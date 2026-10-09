@@ -1,0 +1,76 @@
+package com.carevora.entity;
+
+import com.carevora.enums.RiskLevel;
+import com.carevora.enums.TrajectoryStatus;
+import com.carevora.enums.WellnessStatus;
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "residents")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Resident {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false, unique = true)
+    private User user;
+
+    @Column(name = "room_number", nullable = false, length = 50)
+    private String roomNumber;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Column(name = "age")
+    private Integer age;
+
+    @Column(name = "emergency_contact", length = 100)
+    private String emergencyContact;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "current_status", length = 30)
+    @Builder.Default
+    private WellnessStatus currentStatus = WellnessStatus.LOOKING_GOOD;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "risk_level", length = 30)
+    @Builder.Default
+    private RiskLevel riskLevel = RiskLevel.LOW;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "trajectory", length = 30)
+    @Builder.Default
+    private TrajectoryStatus trajectory = TrajectoryStatus.IMPROVING;
+
+    @Column(name = "emotional_score")
+    @Builder.Default
+    private Double emotionalScore = 85.0;
+
+    @Column(name = "social_score")
+    @Builder.Default
+    private Double socialScore = 80.0;
+
+    @Column(name = "last_assessment_date")
+    private LocalDateTime lastAssessmentDate;
+
+    @CreationTimestamp
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+}
