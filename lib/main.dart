@@ -1,15 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
-import 'features/caregiver/login/caregiver_login_view.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(
-    const ProviderScope(
-      child: CarevoraApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: CarevoraApp()));
 }
 
 class CarevoraApp extends StatelessWidget {
@@ -17,11 +13,11 @@ class CarevoraApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'CAREVORA • Compassionate Care, Smarter Tomorrow',
-      debugShowCheckedModeBanner: false,
+    return MaterialApp.router(
+      title: 'Carevora – Compassionate Care, Smarter Tomorrow',
       theme: AppTheme.lightTheme,
-      home: const CaregiverLoginView(),
+      debugShowCheckedModeBanner: false,
+      routerConfig: AppRouter.router,
     );
   }
 }

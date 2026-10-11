@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from vision_analyzer import analyze_facial_affect
@@ -7,7 +7,7 @@ from ralpa_engine import RALPAEngine
 
 app = FastAPI(
     title="CAREVORA AI/ML Microservice",
-    description="Multimodal Emotion Recognition & RALPA Trajectory Forecasting Engine (FER-2013 & CREMA-D Grounded)",
+    description="Multimodal Emotion Recognition & RALPA Trajectory Forecasting Engine (FER-2013 & PyTorch CNN Grounded)",
     version="1.0.0"
 )
 
@@ -27,10 +27,24 @@ def root():
         "status": "online",
         "service": "CAREVORA AI/ML Intelligence Microservice",
         "models": {
-            "facial": "FER-2013 Affect Feature Pipeline",
+            "facial": "Trained PyTorch FER-2013 CNN Model",
             "vocal": "CREMA-D Acoustic Feature Pipeline",
             "trajectory": "RALPA Latent Progression Engine"
         }
+    }
+
+@app.post("/api/ml/analyze-photo")
+async def analyze_photo(file: UploadFile = File(...)):
+    """
+    Endpoint to receive a live captured photo from mobile/web camera,
+    process it through trained PyTorch FER model, and return whether person is HAPPY or SAD.
+    """
+    contents = await file.read()
+    res = analyze_facial_affect(image_bytes=contents)
+    return {
+        "success": True,
+        "filename": file.filename,
+        "analysis": res
     }
 
 @app.post("/api/ml/predict-ralpa")
@@ -44,7 +58,7 @@ def predict_ralpa_progression(req: MultimodalAssessmentRequest):
     # 3. Multimodal Latent Fusion & RALPA Trajectory Progression
     scores = {
         'questionnaire': req.questionnaire_score,
-        'facial': face_res['affect_score'],
+        'facial': face_res.get('affect_score', 80.0),
         'vocal': audio_res['vocal_wellness_score'],
         'social': req.social_score or 80.0
     }

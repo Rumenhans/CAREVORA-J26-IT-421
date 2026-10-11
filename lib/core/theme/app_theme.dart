@@ -1,6 +1,62 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
-import 'app_typography.dart';
+import 'app_text_styles.dart';
+
+@immutable
+class CarevoraThemeExtension extends ThemeExtension<CarevoraThemeExtension> {
+  final Color primary;
+  final Color primaryDeep;
+  final Color primarySoft;
+  final Color navy;
+  final Color lavenderBg;
+  final Color card;
+  final Color border;
+
+  const CarevoraThemeExtension({
+    required this.primary,
+    required this.primaryDeep,
+    required this.primarySoft,
+    required this.navy,
+    required this.lavenderBg,
+    required this.card,
+    required this.border,
+  });
+
+  @override
+  CarevoraThemeExtension copyWith({
+    Color? primary,
+    Color? primaryDeep,
+    Color? primarySoft,
+    Color? navy,
+    Color? lavenderBg,
+    Color? card,
+    Color? border,
+  }) {
+    return CarevoraThemeExtension(
+      primary: primary ?? this.primary,
+      primaryDeep: primaryDeep ?? this.primaryDeep,
+      primarySoft: primarySoft ?? this.primarySoft,
+      navy: navy ?? this.navy,
+      lavenderBg: lavenderBg ?? this.lavenderBg,
+      card: card ?? this.card,
+      border: border ?? this.border,
+    );
+  }
+
+  @override
+  CarevoraThemeExtension lerp(ThemeExtension<CarevoraThemeExtension>? other, double t) {
+    if (other is! CarevoraThemeExtension) return this;
+    return CarevoraThemeExtension(
+      primary: Color.lerp(primary, other.primary, t)!,
+      primaryDeep: Color.lerp(primaryDeep, other.primaryDeep, t)!,
+      primarySoft: Color.lerp(primarySoft, other.primarySoft, t)!,
+      navy: Color.lerp(navy, other.navy, t)!,
+      lavenderBg: Color.lerp(lavenderBg, other.lavenderBg, t)!,
+      card: Color.lerp(card, other.card, t)!,
+      border: Color.lerp(border, other.border, t)!,
+    );
+  }
+}
 
 class AppTheme {
   AppTheme._();
@@ -8,90 +64,46 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      scaffoldBackgroundColor: AppColors.background,
-      colorScheme: const ColorScheme.light(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primary,
         primary: AppColors.primary,
-        onPrimary: Colors.white,
-        primaryContainer: AppColors.softLilac,
-        onPrimaryContainer: AppColors.primaryDark,
-        secondary: AppColors.primaryDark,
-        onSecondary: Colors.white,
-        surface: AppColors.surface,
-        onSurface: AppColors.textPrimary,
-        error: AppColors.critical,
-        onError: Colors.white,
+        secondary: AppColors.accentPink,
+        surface: AppColors.card,
       ),
-      fontFamily: 'Inter',
-      appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        scrolledUnderElevation: 0.5,
-        iconTheme: const IconThemeData(color: AppColors.textPrimary),
-        titleTextStyle: AppTypography.h2,
-        centerTitle: false,
-      ),
-      cardTheme: CardThemeData(
-        color: AppColors.surface,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: const BorderSide(color: AppColors.border, width: 1),
-        ),
-        margin: EdgeInsets.zero,
+      scaffoldBackgroundColor: AppColors.dashboardBg,
+      textTheme: TextTheme(
+        headlineLarge: AppTextStyles.h1,
+        headlineMedium: AppTextStyles.h2,
+        titleLarge: AppTextStyles.h3,
+        titleMedium: AppTextStyles.h4,
+        bodyLarge: AppTextStyles.bodyMedium,
+        bodyMedium: AppTextStyles.body,
+        bodySmall: AppTextStyles.bodySmall,
+        labelLarge: AppTextStyles.button,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
-          minimumSize: const Size(double.infinity, 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          textStyle: AppTextStyles.button,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          textStyle: AppTypography.button,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.textPrimary,
-          minimumSize: const Size(double.infinity, 48),
-          side: const BorderSide(color: AppColors.borderInput, width: 1.5),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          textStyle: AppTypography.button.copyWith(color: AppColors.textPrimary),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      extensions: const [
+        CarevoraThemeExtension(
+          primary: AppColors.primary,
+          primaryDeep: AppColors.primaryDeep,
+          primarySoft: AppColors.primarySoft,
+          navy: AppColors.navy,
+          lavenderBg: AppColors.lavenderBg,
+          card: AppColors.card,
+          border: AppColors.border,
         ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: AppColors.surfaceSecondary,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        hintStyle: AppTypography.bodySmall.copyWith(color: AppColors.textTertiary),
-        labelStyle: AppTypography.label.copyWith(color: AppColors.textSecondary),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.borderInput),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.borderInput),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.8),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.critical),
-        ),
-      ),
-      dividerTheme: const DividerThemeData(
-        color: AppColors.border,
-        thickness: 1,
-        space: 1,
-      ),
+      ],
     );
   }
 }

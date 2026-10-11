@@ -1,0 +1,16 @@
+{
+  "name": "Carevora",
+  "short_name": "Carevora",
+  "description": "AI-Powered Wellness Monitoring and Early Risk Detection System for Elderly Care Homes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8F7FC",
+  "theme_color": "#6C3FC5",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

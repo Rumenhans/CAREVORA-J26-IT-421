@@ -1,0 +1,188 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../../core/responsive/responsive_builder.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../shared/widgets/desktop_sidebar.dart';
+import '../../../shared/widgets/mobile_bottom_nav.dart';
+
+class DashboardShell extends StatelessWidget {
+  final Widget child;
+
+  const DashboardShell({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final location = GoRouterState.of(context).matchedLocation;
+
+    return Scaffold(
+      backgroundColor: AppColors.dashboardBg,
+      drawer: Drawer(
+        backgroundColor: AppColors.card,
+        child: SafeArea(
+          child: DesktopSidebar(currentRoute: location, isCollapsed: false),
+        ),
+      ),
+      body: ResponsiveBuilder(
+        mobile: (context) => Column(
+          children: [
+            _buildTopBar(context, isMobile: true),
+            Expanded(child: child),
+            MobileBottomNav(currentRoute: location),
+          ],
+        ),
+        tablet: (context) => Row(
+          children: [
+            DesktopSidebar(currentRoute: location, isCollapsed: true),
+            Expanded(
+              child: Column(
+                children: [
+                  _buildTopBar(context, isMobile: false),
+                  Expanded(child: child),
+                ],
+              ),
+            ),
+          ],
+        ),
+        desktop: (context) => Row(
+          children: [
+            DesktopSidebar(currentRoute: location, isCollapsed: false),
+            Expanded(
+              child: Column(
+                children: [
+                  _buildTopBar(context, isMobile: false),
+                  Expanded(child: child),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar(BuildContext context, {required bool isMobile}) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12 : 24,
+        vertical: isMobile ? 10 : 0,
+      ),
+      constraints: const BoxConstraints(minHeight: 70),
+      decoration: const BoxDecoration(
+        color: AppColors.card,
+        border: Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          if (isMobile) ...[
+            Builder(
+              builder: (ctx) => IconButton(
+                icon: const Icon(LucideIcons.menu, color: AppColors.navy, size: 22),
+                tooltip: 'Open Navigation Menu',
+                onPressed: () => Scaffold.of(ctx).openDrawer(),
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Welcome back!',
+                        style: AppTextStyles.h4.copyWith(
+                          fontSize: isMobile ? 14 : 16,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('👋', style: TextStyle(fontSize: 15)),
+                  ],
+                ),
+                if (!isMobile)
+                  Text(
+                    "Here's the overall wellness overview of your residents.",
+                    style: AppTextStyles.caption,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Live Date Chip
+              if (!isMobile)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSecondary,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(LucideIcons.calendar, size: 14, color: AppColors.muted),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Today, 12 May 2025',
+                        style: AppTextStyles.caption.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!isMobile) const SizedBox(width: 8),
+              // Bell Notification Icon with Badge
+              Stack(
+                alignment: Alignment.topRight,
+                children: [
+                  IconButton(
+                    padding: EdgeInsets.all(isMobile ? 8 : 12),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(LucideIcons.bell, size: 20, color: AppColors.navy),
+                    onPressed: () => context.go('/dashboard/alerts'),
+                  ),
+                  Positioned(
+                    top: isMobile ? 2 : 4,
+                    right: isMobile ? 2 : 4,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: const BoxDecoration(
+                        color: AppColors.riskHigh,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Text(
+                          '3',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -1,0 +1,85 @@
+class Resident {
+  final String id;
+  final String name;
+  final int age;
+  final String gender;
+  final String roomNo;
+  final String lastAssessmentDate;
+  final double cognitiveScore;
+  final double cognitiveTrend;
+  final double emotionalScore;
+  final double emotionalTrend;
+  final double metabolicScore;
+  final double metabolicTrend;
+  final double overallIndex;
+  final double overallTrend;
+
+  const Resident({
+    required this.id,
+    required this.name,
+    required this.age,
+    required this.gender,
+    required this.roomNo,
+    required this.lastAssessmentDate,
+    required this.cognitiveScore,
+    required this.cognitiveTrend,
+    required this.emotionalScore,
+    required this.emotionalTrend,
+    required this.metabolicScore,
+    required this.metabolicTrend,
+    required this.overallIndex,
+    required this.overallTrend,
+  });
+}
+
+class AssessmentRecord {
+  final String id;
+  final String dateTime;
+  final double cognitiveScore;
+  final double emotionalScore;
+  final double metabolicScore;
+  final double overallRiskScore;
+  final String assessedBy;
+
+  const AssessmentRecord({
+    required this.id,
+    required this.dateTime,
+    required this.cognitiveScore,
+    required this.emotionalScore,
+    required this.metabolicScore,
+    required this.overallRiskScore,
+    required this.assessedBy,
+  });
+}
+
+class AlertItem {
+  final String id;
+  final String title;
+  final String description;
+  final String severity; // High, Moderate, Reminder
+  final String timestamp;
+
+  const AlertItem({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.severity,
+    required this.timestamp,
+  });
+}
+
+class AssessmentQuestion {
+  final int id;
+  final String category;
+  final String prompt;
+  final String audioPrompt;
+  final String tip;
+
+  const AssessmentQuestion({
+    required this.id,
+    required this.category,
+    required this.prompt,
+    required this.audioPrompt,
+    required this.tip,
+  });
+}
