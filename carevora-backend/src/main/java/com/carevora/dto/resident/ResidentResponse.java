@@ -28,4 +28,6 @@ public class ResidentResponse {
     private Double socialScore;
     private LocalDateTime lastAssessmentDate;
     private int unreadAlertsCount;
+    private Long elderHomeId;
+    private String elderHomeName;
 }

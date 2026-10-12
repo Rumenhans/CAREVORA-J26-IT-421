@@ -6,6 +6,7 @@ import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/landing/presentation/pages/landing_page.dart';
 import '../../features/dashboard/presentation/dashboard_shell.dart';
 import '../../features/dashboard/presentation/overview_page.dart';
+import '../../features/dashboard/presentation/resident_directory_page.dart';
 import '../../features/dashboard/presentation/generic_placeholder_tab.dart';
 import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
 import '../../features/doctor/presentation/pages/doctor_dashboard_page.dart';
@@ -57,11 +58,7 @@ class AppRouter {
           ),
           GoRoute(
             path: '/dashboard/residents',
-            builder: (context, state) => const GenericPlaceholderTab(
-              title: 'Resident Directory',
-              description: 'Continuous emotional and social wellness tracking',
-              icon: LucideIcons.users,
-            ),
+            builder: (context, state) => const ResidentDirectoryPage(),
           ),
           GoRoute(
             path: '/dashboard/cognitive/session',

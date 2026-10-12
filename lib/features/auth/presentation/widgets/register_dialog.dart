@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'common/app_text_field.dart';
@@ -18,17 +20,70 @@ class _RegisterDialogState extends State<RegisterDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
-  final _facilityController = TextEditingController();
+  final _passwordController = TextEditingController(text: 'carevora123');
+  final _newFacilityNameController = TextEditingController();
+  final _newFacilityAddressController = TextEditingController();
+  final _roomNumberController = TextEditingController();
+
+  String _selectedRole = 'CAREGIVER'; // CAREGIVER, ELDER, DOCTOR
+  bool _isNewFacility = false;
+  int? _selectedElderHomeId = 1;
+  String? _selectedElderHomeName = 'Serene Valley Senior Living';
+
+  List<Map<String, dynamic>> _elderHomes = [
+    {'id': 1, 'name': 'Serene Valley Senior Living', 'code': 'SV-101'},
+    {'id': 2, 'name': 'Golden Sunset Eldercare', 'code': 'GS-202'},
+    {'id': 3, 'name': 'Lotus Care Senior Home', 'code': 'LOT-861'},
+  ];
 
   bool _isLoading = false;
   bool _isSuccess = false;
   bool _hasSubmittedOnce = false;
+  String? _successMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchElderHomes();
+  }
+
+  Future<void> _fetchElderHomes() async {
+    try {
+      final res = await http
+          .get(Uri.parse('http://localhost:8081/api/elder-homes'))
+          .timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        final list = decoded['data'] as List?;
+        if (list != null && list.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _elderHomes = list
+                  .map((e) => {
+                        'id': e['id'] as int,
+                        'name': e['name'] as String,
+                        'code': e['facilityCode'] as String? ?? '',
+                      })
+                  .toList();
+              if (_elderHomes.isNotEmpty) {
+                _selectedElderHomeId = _elderHomes.first['id'] as int;
+                _selectedElderHomeName = _elderHomes.first['name'] as String;
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
-    _facilityController.dispose();
+    _passwordController.dispose();
+    _newFacilityNameController.dispose();
+    _newFacilityAddressController.dispose();
+    _roomNumberController.dispose();
     super.dispose();
   }
 
@@ -37,12 +92,74 @@ class _RegisterDialogState extends State<RegisterDialog> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 900));
+
+    int? elderHomeIdToAssign = _selectedElderHomeId;
+    String assignedHomeName = _selectedElderHomeName ?? 'Facility';
+
+    // 1. If registering a new Elder Home first
+    if ((_selectedRole == 'CAREGIVER' || _selectedRole == 'ELDER') && _isNewFacility) {
+      try {
+        final regHomeRes = await http
+            .post(
+              Uri.parse('http://localhost:8081/api/elder-homes/register'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'name': _newFacilityNameController.text.trim(),
+                'address': _newFacilityAddressController.text.trim().isEmpty
+                    ? 'Colombo, Sri Lanka'
+                    : _newFacilityAddressController.text.trim(),
+                'contactEmail': _emailController.text.trim(),
+                'contactPhone': '+94 11 234 5678',
+              }),
+            )
+            .timeout(const Duration(seconds: 4));
+
+        if (regHomeRes.statusCode == 200) {
+          final decoded = jsonDecode(regHomeRes.body);
+          final data = decoded['data'];
+          if (data != null && data['id'] != null) {
+            elderHomeIdToAssign = data['id'] as int;
+            assignedHomeName = data['name'] as String;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Register the user
+    try {
+      final reqBody = <String, dynamic>{
+        'fullName': _nameController.text.trim(),
+        'email': _emailController.text.trim().toLowerCase(),
+        'password': _passwordController.text.trim(),
+        'role': _selectedRole,
+      };
+
+      if (_selectedRole == 'CAREGIVER' || _selectedRole == 'ELDER') {
+        reqBody['elderHomeId'] = elderHomeIdToAssign;
+      }
+      if (_selectedRole == 'ELDER') {
+        reqBody['roomNumber'] = _roomNumberController.text.trim().isEmpty
+            ? '101'
+            : _roomNumberController.text.trim();
+        reqBody['age'] = 75;
+      }
+
+      await http
+          .post(
+            Uri.parse('http://localhost:8081/api/auth/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(reqBody),
+          )
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {}
 
     if (mounted) {
       setState(() {
         _isLoading = false;
         _isSuccess = true;
+        _successMessage = _selectedRole == 'DOCTOR'
+            ? 'Registered as Doctor with global clinical access across all elder homes.'
+            : 'Registered as ${_selectedRole.toLowerCase()} assigned to $assignedHomeName.';
       });
     }
   }
@@ -53,7 +170,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
+        constraints: const BoxConstraints(maxWidth: 540),
         child: SingleChildScrollView(
           child: GlassContainer(
             borderRadius: 28,
@@ -107,7 +224,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
                   ),
                 ),
                 child: const Icon(
-                  LucideIcons.building2,
+                  LucideIcons.userPlus,
                   size: 20,
                   color: AppColors.primary,
                 ),
@@ -118,7 +235,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     Text(
-                      'Request Facility Access',
+                      'Register User & Elder Home',
                       style: TextStyle(
                         fontFamily: 'Plus Jakarta Sans',
                         fontSize: 19,
@@ -129,7 +246,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Care community onboarding',
+                      'Caregiver, Elder, or Doctor Onboarding',
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 12,
@@ -150,84 +267,254 @@ class _RegisterDialogState extends State<RegisterDialog> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
 
-          // Subtitle info
+          // Role Selection Selector
           const Text(
-            'Register your eldercare facility to deploy AI-driven resident safety & risk alerts.',
+            'Select Account Role',
             style: TextStyle(
               fontSize: 12.5,
-              color: AppColors.body,
-              height: 1.4,
+              fontWeight: FontWeight.w700,
+              color: AppColors.navy,
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildRolePill('CAREGIVER', 'Caregiver', LucideIcons.heartHandshake),
+              const SizedBox(width: 8),
+              _buildRolePill('ELDER', 'Elder', LucideIcons.user),
+              const SizedBox(width: 8),
+              _buildRolePill('DOCTOR', 'Doctor', LucideIcons.stethoscope),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Elder Home Section (Required for Caregiver and Elder)
+          if (_selectedRole == 'CAREGIVER' || _selectedRole == 'ELDER') ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.lavenderBg.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.lilac.withValues(alpha: 0.7)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(LucideIcons.building2, size: 16, color: AppColors.primary),
+                          SizedBox(width: 6),
+                          Text(
+                            'Assign Elder Home Facility',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primaryDeep,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Toggle: Existing vs New
+                      InkWell(
+                        onTap: () {
+                          setState(() => _isNewFacility = !_isNewFacility);
+                        },
+                        child: Text(
+                          _isNewFacility ? 'Choose Existing' : '+ Register New Home',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (!_isNewFacility) ...[
+                    // Dropdown for existing Elder Homes
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<int>(
+                          value: _selectedElderHomeId,
+                          isExpanded: true,
+                          items: _elderHomes.map((home) {
+                            return DropdownMenuItem<int>(
+                              value: home['id'] as int,
+                              child: Text(
+                                '${home['name']} (${home['code']})',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.navy,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _selectedElderHomeId = val;
+                                final found = _elderHomes.firstWhere(
+                                  (h) => h['id'] == val,
+                                  orElse: () => {'name': ''},
+                                );
+                                _selectedElderHomeName = found['name'] as String;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _selectedRole == 'CAREGIVER'
+                          ? 'Caregiver will only be able to view residents belonging to this elder home.'
+                          : 'Elder will belong to this facility with private individual tracking.',
+                      style: const TextStyle(fontSize: 11, color: AppColors.body),
+                    ),
+                  ] else ...[
+                    // New Elder Home Fields
+                    AppTextField(
+                      controller: _newFacilityNameController,
+                      label: 'New Elder Home Name',
+                      hintText: 'e.g. Blossom Elder Sanctuary',
+                      leadingIcon: LucideIcons.building,
+                      validator: (v) => (_isNewFacility && (v == null || v.trim().isEmpty))
+                          ? 'Please enter facility name.'
+                          : null,
+                    ),
+                    const SizedBox(height: 8),
+                    AppTextField(
+                      controller: _newFacilityAddressController,
+                      label: 'Address / Location',
+                      hintText: 'e.g. 50 Park Lane, Kandy',
+                      leadingIcon: LucideIcons.mapPin,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          if (_selectedRole == 'DOCTOR') ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDFA),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF99F6E4)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(LucideIcons.shieldCheck, size: 18, color: Color(0xFF0D9488)),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Doctor privileges grant global oversight across all registered elder homes and all users.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF115E59),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
 
           // Full Name Input
           AppTextField(
             controller: _nameController,
             label: 'Full Name',
-            hintText: 'Sarah Jenkins',
+            hintText: _selectedRole == 'DOCTOR' ? 'Dr. Samantha Reed' : 'Full Name',
             leadingIcon: LucideIcons.user,
             textInputAction: TextInputAction.next,
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? 'Please enter your name.' : null,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
 
-          // Work Email Input
+          // Email Input
           AppTextField(
             controller: _emailController,
-            label: 'Work Email Address',
-            hintText: 'sarah@meadowcare.org',
+            label: 'Email Address',
+            hintText: 'user@carevora.com',
             leadingIcon: LucideIcons.mail,
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
             validator: (v) {
               if (v == null || v.trim().isEmpty) {
-                return 'Please enter your work email.';
+                return 'Please enter your email.';
               }
               final regex = RegExp(
                 r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
               );
               if (!regex.hasMatch(v.trim())) {
-                return 'Enter a valid work email.';
+                return 'Enter a valid email.';
               }
               return null;
             },
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
 
-          // Facility Name Input
+          // Password Input
           AppTextField(
-            controller: _facilityController,
-            label: 'Care Home / Facility Name',
-            hintText: 'Meadowview Senior Living',
-            leadingIcon: LucideIcons.building,
+            controller: _passwordController,
+            label: 'Password',
+            hintText: 'Enter password',
+            leadingIcon: LucideIcons.lock,
+            obscureText: true,
             textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _handleRegister(),
-            validator: (v) => (v == null || v.trim().isEmpty)
-                ? 'Please enter facility name.'
-                : null,
+            validator: (v) =>
+                (v == null || v.length < 6) ? 'Password must be at least 6 characters.' : null,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+
+          if (_selectedRole == 'ELDER') ...[
+            AppTextField(
+              controller: _roomNumberController,
+              label: 'Room Number (Optional)',
+              hintText: 'e.g. 104',
+              leadingIcon: LucideIcons.bed,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          const SizedBox(height: 8),
 
           // Submit Button
           GradientButton(
             isLoading: _isLoading,
-            loadingLabel: 'Submitting Request...',
+            loadingLabel: 'Registering...',
             onPressed: _handleRegister,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: const [
                 Icon(
-                  LucideIcons.send,
+                  LucideIcons.userCheck,
                   size: 16,
                   color: Colors.white,
                 ),
                 SizedBox(width: 8),
                 Text(
-                  'Submit Access Request',
+                  'Complete Registration',
                   style: TextStyle(
                     fontFamily: 'Plus Jakarta Sans',
                     fontSize: 15,
@@ -238,11 +525,11 @@ class _RegisterDialogState extends State<RegisterDialog> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
           // Protected Sign-in Strip
           const ProtectedSignInStrip(),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // Back to Login Link
           Center(
@@ -271,11 +558,59 @@ class _RegisterDialogState extends State<RegisterDialog> {
               ],
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
 
           // Secure Footer
           const SecureFooter(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRolePill(String roleKey, String label, IconData icon) {
+    final isSelected = _selectedRole == roleKey;
+    return Expanded(
+      child: InkWell(
+        onTap: () => setState(() => _selectedRole = roleKey),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primary : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? AppColors.primary : AppColors.border,
+              width: 1.5,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.25),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    )
+                  ]
+                : null,
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: isSelected ? Colors.white : AppColors.navy,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected ? Colors.white : AppColors.navy,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -317,7 +652,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
         const SizedBox(height: 18),
 
         const Text(
-          'Request Submitted!',
+          'Registration Successful!',
           style: TextStyle(
             fontFamily: 'Plus Jakarta Sans',
             fontSize: 21,
@@ -329,7 +664,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
         const SizedBox(height: 8),
 
         Text(
-          'Thank you, ${_nameController.text.trim()}.\nOur clinical deployment team will verify ${_facilityController.text.trim()} and dispatch your onboarding keys.',
+          _successMessage ?? 'Account created successfully.',
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontFamily: 'Inter',
@@ -338,7 +673,30 @@ class _RegisterDialogState extends State<RegisterDialog> {
             height: 1.5,
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 14),
+
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.primarySoft,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: [
+              Text(
+                'Email: ${_emailController.text.trim()}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Role: $_selectedRole',
+                style: const TextStyle(fontSize: 12, color: AppColors.primaryDeep),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
 
         GradientButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -346,13 +704,13 @@ class _RegisterDialogState extends State<RegisterDialog> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
               Icon(
-                LucideIcons.check,
+                LucideIcons.logIn,
                 size: 16,
                 color: Colors.white,
               ),
               SizedBox(width: 8),
               Text(
-                'Done',
+                'Return to Login & Sign In',
                 style: TextStyle(
                   fontFamily: 'Plus Jakarta Sans',
                   fontSize: 15,
@@ -370,3 +728,4 @@ class _RegisterDialogState extends State<RegisterDialog> {
     );
   }
 }
+

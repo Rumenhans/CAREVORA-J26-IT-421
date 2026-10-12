@@ -10,4 +10,6 @@ import java.util.Optional;
 public interface CaregiverRepository extends JpaRepository<Caregiver, Long> {
     Optional<Caregiver> findByUserId(Long userId);
     Optional<Caregiver> findByStaffCode(String staffCode);
+    java.util.List<Caregiver> findByElderHomeId(Long elderHomeId);
+    long countByElderHomeId(Long elderHomeId);
 }

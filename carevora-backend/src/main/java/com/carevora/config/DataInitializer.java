@@ -18,6 +18,7 @@ public class DataInitializer implements CommandLineRunner {
     private final UserRepository userRepository;
     private final ResidentRepository residentRepository;
     private final CaregiverRepository caregiverRepository;
+    private final ElderHomeRepository elderHomeRepository;
     private final AssessmentRepository assessmentRepository;
     private final ContributingFactorRepository contributingFactorRepository;
     private final RecommendationRepository recommendationRepository;
@@ -30,39 +31,106 @@ public class DataInitializer implements CommandLineRunner {
             return;
         }
 
-        // Seed Caregiver
-        User caregiverUser = User.builder()
+        // ==========================================
+        // 1. Seed Elder Homes (Facilities)
+        // ==========================================
+        ElderHome sereneValley = ElderHome.builder()
+                .name("Serene Valley Senior Living")
+                .facilityCode("SV-101")
+                .address("12 Orchards Way, Colombo 07")
+                .contactEmail("contact@serenevalley.com")
+                .contactPhone("+94 11 234 5678")
+                .active(true)
+                .build();
+        elderHomeRepository.save(sereneValley);
+
+        ElderHome goldenSunset = ElderHome.builder()
+                .name("Golden Sunset Eldercare")
+                .facilityCode("GS-202")
+                .address("45 Palm Grove, Kandy")
+                .contactEmail("info@goldensunset.org")
+                .contactPhone("+94 81 223 4455")
+                .active(true)
+                .build();
+        elderHomeRepository.save(goldenSunset);
+
+        // ==========================================
+        // 2. Seed Doctor (Clinical Specialist - Oversees all elder homes)
+        // ==========================================
+        User doctorUser = User.builder()
+                .email("dr.reed@carevora.com")
+                .passwordHash(passwordEncoder.encode("doctor123"))
+                .firstName("Samantha")
+                .lastName("Reed")
+                .role(UserRole.DOCTOR)
+                .active(true)
+                .build();
+        userRepository.save(doctorUser);
+
+        // ==========================================
+        // 3. Seed Caregiver 1 (Serene Valley)
+        // ==========================================
+        User caregiver1User = User.builder()
                 .email("eleanor.vance@carevora.com")
                 .passwordHash(passwordEncoder.encode("carevora_admin"))
                 .firstName("Eleanor")
                 .lastName("Vance")
                 .role(UserRole.CAREGIVER)
+                .active(true)
                 .build();
-        userRepository.save(caregiverUser);
+        userRepository.save(caregiver1User);
 
-        Caregiver caregiver = Caregiver.builder()
-                .user(caregiverUser)
+        Caregiver caregiver1 = Caregiver.builder()
+                .user(caregiver1User)
+                .elderHome(sereneValley)
                 .staffCode("CG-101")
                 .title("Lead Care Coordinator")
                 .department("Senior Behavioral Health")
                 .build();
-        caregiverRepository.save(caregiver);
+        caregiverRepository.save(caregiver1);
 
-        // Seed Resident 1: Sarah Jenkins
+        // ==========================================
+        // 4. Seed Caregiver 2 (Golden Sunset)
+        // ==========================================
+        User caregiver2User = User.builder()
+                .email("david.silva@carevora.com")
+                .passwordHash(passwordEncoder.encode("carevora123"))
+                .firstName("David")
+                .lastName("Silva")
+                .role(UserRole.CAREGIVER)
+                .active(true)
+                .build();
+        userRepository.save(caregiver2User);
+
+        Caregiver caregiver2 = Caregiver.builder()
+                .user(caregiver2User)
+                .elderHome(goldenSunset)
+                .staffCode("CG-202")
+                .title("Senior Care Specialist")
+                .department("Active Living Support")
+                .build();
+        caregiverRepository.save(caregiver2);
+
+        // ==========================================
+        // 5. Seed Elders in Serene Valley (Home 1)
+        // ==========================================
+        // Resident 1: Sarah Jenkins (Serene Valley)
         User sarahUser = User.builder()
                 .email("sarah.jenkins@carevora.com")
                 .passwordHash(passwordEncoder.encode("carevora123"))
                 .firstName("Sarah")
                 .lastName("Jenkins")
-                .role(UserRole.RESIDENT)
+                .role(UserRole.ELDER)
+                .active(true)
                 .build();
         userRepository.save(sarahUser);
 
         Resident sarah = Resident.builder()
                 .user(sarahUser)
+                .elderHome(sereneValley)
                 .roomNumber("Suite 204")
                 .age(78)
-                .emergencyContact("+1 (555) 019-2834")
+                .emergencyContact("+94 77 123 4567")
                 .currentStatus(WellnessStatus.LOOKING_GOOD)
                 .riskLevel(RiskLevel.LOW)
                 .trajectory(TrajectoryStatus.IMPROVING)
@@ -72,21 +140,23 @@ public class DataInitializer implements CommandLineRunner {
                 .build();
         residentRepository.save(sarah);
 
-        // Seed Resident 2: Arthur Pendelton
+        // Resident 2: Arthur Pendelton (Serene Valley)
         User arthurUser = User.builder()
                 .email("arthur.p@carevora.com")
                 .passwordHash(passwordEncoder.encode("carevora123"))
                 .firstName("Arthur")
                 .lastName("Pendelton")
-                .role(UserRole.RESIDENT)
+                .role(UserRole.ELDER)
+                .active(true)
                 .build();
         userRepository.save(arthurUser);
 
         Resident arthur = Resident.builder()
                 .user(arthurUser)
+                .elderHome(sereneValley)
                 .roomNumber("Suite 112")
                 .age(82)
-                .emergencyContact("+1 (555) 018-9921")
+                .emergencyContact("+94 71 987 6543")
                 .currentStatus(WellnessStatus.NEEDS_ATTENTION)
                 .riskLevel(RiskLevel.MODERATE)
                 .trajectory(TrajectoryStatus.INCREASING_RISK)
@@ -96,20 +166,26 @@ public class DataInitializer implements CommandLineRunner {
                 .build();
         residentRepository.save(arthur);
 
-        // Seed Resident 3: Margaret Chen
+        // ==========================================
+        // 6. Seed Elders in Golden Sunset (Home 2)
+        // ==========================================
+        // Resident 3: Margaret Chen (Golden Sunset)
         User margaretUser = User.builder()
                 .email("margaret.c@carevora.com")
                 .passwordHash(passwordEncoder.encode("carevora123"))
                 .firstName("Margaret")
                 .lastName("Chen")
-                .role(UserRole.RESIDENT)
+                .role(UserRole.ELDER)
+                .active(true)
                 .build();
         userRepository.save(margaretUser);
 
         Resident margaret = Resident.builder()
                 .user(margaretUser)
+                .elderHome(goldenSunset)
                 .roomNumber("Suite 305")
                 .age(75)
+                .emergencyContact("+94 76 555 4321")
                 .currentStatus(WellnessStatus.STABLE)
                 .riskLevel(RiskLevel.LOW)
                 .trajectory(TrajectoryStatus.STABLE)
@@ -119,20 +195,23 @@ public class DataInitializer implements CommandLineRunner {
                 .build();
         residentRepository.save(margaret);
 
-        // Seed Resident 4: Robert Hastings
+        // Resident 4: Robert Hastings (Golden Sunset)
         User robertUser = User.builder()
                 .email("robert.h@carevora.com")
                 .passwordHash(passwordEncoder.encode("carevora123"))
                 .firstName("Robert")
                 .lastName("Hastings")
-                .role(UserRole.RESIDENT)
+                .role(UserRole.ELDER)
+                .active(true)
                 .build();
         userRepository.save(robertUser);
 
         Resident robert = Resident.builder()
                 .user(robertUser)
+                .elderHome(goldenSunset)
                 .roomNumber("Suite 108")
                 .age(84)
+                .emergencyContact("+94 70 333 2211")
                 .currentStatus(WellnessStatus.CHECK_IN_NEEDED)
                 .riskLevel(RiskLevel.HIGH)
                 .trajectory(TrajectoryStatus.INCREASING_RISK)
@@ -142,7 +221,9 @@ public class DataInitializer implements CommandLineRunner {
                 .build();
         residentRepository.save(robert);
 
-        // Seed Sarah's Assessment
+        // ==========================================
+        // 7. Seed Sample Assessments & Factors
+        // ==========================================
         Assessment sarahAssessment = Assessment.builder()
                 .resident(sarah)
                 .overallScore(86.0)

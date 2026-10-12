@@ -23,6 +23,17 @@ public interface ResidentRepository extends JpaRepository<Resident, Long> {
            "LOWER(r.roomNumber) LIKE LOWER(CONCAT('%', :query, '%'))")
     List<Resident> searchResidents(@Param("query") String query);
 
+    List<Resident> findByElderHomeId(Long elderHomeId);
+
+    @Query("SELECT r FROM Resident r JOIN r.user u WHERE r.elderHome.id = :elderHomeId AND (" +
+           "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+           "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+           "LOWER(r.roomNumber) LIKE LOWER(CONCAT('%', :query, '%')))")
+    List<Resident> searchResidentsByElderHomeId(@Param("query") String query, @Param("elderHomeId") Long elderHomeId);
+
     long countByRiskLevel(RiskLevel riskLevel);
     long countByCurrentStatus(WellnessStatus status);
+    long countByElderHomeId(Long elderHomeId);
+    long countByElderHomeIdAndCurrentStatus(Long elderHomeId, WellnessStatus status);
+    long countByElderHomeIdAndRiskLevel(Long elderHomeId, RiskLevel riskLevel);
 }

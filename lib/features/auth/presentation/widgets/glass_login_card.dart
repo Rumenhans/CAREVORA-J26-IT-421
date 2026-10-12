@@ -109,12 +109,34 @@ class _GlassLoginCardState extends ConsumerState<GlassLoginCard> {
     }
   }
 
-  void _fillDemoCredentials() {
+  void _fillCaregiverDavid() {
     setState(() {
-      _emailController.text = 'seetha@carevora.com';
-      _passwordController.text = 'demo1234';
+      _emailController.text = 'david.silva@carevora.com';
+      _passwordController.text = 'carevora123';
     });
   }
+
+  void _fillCaregiverEleanor() {
+    setState(() {
+      _emailController.text = 'eleanor.vance@carevora.com';
+      _passwordController.text = 'carevora_admin';
+    });
+  }
+
+  void _fillDoctor() {
+    setState(() {
+      _emailController.text = 'dr.reed@carevora.com';
+      _passwordController.text = 'doctor123';
+    });
+  }
+
+  void _fillElder() {
+    setState(() {
+      _emailController.text = 'sarah.jenkins@carevora.com';
+      _passwordController.text = 'carevora123';
+    });
+  }
+
 
   Future<void> _handleSubmit() async {
     setState(() => _hasSubmittedOnce = true);
@@ -695,13 +717,14 @@ class _GlassLoginCardState extends ConsumerState<GlassLoginCard> {
 
   Widget _buildDemoChip() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.lavenderBg.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(12),
+        color: AppColors.lavenderBg.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.lilac),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
@@ -713,60 +736,82 @@ class _GlassLoginCardState extends ConsumerState<GlassLoginCard> {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'Demo Preset Credentials Active',
+                  'Quick Role Presets (Click to autofill):',
                   style: TextStyle(
                     fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.primaryDeep,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
             children: [
-              InkWell(
-                onTap: _fillDemoCredentials,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    'Caregiver Fill',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
+              _buildPresetPill(
+                label: 'Caregiver (David - Golden Sunset)',
+                color: AppColors.primary,
+                onTap: _fillCaregiverDavid,
               ),
-              const SizedBox(width: 8),
-              InkWell(
+              _buildPresetPill(
+                label: 'Doctor (Dr. Reed - All Homes)',
+                color: const Color(0xFF0D9488),
+                onTap: _fillDoctor,
+              ),
+              _buildPresetPill(
+                label: 'Elder (Sarah Jenkins - Serene Valley)',
+                color: const Color(0xFFD97706),
+                onTap: _fillElder,
+              ),
+              _buildPresetPill(
+                label: 'Caregiver (Eleanor - Serene Valley)',
+                color: const Color(0xFF4F46E5),
+                onTap: _fillCaregiverEleanor,
+              ),
+              _buildPresetPill(
+                label: 'Admin',
+                color: AppColors.navy,
                 onTap: _fillAdminCredentials,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.navy,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    'Admin Fill',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPresetPill({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.25),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
       ),
     );
   }

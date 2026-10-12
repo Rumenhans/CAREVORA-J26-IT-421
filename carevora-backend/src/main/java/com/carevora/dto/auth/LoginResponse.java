@@ -21,4 +21,6 @@ public class LoginResponse {
     private String avatarUrl;
     private Long residentId;
     private Long caregiverId;
+    private Long elderHomeId;
+    private String elderHomeName;
 }

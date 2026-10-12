@@ -30,6 +30,11 @@ public class Resident {
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "passwordHash"})
     private User user;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "elder_home_id")
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    private ElderHome elderHome;
+
     @Column(name = "room_number", nullable = false, length = 50)
     private String roomNumber;
 

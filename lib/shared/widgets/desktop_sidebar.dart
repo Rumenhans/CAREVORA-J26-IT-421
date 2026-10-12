@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../features/auth/application/auth_controller.dart';
 import 'carevora_logo.dart';
 
-class DesktopSidebar extends StatelessWidget {
+class DesktopSidebar extends ConsumerWidget {
   final String currentRoute;
   final bool isCollapsed;
 
@@ -16,8 +18,21 @@ class DesktopSidebar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final authState = ref.watch(authProvider).state;
     final width = isCollapsed ? 80.0 : 260.0;
+
+    final userName = authState.userName ?? 'Care Specialist';
+    final roleName = authState.role.name.toUpperCase();
+    final elderHomeName = authState.elderHomeName;
+
+    String initials = 'CV';
+    final parts = userName.trim().split(' ');
+    if (parts.length >= 2) {
+      initials = '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    } else if (parts.isNotEmpty && parts[0].isNotEmpty) {
+      initials = parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
+    }
 
     return Container(
       width: width,
@@ -49,7 +64,7 @@ class DesktopSidebar extends StatelessWidget {
                 _buildNavItem(
                   context,
                   icon: LucideIcons.users,
-                  label: 'Residents',
+                  label: authState.isElder ? 'My Health Record' : 'Resident Directory',
                   route: '/dashboard/residents',
                 ),
                 _buildNavItem(
@@ -90,19 +105,21 @@ class DesktopSidebar extends StatelessWidget {
                   route: '/dashboard/care-plans',
                   badge: '3',
                 ),
-                _buildNavItem(
-                  context,
-                  icon: LucideIcons.stethoscope,
-                  label: 'Doctor Prescribing',
-                  route: '/dashboard/doctor',
-                ),
-                _buildNavItem(
-                  context,
-                  icon: LucideIcons.pill,
-                  label: 'Live Medicine Board',
-                  route: '/dashboard/medicine',
-                  badge: '2',
-                ),
+                if (!authState.isElder) ...[
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.stethoscope,
+                    label: 'Doctor Prescribing',
+                    route: '/dashboard/doctor',
+                  ),
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.pill,
+                    label: 'Live Medicine Board',
+                    route: '/dashboard/medicine',
+                    badge: '2',
+                  ),
+                ],
                 _buildNavItem(
                   context,
                   icon: LucideIcons.settings,
@@ -113,13 +130,16 @@ class DesktopSidebar extends StatelessWidget {
             ),
           ),
           const Divider(height: 1, color: AppColors.border),
-          // Caregiver Profile Card & Log Out
+          // User Profile Card & Log Out
           Padding(
             padding: const EdgeInsets.all(16),
             child: isCollapsed
                 ? IconButton(
                     icon: const Icon(LucideIcons.logOut, color: AppColors.riskHigh),
-                    onPressed: () => context.go('/login'),
+                    onPressed: () async {
+                      await ref.read(authProvider).logout();
+                      if (context.mounted) context.go('/login');
+                    },
                   )
                 : Column(
                     children: [
@@ -136,8 +156,8 @@ class DesktopSidebar extends StatelessWidget {
                               radius: 18,
                               backgroundColor: AppColors.primarySoft,
                               child: Text(
-                                'SN',
-                                style: TextStyle(
+                                initials,
+                                style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
                                   color: AppColors.primary,
@@ -149,18 +169,47 @@ class DesktopSidebar extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Seetha N.', style: AppTextStyles.bodyMedium.copyWith(fontSize: 13)),
-                                  Text('Caregiver', style: AppTextStyles.caption.copyWith(fontSize: 11)),
+                                  Text(
+                                    userName,
+                                    style: AppTextStyles.bodyMedium.copyWith(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    roleName,
+                                    style: AppTextStyles.caption.copyWith(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                  if (elderHomeName != null && elderHomeName.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      elderHomeName,
+                                      style: AppTextStyles.caption.copyWith(
+                                        fontSize: 9.5,
+                                        color: AppColors.muted,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
-                            const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.muted),
                           ],
                         ),
                       ),
                       const SizedBox(height: 10),
                       InkWell(
-                        onTap: () => context.go('/login'),
+                        onTap: () async {
+                          await ref.read(authProvider).logout();
+                          if (context.mounted) context.go('/login');
+                        },
                         borderRadius: BorderRadius.circular(8),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
