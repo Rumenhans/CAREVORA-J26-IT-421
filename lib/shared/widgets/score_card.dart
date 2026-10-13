@@ -10,6 +10,7 @@ class ScoreCard extends StatelessWidget {
   final double score;
   final double delta;
   final bool isGauge;
+  final VoidCallback? onTap;
 
   const ScoreCard({
     super.key,
@@ -17,13 +18,14 @@ class ScoreCard extends StatelessWidget {
     required this.score,
     required this.delta,
     this.isGauge = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final tier = RiskUtils.getTier(score);
 
-    return Container(
+    Widget content = Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.card,
@@ -112,6 +114,19 @@ class ScoreCard extends StatelessWidget {
         ],
       ),
     );
+
+    if (onTap != null) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: content,
+        ),
+      );
+    }
+
+    return content;
   }
 }
 
