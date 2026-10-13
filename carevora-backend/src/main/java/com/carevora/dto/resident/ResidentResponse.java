@@ -19,6 +19,7 @@ public class ResidentResponse {
     private Long userId;
     private String name;
     private Integer age;
+    private Integer educationYears;
     private String roomNumber;
     private String avatarUrl;
     private WellnessStatus currentStatus;
@@ -26,6 +27,7 @@ public class ResidentResponse {
     private TrajectoryStatus trajectory;
     private Double emotionalScore;
     private Double socialScore;
+    private Double cognitiveScore;
     private LocalDateTime lastAssessmentDate;
     private int unreadAlertsCount;
     private Long elderHomeId;

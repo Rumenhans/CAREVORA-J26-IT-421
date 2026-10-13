@@ -2,6 +2,7 @@ package com.carevora.config;
 
 import com.carevora.security.CustomUserDetailsService;
 import com.carevora.security.JwtAuthenticationFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -45,6 +46,15 @@ public class SecurityConfig {
                     "/h2-console/**"
                 ).permitAll()
                 .anyRequest().authenticated()
+            )
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setContentType("application/json");
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.getWriter().write(
+                        "{\"success\":false,\"message\":\"Full authentication is required to access this resource. Please provide a valid Bearer token.\",\"data\":null,\"errorCode\":\"UNAUTHORIZED\"}"
+                    );
+                })
             )
             .headers(headers -> headers.frameOptions(frame -> frame.disable()))
             .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

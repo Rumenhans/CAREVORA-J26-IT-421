@@ -44,6 +44,9 @@ public class Resident {
     @Column(name = "age")
     private Integer age;
 
+    @Column(name = "education_years")
+    private Integer educationYears;
+
     @Column(name = "emergency_contact", length = 100)
     private String emergencyContact;
 
@@ -69,6 +72,10 @@ public class Resident {
     @Column(name = "social_score")
     @Builder.Default
     private Double socialScore = 80.0;
+
+    @Column(name = "cognitive_score")
+    @Builder.Default
+    private Double cognitiveScore = 75.0;
 
     @Column(name = "last_assessment_date")
     private LocalDateTime lastAssessmentDate;

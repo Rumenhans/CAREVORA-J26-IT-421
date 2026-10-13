@@ -23,6 +23,7 @@ public class DataInitializer implements CommandLineRunner {
     private final ContributingFactorRepository contributingFactorRepository;
     private final RecommendationRepository recommendationRepository;
     private final AlertRepository alertRepository;
+    private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -130,12 +131,14 @@ public class DataInitializer implements CommandLineRunner {
                 .elderHome(sereneValley)
                 .roomNumber("Suite 204")
                 .age(78)
+                .educationYears(12)
                 .emergencyContact("+94 77 123 4567")
                 .currentStatus(WellnessStatus.LOOKING_GOOD)
                 .riskLevel(RiskLevel.LOW)
                 .trajectory(TrajectoryStatus.IMPROVING)
                 .emotionalScore(88.0)
                 .socialScore(82.0)
+                .cognitiveScore(85.0)
                 .lastAssessmentDate(LocalDateTime.now().minusHours(2))
                 .build();
         residentRepository.save(sarah);
@@ -156,12 +159,14 @@ public class DataInitializer implements CommandLineRunner {
                 .elderHome(sereneValley)
                 .roomNumber("Suite 112")
                 .age(82)
+                .educationYears(10)
                 .emergencyContact("+94 71 987 6543")
                 .currentStatus(WellnessStatus.NEEDS_ATTENTION)
                 .riskLevel(RiskLevel.MODERATE)
                 .trajectory(TrajectoryStatus.INCREASING_RISK)
                 .emotionalScore(54.0)
                 .socialScore(48.0)
+                .cognitiveScore(62.0)
                 .lastAssessmentDate(LocalDateTime.now().minusHours(5))
                 .build();
         residentRepository.save(arthur);
@@ -185,12 +190,14 @@ public class DataInitializer implements CommandLineRunner {
                 .elderHome(goldenSunset)
                 .roomNumber("Suite 305")
                 .age(75)
+                .educationYears(14)
                 .emergencyContact("+94 76 555 4321")
                 .currentStatus(WellnessStatus.STABLE)
                 .riskLevel(RiskLevel.LOW)
                 .trajectory(TrajectoryStatus.STABLE)
                 .emotionalScore(76.0)
                 .socialScore(78.0)
+                .cognitiveScore(80.0)
                 .lastAssessmentDate(LocalDateTime.now().minusHours(8))
                 .build();
         residentRepository.save(margaret);
@@ -211,12 +218,14 @@ public class DataInitializer implements CommandLineRunner {
                 .elderHome(goldenSunset)
                 .roomNumber("Suite 108")
                 .age(84)
+                .educationYears(12)
                 .emergencyContact("+94 70 333 2211")
                 .currentStatus(WellnessStatus.CHECK_IN_NEEDED)
                 .riskLevel(RiskLevel.HIGH)
                 .trajectory(TrajectoryStatus.INCREASING_RISK)
                 .emotionalScore(38.0)
                 .socialScore(35.0)
+                .cognitiveScore(48.0)
                 .lastAssessmentDate(LocalDateTime.now().minusHours(1))
                 .build();
         residentRepository.save(robert);
@@ -237,6 +246,18 @@ public class DataInitializer implements CommandLineRunner {
                 .voiceCheckIncluded(true)
                 .build();
         assessmentRepository.save(sarahAssessment);
+
+        // Seed Sample Cognitive Assessment for Sarah Jenkins
+        cognitiveAssessmentRepository.save(CognitiveAssessment.builder()
+                .resident(sarah)
+                .memoryScore(85.0)
+                .attentionScore(88.0)
+                .orientationScore(90.0)
+                .recallScore(80.0)
+                .reasoningScore(82.0)
+                .acrfScore(85.15)
+                .assessedBy("Eleanor Vance")
+                .build());
 
         contributingFactorRepository.saveAll(List.of(
                 ContributingFactor.builder().assessment(sarahAssessment).resident(sarah).title("Morning Garden Walk").score(92.0).category("Social").description("Active outdoor engagement noted early morning").build(),
