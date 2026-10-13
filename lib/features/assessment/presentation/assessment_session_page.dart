@@ -1,191 +1,70 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../../core/responsive/responsive_builder.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../data/mock/mock_carevora_data.dart';
 import '../../../data/models/carevora_models.dart';
-import '../../../shared/widgets/city_skyline_illustration.dart';
-import '../../../shared/widgets/voice_waveform.dart';
-import 'widgets/live_facial_emotion_scanner_widget.dart';
 
-class AssessmentSessionPage extends ConsumerStatefulWidget {
+class AssessmentSessionPage extends StatefulWidget {
   const AssessmentSessionPage({super.key});
 
   @override
-  ConsumerState<AssessmentSessionPage> createState() =>
-      _AssessmentSessionPageState();
+  State<AssessmentSessionPage> createState() => _AssessmentSessionPageState();
 }
 
-class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage> {
-  int _currentIndex = 0;
-  final List<AssessmentQuestion> _questions = MockCarevoraData.cognitiveQuestions;
-
-  // Speech and Voice
-  late FlutterTts _flutterTts;
-  late stt.SpeechToText _speech;
-  bool _isListening = false;
-  bool _speechEnabled = false;
-  String _spokenText = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _initVoiceEngines();
-  }
-
-  Future<void> _initVoiceEngines() async {
-    _flutterTts = FlutterTts();
-    await _flutterTts.setLanguage("en-US");
-    await _flutterTts.setSpeechRate(0.45);
-
-    _speech = stt.SpeechToText();
-    try {
-      _speechEnabled = await _speech.initialize(
-        onError: (err) => debugPrint('STT Error: $err'),
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-      );
-    } catch (e) {
-      debugPrint('Speech init fallback: $e');
-    }
-  }
-
-  @override
-  void dispose() {
-    _flutterTts.stop();
-    _speech.stop();
-    super.dispose();
-  }
-
-  Future<void> _readQuestionAloud() async {
-    final currentQ = _questions[_currentIndex];
-    await _flutterTts.speak(currentQ.audioPrompt);
-  }
-
-  Future<void> _toggleMic() async {
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-    } else {
-      if (_speechEnabled) {
-        setState(() {
-          _isListening = true;
-          _spokenText = '';
-        });
-        _speech.listen(onResult: (result) {
-          setState(() {
-            _spokenText = result.recognizedWords;
-          });
-        });
-      } else {
-        // Fallback simulation
-        setState(() {
-          _isListening = true;
-          _spokenText = 'Listening to response...';
-        });
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) {
-            setState(() {
-              _isListening = false;
-              _spokenText = 'Resident answered: "The year is 2025 and it is spring."';
-            });
-          }
-        });
-      }
-    }
-  }
-
-  void _nextQuestion() {
-    if (_currentIndex < _questions.length - 1) {
-      setState(() {
-        _currentIndex++;
-        _spokenText = '';
-        _isListening = false;
-      });
-    } else {
-      _showEndAssessmentDialog();
-    }
-  }
-
-  void _showEndAssessmentDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Complete Assessment?'),
-        content: const Text(
-          'All 20 multimodal items have been completed. The system will calculate the updated cognitive risk score and archive the assessment session.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.go('/dashboard');
-            },
-            child: const Text('Confirm & Save Score'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showTipsDialog(String tip) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: const [
-            Icon(LucideIcons.bot, color: AppColors.primary),
-            SizedBox(width: 8),
-            Text('AI Assistant Protocol Tip'),
-          ],
-        ),
-        content: Text(tip),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Got it'),
-          ),
-        ],
-      ),
-    );
-  }
+class _AssessmentSessionPageState extends State<AssessmentSessionPage> {
+  final Resident _resident = MockCarevoraData.defaultResident;
 
   @override
   Widget build(BuildContext context) {
-    final currentQ = _questions[_currentIndex];
-    final progress = (_currentIndex + 1) / _questions.length;
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Navigation Back & Session Header
+          // 1. Navigation Back Button & Status Indicator
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               InkWell(
                 onTap: () => context.go('/dashboard'),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  child: Row(
+                    children: const [
+                      Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
+                      SizedBox(width: 6),
+                      Text(
+                        'Back to Overview',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.lilac),
+                ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: const [
-                    Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
+                    Icon(LucideIcons.sparkles, size: 13, color: AppColors.primary),
                     SizedBox(width: 6),
                     Text(
-                      'Back to overview',
+                      'Cognitive Workspace Ready',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: AppColors.primary,
                       ),
@@ -193,27 +72,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage> {
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceSecondary,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: const Text(
-                  'Live Session: Active',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.riskLow,
-                  ),
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
 
-          // Resident Session Header Card
+          // 2. Resident Context Header Banner
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -233,17 +96,26 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage> {
                     CircleAvatar(
                       radius: 22,
                       backgroundColor: AppColors.primarySoft,
-                      child: const Text('JP',
-                          style: TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'JP',
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 14),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Mr. James Perera (ID: R001)', style: AppTextStyles.h4),
-                        Text('Age 78 / Male / Room 105', style: AppTextStyles.caption),
+                        Text(
+                          '${_resident.name} (ID: ${_resident.id})',
+                          style: AppTextStyles.h4,
+                        ),
+                        Text(
+                          'Age ${_resident.age} / ${_resident.gender} / Room ${_resident.roomNo}',
+                          style: AppTextStyles.caption,
+                        ),
                       ],
                     ),
                   ],
@@ -254,17 +126,21 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Assessment Type', style: AppTextStyles.caption),
-                        Text('Standard Cognitive Assessment',
-                            style: AppTextStyles.bodyMedium),
+                        Text('Current Cognitive Score', style: AppTextStyles.caption),
+                        Text(
+                          '${_resident.cognitiveScore.toInt()} / 100',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary,
+                          ),
+                        ),
                       ],
                     ),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Session Started', style: AppTextStyles.caption),
-                        Text('12 May 2025, 10:30 AM',
-                            style: AppTextStyles.bodyMedium),
+                        Text('Facility Assigned', style: AppTextStyles.caption),
+                        Text('Maple Wood Care Home', style: AppTextStyles.bodyMedium),
                       ],
                     ),
                   ],
@@ -274,369 +150,201 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage> {
           ),
           const SizedBox(height: 24),
 
-          // Main Assessment Body
-          ResponsiveBuilder(
-            mobile: (context) => Column(
-              children: [
-                _buildQuestionCard(currentQ, progress),
-                const SizedBox(height: 20),
-                _buildSidebarOverview(currentQ),
-              ],
+          // 3. Clean Placeholder Central Workspace
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.border),
             ),
-            desktop: (context) => Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Expanded(flex: 7, child: _buildQuestionCard(currentQ, progress)),
-                const SizedBox(width: 24),
-                Expanded(flex: 3, child: _buildSidebarOverview(currentQ)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuestionCard(AssessmentQuestion currentQ, double progress) {
-    return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Cognitive Assessment in Progress',
-                style: AppTextStyles.h3.copyWith(fontSize: 18),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(9999),
-                ),
-                child: Text(
-                  '${(progress * 100).toInt()}% Complete',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+                Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    color: AppColors.lavenderBg,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.lilac, width: 2),
+                  ),
+                  child: const Icon(
+                    LucideIcons.brain,
+                    size: 48,
                     color: AppColors.primary,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Question ${currentQ.id} of ${_questions.length} • Category: ${currentQ.category}',
-            style: AppTextStyles.caption,
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 6,
-              backgroundColor: AppColors.border,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Large Lavender Question Panel
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppColors.lavenderBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.lilac),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                const SizedBox(height: 24),
+                Text(
+                  'Cognitive Assessment Dashboard',
+                  style: AppTextStyles.h2.copyWith(color: AppColors.navy),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 620),
+                  child: Text(
+                    'All previous mock questions, voice recording pipelines, and facial recognition scanners have been cleared. This workspace is ready for your custom Cognitive Assessment models, tasks, and telemetry integrations.',
+                    style: AppTextStyles.body.copyWith(height: 1.5),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        'QUESTION ${currentQ.id}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
+                    ElevatedButton.icon(
+                      onPressed: () => context.go('/dashboard'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
+                      icon: const Icon(LucideIcons.layoutDashboard, size: 16),
+                      label: const Text(
+                        'Return to Dashboard',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
-                    IconButton(
-                      icon: const Icon(LucideIcons.volume2, color: AppColors.primary),
-                      onPressed: _readQuestionAloud,
-                      tooltip: 'Read question aloud',
+                    OutlinedButton.icon(
+                      onPressed: () => context.go('/dashboard/residents'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.lilac),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(LucideIcons.users, size: 16),
+                      label: const Text(
+                        'View Resident Directory',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  currentQ.prompt,
-                  style: AppTextStyles.h3.copyWith(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.navy,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const CitySkylineIllustration(height: 90),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // AI Assistant Prompt Bubble
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceSecondary,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: AppColors.primarySoft,
-                  child: const Icon(LucideIcons.bot, size: 16, color: AppColors.primary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Please take your time and answer clearly.',
-                    style: AppTextStyles.bodyMedium.copyWith(fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Real-time Facial Emotion Recognition AI Component
-          const LiveFacialEmotionScannerWidget(),
-          const SizedBox(height: 20),
-
-          // Response & Waveform Panel
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceSecondary,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  _isListening
-                      ? 'Listening to response...'
-                      : _spokenText.isNotEmpty
-                          ? _spokenText
-                          : 'Tap microphone to speak or capture verbal answer',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: _isListening ? AppColors.leafGreen : AppColors.muted,
-                    fontWeight: _isListening ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                VoiceWaveformWidget(isListening: _isListening),
-                const SizedBox(height: 16),
-                // Round Purple Mic Button
-                FloatingActionButton(
-                  onPressed: _toggleMic,
-                  backgroundColor: _isListening ? AppColors.riskHigh : AppColors.primary,
-                  elevation: 2,
-                  child: Icon(
-                    _isListening ? LucideIcons.micOff : LucideIcons.mic,
-                    color: Colors.white,
-                  ),
-                ),
               ],
             ),
           ),
           const SizedBox(height: 24),
 
-          // Bottom Action Row
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _readQuestionAloud,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: const BorderSide(color: AppColors.lilac),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          // 4. Clean Module Integration Slots (Skeletons for upcoming features)
+          ResponsiveBuilder(
+            mobile: (context) => Column(
+              children: [
+                _buildModuleSlotCard(
+                  icon: LucideIcons.puzzle,
+                  title: 'Cognitive Task Engine',
+                  description: 'Slot reserved for memory recall, executive function, and spatial tasks.',
                 ),
-                icon: const Icon(LucideIcons.rotateCcw, size: 16),
-                label: const Text('Repeat Question'),
-              ),
-              ElevatedButton.icon(
-                onPressed: _nextQuestion,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                const SizedBox(height: 16),
+                _buildModuleSlotCard(
+                  icon: LucideIcons.activity,
+                  title: 'Neuro-Telemetry Stream',
+                  description: 'Slot reserved for reaction latency, decision times, and focus metrics.',
                 ),
-                icon: const Icon(LucideIcons.arrowRight, size: 16),
-                label: Text(
-                  _currentIndex == _questions.length - 1
-                      ? 'Complete Assessment'
-                      : 'Next Question',
+                const SizedBox(height: 16),
+                _buildModuleSlotCard(
+                  icon: LucideIcons.fileSpreadsheet,
+                  title: 'MMSE / MoCA Clinical Logs',
+                  description: 'Slot reserved for standardized clinical cognitive score summaries.',
                 ),
-              ),
-            ],
+              ],
+            ),
+            desktop: (context) => Row(
+              children: [
+                Expanded(
+                  child: _buildModuleSlotCard(
+                    icon: LucideIcons.puzzle,
+                    title: 'Cognitive Task Engine',
+                    description: 'Slot reserved for memory recall, executive function, and spatial tasks.',
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildModuleSlotCard(
+                    icon: LucideIcons.activity,
+                    title: 'Neuro-Telemetry Stream',
+                    description: 'Slot reserved for reaction latency, decision times, and focus metrics.',
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildModuleSlotCard(
+                    icon: LucideIcons.fileSpreadsheet,
+                    title: 'MMSE / MoCA Clinical Logs',
+                    description: 'Slot reserved for standardized clinical cognitive score summaries.',
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSidebarOverview(AssessmentQuestion currentQ) {
-    return Column(
-      children: [
-        // Questions Overview Checklist
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildModuleSlotCard({
+    required IconData icon,
+    required String title,
+    required String description,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text('Questions Overview', style: AppTextStyles.h4),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 280,
-                child: ListView.builder(
-                  itemCount: _questions.length,
-                  itemBuilder: (context, index) {
-                    final q = _questions[index];
-                    final isDone = index < _currentIndex;
-                    final isCurrent = index == _currentIndex;
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: isCurrent
-                            ? AppColors.primarySoft
-                            : isDone
-                                ? AppColors.surfaceSecondary
-                                : Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            isDone
-                                ? Icons.check_circle_rounded
-                                : isCurrent
-                                    ? Icons.radio_button_checked_rounded
-                                    : Icons.radio_button_unchecked_rounded,
-                            size: 16,
-                            color: isDone
-                                ? AppColors.riskLow
-                                : isCurrent
-                                    ? AppColors.primary
-                                    : AppColors.muted,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Q${q.id}. ${q.category}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                                color: isCurrent ? AppColors.primary : AppColors.body,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                child: Icon(icon, size: 20, color: AppColors.primary),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // AI Assistant Tips Card
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 14,
-                    backgroundColor: AppColors.primarySoft,
-                    child: const Icon(LucideIcons.bot, size: 14, color: AppColors.primary),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSecondary,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Text(
+                  'Ready to connect',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
                   ),
-                  const SizedBox(width: 8),
-                  Text('AI Protocol Guide', style: AppTextStyles.h4.copyWith(fontSize: 13)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                currentQ.tip,
-                style: AppTextStyles.caption.copyWith(fontSize: 12),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () => _showTipsDialog(currentQ.tip),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  minimumSize: const Size(double.infinity, 36),
                 ),
-                child: const Text('Show Tips', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 16),
-
-        // End Assessment Button
-        OutlinedButton.icon(
-          onPressed: _showEndAssessmentDialog,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.riskHigh,
-            side: const BorderSide(color: AppColors.riskHigh),
-            minimumSize: const Size(double.infinity, 44),
+          const SizedBox(height: 16),
+          Text(title, style: AppTextStyles.h4),
+          const SizedBox(height: 6),
+          Text(
+            description,
+            style: AppTextStyles.caption.copyWith(height: 1.4),
           ),
-          icon: const Icon(LucideIcons.xCircle, size: 16),
-          label: const Text('End Assessment'),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

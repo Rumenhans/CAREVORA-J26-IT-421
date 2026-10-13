@@ -13,6 +13,7 @@ import '../../features/doctor/presentation/pages/doctor_dashboard_page.dart';
 import '../../features/medicine/presentation/pages/live_medicine_board_page.dart';
 import '../../features/medicine/presentation/pages/medicine_history_page.dart';
 import '../../features/assessment/presentation/assessment_session_page.dart';
+import '../../features/assessment/presentation/emotional_wellness_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -66,11 +67,11 @@ class AppRouter {
           ),
           GoRoute(
             path: '/dashboard/emotional',
-            builder: (context, state) => const GenericPlaceholderTab(
-              title: 'Emotional Wellness',
-              description: 'Affect scoring, sentiment trajectory, and withdrawal indicators',
-              icon: LucideIcons.heartPulse,
-            ),
+            builder: (context, state) => const EmotionalWellnessPage(),
+          ),
+          GoRoute(
+            path: '/dashboard/emotional/session',
+            builder: (context, state) => const EmotionalWellnessPage(),
           ),
           GoRoute(
             path: '/dashboard/metabolic',
