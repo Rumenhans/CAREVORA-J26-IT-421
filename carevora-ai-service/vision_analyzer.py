@@ -56,8 +56,9 @@ _model_instance = None
 def get_trained_model():
     global _model_instance
     if _model_instance is None:
+        import os
         _model_instance = LightweightEmotionCNN(num_classes=7)
-        model_path = r"d:\pratice\Akka\carevora-ai-service\emotion_model.pth"
+        model_path = os.path.join(os.path.dirname(__file__), "emotion_model.pth")
         try:
             _model_instance.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
             _model_instance.eval()

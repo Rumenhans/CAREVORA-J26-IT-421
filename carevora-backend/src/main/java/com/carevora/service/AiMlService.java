@@ -1,32 +1,63 @@
 package com.carevora.service;
 
 import com.carevora.dto.ApiResponse;
+import com.carevora.entity.Assessment;
+import com.carevora.entity.Resident;
+import com.carevora.repository.AssessmentRepository;
+import com.carevora.repository.ResidentRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * AI/ML Service Adapter connecting Spring Boot to Python FastAPI on Port 8000
  * (FER-2013 & CREMA-D Grounded Multimodal RALPA Engine)
  */
 @Service
+@RequiredArgsConstructor
 public class AiMlService {
 
     private final RestTemplate restTemplate = new RestTemplate();
+    private final AssessmentRepository assessmentRepository;
+    private final ResidentRepository residentRepository;
     private final String aiServiceUrl = "http://127.0.0.1:8000/api/ml/predict-ralpa";
 
     public ApiResponse<Map<String, Object>> predictTrajectory(Long residentId) {
+        Resident resident = residentRepository.findById(residentId).orElse(null);
+        double qScore = (resident != null && resident.getEmotionalScore() != null)
+                ? resident.getEmotionalScore()
+                : 80.0;
+        double sScore = (resident != null && resident.getSocialScore() != null)
+                ? resident.getSocialScore()
+                : 80.0;
+
+        List<Assessment> assessments = assessmentRepository.findByResidentIdOrderByCreatedAtDesc(residentId);
+        List<Double> historyScores = assessments.stream()
+                .map(Assessment::getOverallScore)
+                .collect(Collectors.toList());
+        // Assessments query is ordered DESC for UI history listing; reverse to chronological order (ASC) for longitudinal temporal regression
+        Collections.reverse(historyScores);
+
         try {
             Map<String, Object> req = new HashMap<>();
             req.put("resident_id", residentId);
-            req.put("questionnaire_score", 86.0);
+            req.put("questionnaire_score", qScore);
+            req.put("social_score", sScore);
+            req.put("history_scores", historyScores);
+            req.put("score_domain", "wellness");
 
-            Map res = restTemplate.postForObject(aiServiceUrl, req, Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> res = restTemplate.postForObject(aiServiceUrl, req, Map.class);
             if (res != null && res.containsKey("data")) {
-                return ApiResponse.ok((Map<String, Object>) res.get("data"), "RALPA Trajectory forecasted from Python ML engine");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) res.get("data");
+                return ApiResponse.ok(data, "RALPA Trajectory forecasted from Python ML engine");
             }
         } catch (Exception e) {
             // Fallback if AI server is reloading
@@ -42,3 +73,4 @@ public class AiMlService {
         return ApiResponse.ok(fallback, "Trajectory forecast generated successfully");
     }
 }
+

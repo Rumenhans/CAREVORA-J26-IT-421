@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from vision_analyzer import analyze_facial_affect
@@ -11,6 +12,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Enable CORS for Flutter Web & Mobile Clients (localhost, 127.0.0.1, and Android emulators)
+# Avoiding wildcard allow_origins=["*"] with allow_credentials=True to comply with CORS specification
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 ralpa = RALPAEngine()
 
 class MultimodalAssessmentRequest(BaseModel):
@@ -19,7 +30,8 @@ class MultimodalAssessmentRequest(BaseModel):
     facial_cues: Optional[Dict[str, Any]] = None
     vocal_cues: Optional[Dict[str, Any]] = None
     social_score: Optional[float] = 80.0
-    history_scores: Optional[List[float]] = None
+    history_scores: Optional[List[Any]] = None
+    score_domain: Optional[str] = "wellness"
 
 @app.get("/")
 def root():
@@ -47,6 +59,20 @@ async def analyze_photo(file: UploadFile = File(...)):
         "analysis": res
     }
 
+@app.post("/api/ml/analyze-audio")
+async def analyze_audio(file: UploadFile = File(...)):
+    """
+    Endpoint for acoustic speech feature extraction from recorded audio file/bytes.
+    Explicitly non-neural; calculates rule-based zero crossings, RMS energy, and cadence metrics.
+    """
+    contents = await file.read()
+    res = analyze_vocal_affect(audio_bytes=contents)
+    return {
+        "success": True,
+        "filename": file.filename,
+        "analysis": res
+    }
+
 @app.post("/api/ml/predict-ralpa")
 def predict_ralpa_progression(req: MultimodalAssessmentRequest):
     # 1. Vision Emotion Inference
@@ -66,7 +92,8 @@ def predict_ralpa_progression(req: MultimodalAssessmentRequest):
     prediction = ralpa.predict_progression(
         resident_id=req.resident_id,
         current_scores=scores,
-        history_scores=req.history_scores
+        history_scores=req.history_scores,
+        score_domain=req.score_domain or "wellness"
     )
 
     return {
