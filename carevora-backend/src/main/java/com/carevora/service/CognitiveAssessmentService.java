@@ -31,7 +31,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class CognitiveAssessmentService {
 
     private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
@@ -40,6 +39,21 @@ public class CognitiveAssessmentService {
     private final CaregiverRepository caregiverRepository;
     private final AiMlService aiMlService;
     private final ObjectMapper objectMapper;
+
+    public CognitiveAssessmentService(
+            CognitiveAssessmentRepository cognitiveAssessmentRepository,
+            ResidentRepository residentRepository,
+            UserRepository userRepository,
+            CaregiverRepository caregiverRepository,
+            AiMlService aiMlService,
+            ObjectMapper objectMapper) {
+        this.cognitiveAssessmentRepository = cognitiveAssessmentRepository;
+        this.residentRepository = residentRepository;
+        this.userRepository = userRepository;
+        this.caregiverRepository = caregiverRepository;
+        this.aiMlService = aiMlService;
+        this.objectMapper = objectMapper;
+    }
 
     // Fixed ACRF Base Weights established in system specifications
     private static final Map<String, Double> ACRF_WEIGHTS = Map.of(

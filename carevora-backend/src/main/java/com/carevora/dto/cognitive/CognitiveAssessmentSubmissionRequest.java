@@ -15,7 +15,6 @@ import java.util.Map;
 @Data
 @Builder
 @NoArgsConstructor
-@AllArgsConstructor
 public class CognitiveAssessmentSubmissionRequest {
 
     @NotNull(message = "Resident ID is required")
@@ -58,4 +57,27 @@ public class CognitiveAssessmentSubmissionRequest {
     private Map<String, Double> accuracies;
 
     private Map<String, Double> responseTimes;
+
+    public CognitiveAssessmentSubmissionRequest(
+            Long residentId,
+            Double memory,
+            Double attention,
+            Double orientation,
+            Double recall,
+            Double reasoning,
+            Integer age,
+            Integer educationYears,
+            Map<String, Double> accuracies,
+            Map<String, Double> responseTimes) {
+        this.residentId = residentId;
+        this.memory = memory;
+        this.attention = attention;
+        this.orientation = orientation;
+        this.recall = recall;
+        this.reasoning = reasoning;
+        this.age = age;
+        this.educationYears = educationYears;
+        this.accuracies = accuracies;
+        this.responseTimes = responseTimes;
+    }
 }

@@ -15,11 +15,14 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/cognitive/assessments")
-@RequiredArgsConstructor
 @Tag(name = "Cognitive Assessments", description = "Endpoints for ACRF cognitive wellness scoring, submission, and history")
 public class CognitiveAssessmentController {
 
     private final CognitiveAssessmentService cognitiveAssessmentService;
+
+    public CognitiveAssessmentController(CognitiveAssessmentService cognitiveAssessmentService) {
+        this.cognitiveAssessmentService = cognitiveAssessmentService;
+    }
 
     @PostMapping("/submit")
     @Operation(summary = "Submit category scores for ACRF cognitive wellness evaluation and persistence")

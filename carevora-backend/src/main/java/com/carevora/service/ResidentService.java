@@ -23,13 +23,23 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class ResidentService {
 
     private final ResidentRepository residentRepository;
     private final AlertRepository alertRepository;
     private final UserRepository userRepository;
     private final CaregiverRepository caregiverRepository;
+
+    public ResidentService(
+            ResidentRepository residentRepository,
+            AlertRepository alertRepository,
+            UserRepository userRepository,
+            CaregiverRepository caregiverRepository) {
+        this.residentRepository = residentRepository;
+        this.alertRepository = alertRepository;
+        this.userRepository = userRepository;
+        this.caregiverRepository = caregiverRepository;
+    }
 
     @Transactional(readOnly = true)
     public ApiResponse<List<ResidentResponse>> getAllResidents(String search) {

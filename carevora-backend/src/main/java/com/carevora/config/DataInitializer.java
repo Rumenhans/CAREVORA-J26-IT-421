@@ -12,7 +12,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Component
-@RequiredArgsConstructor
 public class DataInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;
@@ -25,6 +24,29 @@ public class DataInitializer implements CommandLineRunner {
     private final AlertRepository alertRepository;
     private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
     private final PasswordEncoder passwordEncoder;
+
+    public DataInitializer(
+            UserRepository userRepository,
+            ResidentRepository residentRepository,
+            CaregiverRepository caregiverRepository,
+            ElderHomeRepository elderHomeRepository,
+            AssessmentRepository assessmentRepository,
+            ContributingFactorRepository contributingFactorRepository,
+            RecommendationRepository recommendationRepository,
+            AlertRepository alertRepository,
+            CognitiveAssessmentRepository cognitiveAssessmentRepository,
+            PasswordEncoder passwordEncoder) {
+        this.userRepository = userRepository;
+        this.residentRepository = residentRepository;
+        this.caregiverRepository = caregiverRepository;
+        this.elderHomeRepository = elderHomeRepository;
+        this.assessmentRepository = assessmentRepository;
+        this.contributingFactorRepository = contributingFactorRepository;
+        this.recommendationRepository = recommendationRepository;
+        this.alertRepository = alertRepository;
+        this.cognitiveAssessmentRepository = cognitiveAssessmentRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
 
     @Override
     public void run(String... args) {
