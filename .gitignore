@@ -62,3 +62,8 @@ __pycache__/
 **/__pycache__/
 *.py[cod]
 *$py.class
+
+
+# Local H2 database files
+*.mv.db
+*.trace.db
