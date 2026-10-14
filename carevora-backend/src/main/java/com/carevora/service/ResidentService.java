@@ -23,13 +23,23 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class ResidentService {
 
     private final ResidentRepository residentRepository;
     private final AlertRepository alertRepository;
     private final UserRepository userRepository;
     private final CaregiverRepository caregiverRepository;
+
+    public ResidentService(
+            ResidentRepository residentRepository,
+            AlertRepository alertRepository,
+            UserRepository userRepository,
+            CaregiverRepository caregiverRepository) {
+        this.residentRepository = residentRepository;
+        this.alertRepository = alertRepository;
+        this.userRepository = userRepository;
+        this.caregiverRepository = caregiverRepository;
+    }
 
     @Transactional(readOnly = true)
     public ApiResponse<List<ResidentResponse>> getAllResidents(String search) {
@@ -124,6 +134,7 @@ public class ResidentService {
                 .userId(r.getUser().getId())
                 .name(r.getUser().getFullName())
                 .age(r.getAge())
+                .educationYears(r.getEducationYears())
                 .roomNumber(r.getRoomNumber())
                 .avatarUrl(r.getUser().getAvatarUrl())
                 .currentStatus(r.getCurrentStatus())
@@ -131,6 +142,7 @@ public class ResidentService {
                 .trajectory(r.getTrajectory())
                 .emotionalScore(r.getEmotionalScore())
                 .socialScore(r.getSocialScore())
+                .cognitiveScore(r.getCognitiveScore())
                 .lastAssessmentDate(r.getLastAssessmentDate())
                 .unreadAlertsCount(unreadAlerts)
                 .elderHomeId(homeId)

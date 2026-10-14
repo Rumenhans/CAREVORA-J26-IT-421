@@ -1,17 +1,21 @@
 import os
 import json
+import math
+from typing import List, Optional, Dict, Any
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, field_validator, model_validator
+
 from vision_analyzer import analyze_facial_affect
 from audio_analyzer import analyze_vocal_affect
 from ralpa_engine import RALPAEngine
+from cognitive_engine import CognitiveEngine, CognitiveValidationError
 
 app = FastAPI(
     title="CAREVORA AI/ML Microservice",
-    description="Multimodal Emotion Recognition & RALPA Trajectory Forecasting Engine (FER-2013 & PyTorch CNN Grounded)",
-    version="1.0.0"
+    description="Multimodal Emotion Recognition, RALPA Trajectory Forecasting & ACRF Cognitive Scoring Engine",
+    version="1.1.0"
 )
 
 # Enable CORS for Flutter Web & Mobile Clients (localhost, 127.0.0.1, and Android emulators)
@@ -25,6 +29,12 @@ app.add_middleware(
 )
 
 ralpa = RALPAEngine()
+cognitive_engine = CognitiveEngine()
+
+
+# ============================================================================
+# Request / Response Schemas: Emotional & Multimodal RALPA
+# ============================================================================
 
 class MultimodalAssessmentRequest(BaseModel):
     resident_id: int
@@ -35,6 +45,123 @@ class MultimodalAssessmentRequest(BaseModel):
     history_scores: Optional[List[Any]] = None
     score_domain: Optional[str] = "wellness"
 
+
+# ============================================================================
+# Request / Response Schemas: Cognitive Wellness & ACRF Scoring
+# ============================================================================
+
+class CognitiveCategoryScores(BaseModel):
+    memory: float = Field(..., ge=0.0, le=100.0, description="Memory assessment score on 0-100 scale")
+    attention: float = Field(..., ge=0.0, le=100.0, description="Attention assessment score on 0-100 scale")
+    orientation: float = Field(..., ge=0.0, le=100.0, description="Orientation assessment score on 0-100 scale")
+    recall: float = Field(..., ge=0.0, le=100.0, description="Recall assessment score on 0-100 scale")
+    reasoning: float = Field(..., ge=0.0, le=100.0, description="Reasoning assessment score on 0-100 scale")
+
+    @field_validator("memory", "attention", "orientation", "recall", "reasoning", mode="after")
+    @classmethod
+    def check_finite(cls, v: float) -> float:
+        if math.isnan(v):
+            raise ValueError("Category score cannot be NaN")
+        if math.isinf(v):
+            raise ValueError("Category score cannot be infinite")
+        return v
+
+
+class CognitiveAssessmentRequest(BaseModel):
+    resident_id: Optional[int] = Field(None, description="Resident identifier")
+    scores: Optional[CognitiveCategoryScores] = Field(None, description="Cognitive subcategory scores object")
+
+    memory: Optional[float] = Field(None, ge=0.0, le=100.0)
+    attention: Optional[float] = Field(None, ge=0.0, le=100.0)
+    orientation: Optional[float] = Field(None, ge=0.0, le=100.0)
+    recall: Optional[float] = Field(None, ge=0.0, le=100.0)
+    reasoning: Optional[float] = Field(None, ge=0.0, le=100.0)
+
+    # Optional demographic & task features for Random Forest ML inference (synthetic data experiment)
+    age: Optional[float] = Field(None, gt=0.0, le=130.0, description="Resident age in years")
+    education_years: Optional[float] = Field(None, ge=0.0, le=40.0, description="Years of formal education")
+    accuracies: Optional[Dict[str, float]] = Field(None, description="Per-domain task accuracies (0.0 to 1.0 or 0 to 100)")
+    response_times: Optional[Dict[str, float]] = Field(None, description="Per-domain task response times in seconds")
+    assessment_number: Optional[int] = Field(None, ge=1, description="Sequential assessment index")
+    history: Optional[List[Dict[str, Any]]] = Field(None, description="Historical assessments for longitudinal tracking")
+
+    @model_validator(mode="after")
+    def populate_and_validate_scores(self) -> "CognitiveAssessmentRequest":
+        if self.scores is not None:
+            return self
+
+        flat = [self.memory, self.attention, self.orientation, self.recall, self.reasoning]
+        if any(f is not None for f in flat):
+            if any(f is None for f in flat):
+                raise ValueError(
+                    "All 5 cognitive categories (memory, attention, orientation, recall, reasoning) "
+                    "are required when submitting flat scores."
+                )
+            self.scores = CognitiveCategoryScores(
+                memory=self.memory,  # type: ignore[arg-type]
+                attention=self.attention,  # type: ignore[arg-type]
+                orientation=self.orientation,  # type: ignore[arg-type]
+                recall=self.recall,  # type: ignore[arg-type]
+                reasoning=self.reasoning,  # type: ignore[arg-type]
+            )
+            return self
+
+        raise ValueError(
+            "Cognitive scores required. Supply 'scores' object or top-level 'memory', 'attention', "
+            "'orientation', 'recall', and 'reasoning' fields."
+        )
+
+
+class CategoryContributionDto(BaseModel):
+    category: str
+    score: float
+    weight: float
+    contribution: float
+    weight_percentage: str
+
+
+class AcrfAssessmentDto(BaseModel):
+    acrf_score: float
+    raw_weighted_score: float
+    scale: str
+    scoring_direction: str
+    weights_applied: Dict[str, float]
+    category_scores: Dict[str, float]
+    category_contributions: List[CategoryContributionDto]
+    methodology: str
+    clinical_disclaimer: str
+
+
+class MlModelStatusDto(BaseModel):
+    available: bool
+    model_type: str
+    status_message: str
+    prediction: Optional[Any] = None
+    probabilities: Optional[Dict[str, float]] = None
+    alert_threshold: Optional[float] = None
+    alert_triggered: Optional[bool] = None
+    feature_set: Optional[str] = None
+    missing_features: Optional[List[str]] = None
+    feature_count_expected: Optional[int] = None
+    experimental_label: Optional[str] = None
+    disclaimer: Optional[str] = None
+
+
+class CognitiveAssessmentData(BaseModel):
+    resident_id: Optional[int] = None
+    acrf_assessment: AcrfAssessmentDto
+    ml_model_evaluation: MlModelStatusDto
+
+
+class CognitiveAssessmentResponse(BaseModel):
+    success: bool
+    data: CognitiveAssessmentData
+
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
+
 @app.get("/")
 def root():
     return {
@@ -43,9 +170,11 @@ def root():
         "models": {
             "facial": "Trained PyTorch FER-2013 CNN Model",
             "vocal": "CREMA-D Acoustic Feature Pipeline",
-            "trajectory": "RALPA Latent Progression Engine"
+            "trajectory": "RALPA Latent Progression Engine",
+            "cognitive": "ACRF Engine & Random Forest Model (Trained on Synthetic Data - Experimental)"
         }
     }
+
 
 @app.get("/api/ml/model-metrics")
 def get_model_metrics():
@@ -58,6 +187,7 @@ def get_model_metrics():
         with open(metrics_path, "r") as f:
             return {"success": True, "data": json.load(f)}
     return {"success": False, "message": "Metrics not found"}
+
 
 @app.post("/api/ml/analyze-photo")
 async def analyze_photo(file: UploadFile = File(...)):
@@ -73,6 +203,7 @@ async def analyze_photo(file: UploadFile = File(...)):
         "analysis": res
     }
 
+
 @app.post("/api/ml/analyze-audio")
 async def analyze_audio(file: UploadFile = File(...)):
     """
@@ -86,6 +217,7 @@ async def analyze_audio(file: UploadFile = File(...)):
         "filename": file.filename,
         "analysis": res
     }
+
 
 @app.post("/api/ml/predict-ralpa")
 def predict_ralpa_progression(req: MultimodalAssessmentRequest):
@@ -121,6 +253,59 @@ def predict_ralpa_progression(req: MultimodalAssessmentRequest):
         }
     }
 
+
+@app.post(
+    "/api/ml/predict-cognitive",
+    response_model=CognitiveAssessmentResponse,
+    summary="Evaluate cognitive wellness using fixed ACRF weights and verify ML model availability",
+    tags=["Cognitive Wellness"]
+)
+def predict_cognitive(req: CognitiveAssessmentRequest):
+    """
+    Evaluates cognitive wellness across the five designated categories:
+    - memory (weight 0.25)
+    - attention (weight 0.20)
+    - orientation (weight 0.20)
+    - recall (weight 0.20)
+    - reasoning (weight 0.15)
+    
+    Returns the weighted ACRF score, category contributions, and transparent
+    machine-learning status. Non-diagnostic.
+    """
+    if req.scores is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Category scores must be provided."
+        )
+
+    scores_dict = {
+        "memory": req.scores.memory,
+        "attention": req.scores.attention,
+        "orientation": req.scores.orientation,
+        "recall": req.scores.recall,
+        "reasoning": req.scores.reasoning,
+    }
+
+    try:
+        result = cognitive_engine.evaluate(
+            scores_dict,
+            resident_id=req.resident_id,
+            age=req.age,
+            education_years=req.education_years,
+            accuracies=req.accuracies,
+            response_times=req.response_times,
+            assessment_number=req.assessment_number,
+            history=req.history,
+        )
+    except CognitiveValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "success": True,
+        "data": result
+    }
+
+
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn  # pyrefly: ignore [missing-import] # type: ignore
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
