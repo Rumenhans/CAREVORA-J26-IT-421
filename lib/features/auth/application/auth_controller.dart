@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/config/app_config.dart';
 
 enum UserRole {
   admin,
@@ -92,7 +93,7 @@ class AuthNotifier extends ChangeNotifier {
   AuthState get state => _state;
   Timer? _lockoutTimer;
 
-  static const String baseUrl = 'http://localhost:8081';
+  static String get baseUrl => AppConfig.backendBaseUrl;
 
   AuthNotifier() {
     _init();

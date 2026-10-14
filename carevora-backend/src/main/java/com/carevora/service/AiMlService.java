@@ -3,7 +3,12 @@ package com.carevora.service;
 import com.carevora.dto.ApiResponse;
 import com.carevora.dto.cognitive.CognitiveAiResult;
 import com.carevora.dto.cognitive.CognitiveAssessmentResponse;
+import com.carevora.entity.Assessment;
+import com.carevora.entity.Resident;
 import com.carevora.exception.AiServiceException;
+import com.carevora.repository.AssessmentRepository;
+import com.carevora.repository.ResidentRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -11,9 +16,11 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * AI/ML Service Adapter connecting Spring Boot to Python FastAPI on Port 8000
@@ -23,26 +30,71 @@ import java.util.Map;
 public class AiMlService {
 
     private final RestTemplate restTemplate;
+    private final AssessmentRepository assessmentRepository;
+    private final ResidentRepository residentRepository;
     private final String aiServiceBaseUrl;
 
+    @Autowired
     public AiMlService(
             RestTemplate restTemplate,
+            AssessmentRepository assessmentRepository,
+            ResidentRepository residentRepository,
             @Value("${application.ai-service.base-url:http://127.0.0.1:8000}") String aiServiceBaseUrl
     ) {
         this.restTemplate = restTemplate;
-        this.aiServiceBaseUrl = aiServiceBaseUrl;
+        this.assessmentRepository = assessmentRepository;
+        this.residentRepository = residentRepository;
+        this.aiServiceBaseUrl = (aiServiceBaseUrl != null && aiServiceBaseUrl.endsWith("/"))
+                ? aiServiceBaseUrl.substring(0, aiServiceBaseUrl.length() - 1)
+                : aiServiceBaseUrl;
+    }
+
+    public AiMlService(
+            RestTemplate restTemplate,
+            String aiServiceBaseUrl
+    ) {
+        this(restTemplate, null, null, aiServiceBaseUrl);
     }
 
     public ApiResponse<Map<String, Object>> predictTrajectory(Long residentId) {
-        String ralpaUrl = aiServiceBaseUrl + "/api/ml/predict-ralpa";
+        double qScore = 80.0;
+        double sScore = 80.0;
+        List<Double> historyScores = Collections.emptyList();
+
+        if (residentRepository != null) {
+            Resident resident = residentRepository.findById(residentId).orElse(null);
+            if (resident != null && resident.getEmotionalScore() != null) {
+                qScore = resident.getEmotionalScore();
+            }
+            if (resident != null && resident.getSocialScore() != null) {
+                sScore = resident.getSocialScore();
+            }
+        }
+
+        if (assessmentRepository != null) {
+            List<Assessment> assessments = assessmentRepository.findByResidentIdOrderByCreatedAtDesc(residentId);
+            historyScores = assessments.stream()
+                    .map(Assessment::getOverallScore)
+                    .collect(Collectors.toList());
+            // Assessments query is ordered DESC for UI history listing; reverse to chronological order (ASC) for longitudinal temporal regression
+            Collections.reverse(historyScores);
+        }
+
         try {
             Map<String, Object> req = new HashMap<>();
             req.put("resident_id", residentId);
-            req.put("questionnaire_score", 86.0);
+            req.put("questionnaire_score", qScore);
+            req.put("social_score", sScore);
+            req.put("history_scores", historyScores);
+            req.put("score_domain", "wellness");
 
-            Map res = restTemplate.postForObject(ralpaUrl, req, Map.class);
+            String ralpaUrl = aiServiceBaseUrl + "/api/ml/predict-ralpa";
+            @SuppressWarnings("unchecked")
+            Map<String, Object> res = restTemplate.postForObject(ralpaUrl, req, Map.class);
             if (res != null && res.containsKey("data")) {
-                return ApiResponse.ok((Map<String, Object>) res.get("data"), "RALPA Trajectory forecasted from Python ML engine");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) res.get("data");
+                return ApiResponse.ok(data, "RALPA Trajectory forecasted from Python ML engine");
             }
         } catch (Exception e) {
             // Fallback if AI server is reloading
@@ -128,6 +180,7 @@ public class AiMlService {
                 throw new AiServiceException("AI microservice returned invalid payload structure");
             }
 
+            @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) body.get("data");
             return parseCognitiveAiResponse(data);
         } catch (RestClientException ex) {

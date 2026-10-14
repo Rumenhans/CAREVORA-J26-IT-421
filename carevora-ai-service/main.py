@@ -1,7 +1,11 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import List, Optional, Dict, Any
+import os
+import json
 import math
+from typing import List, Optional, Dict, Any
+
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from vision_analyzer import analyze_facial_affect
 from audio_analyzer import analyze_vocal_affect
@@ -12,6 +16,16 @@ app = FastAPI(
     title="CAREVORA AI/ML Microservice",
     description="Multimodal Emotion Recognition, RALPA Trajectory Forecasting & ACRF Cognitive Scoring Engine",
     version="1.1.0"
+)
+
+# Enable CORS for Flutter Web & Mobile Clients (localhost, 127.0.0.1, and Android emulators)
+# Avoiding wildcard allow_origins=["*"] with allow_credentials=True to comply with CORS specification
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 ralpa = RALPAEngine()
@@ -28,7 +42,8 @@ class MultimodalAssessmentRequest(BaseModel):
     facial_cues: Optional[Dict[str, Any]] = None
     vocal_cues: Optional[Dict[str, Any]] = None
     social_score: Optional[float] = 80.0
-    history_scores: Optional[List[float]] = None
+    history_scores: Optional[List[Any]] = None
+    score_domain: Optional[str] = "wellness"
 
 
 # ============================================================================
@@ -161,6 +176,19 @@ def root():
     }
 
 
+@app.get("/api/ml/model-metrics")
+def get_model_metrics():
+    """
+    Returns empirical train & test accuracy, precision, recall, and F1-score
+    evaluated on the FER-2013 benchmark dataset.
+    """
+    metrics_path = os.path.join(os.path.dirname(__file__), "model_metrics.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r") as f:
+            return {"success": True, "data": json.load(f)}
+    return {"success": False, "message": "Metrics not found"}
+
+
 @app.post("/api/ml/analyze-photo")
 async def analyze_photo(file: UploadFile = File(...)):
     """
@@ -169,6 +197,21 @@ async def analyze_photo(file: UploadFile = File(...)):
     """
     contents = await file.read()
     res = analyze_facial_affect(image_bytes=contents)
+    return {
+        "success": True,
+        "filename": file.filename,
+        "analysis": res
+    }
+
+
+@app.post("/api/ml/analyze-audio")
+async def analyze_audio(file: UploadFile = File(...)):
+    """
+    Endpoint for acoustic speech feature extraction from recorded audio file/bytes.
+    Explicitly non-neural; calculates rule-based zero crossings, RMS energy, and cadence metrics.
+    """
+    contents = await file.read()
+    res = analyze_vocal_affect(audio_bytes=contents)
     return {
         "success": True,
         "filename": file.filename,
@@ -195,7 +238,8 @@ def predict_ralpa_progression(req: MultimodalAssessmentRequest):
     prediction = ralpa.predict_progression(
         resident_id=req.resident_id,
         current_scores=scores,
-        history_scores=req.history_scores
+        history_scores=req.history_scores,
+        score_domain=req.score_domain or "wellness"
     )
 
     return {

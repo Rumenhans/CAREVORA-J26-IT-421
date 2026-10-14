@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../../../core/config/app_config.dart';
 
 enum EmotionCategory {
   happy,
@@ -72,7 +73,8 @@ class FacialEmotionAiService {
     // 1. If real camera image bytes passed, call live PyTorch FastAPI backend (/api/ml/analyze-photo)
     if (imageBytes != null && imageBytes.isNotEmpty) {
       try {
-        final uri = Uri.parse('http://10.0.2.2:8000/api/ml/analyze-photo');
+        final host = AppConfig.aiServiceBaseUrl;
+        final uri = Uri.parse('$host/api/ml/analyze-photo');
         final request = http.MultipartRequest('POST', uri);
         request.files.add(
           http.MultipartFile.fromBytes(
@@ -83,138 +85,94 @@ class FacialEmotionAiService {
         );
 
         final streamedResponse = await request.send().timeout(
-              const Duration(seconds: 4),
+              const Duration(seconds: 6),
             );
         if (streamedResponse.statusCode == 200) {
           final responseBody = await streamedResponse.stream.bytesToString();
           final jsonMap = jsonDecode(responseBody);
           if (jsonMap['success'] == true && jsonMap['analysis'] != null) {
             final analysis = jsonMap['analysis'];
-            final String dominant = analysis['dominant_emotion'] ?? 'happy';
+            final String dominant = (analysis['dominant_emotion'] ?? 'happy').toString().toLowerCase();
+            final double conf = (analysis['confidence'] is num)
+                ? (analysis['confidence'] as num).toDouble()
+                : 0.85;
+            final breakdown = analysis['emotion_breakdown_percent'] as Map<String, dynamic>?;
 
-            // Dynamic computation from real captured image bytes
-            int byteSum = 0;
-            for (int i = 0; i < imageBytes.length; i += 32) {
-              byteSum += imageBytes[i];
-            }
-            final double variance = (byteSum % 25) / 100.0;
+            EmotionCategory category;
+            double valence;
+            double arousal;
+            List<String> actionUnits;
 
-            if (dominant == 'sad' || dominant == 'angry' || dominant == 'fear' || (byteSum % 2 == 1)) {
-              final sadScore = (0.72 + variance).clamp(0.65, 0.96);
-              final happyScore = (1.0 - sadScore - 0.05).clamp(0.02, 0.25);
-              final neutralScore = (1.0 - sadScore - happyScore).clamp(0.02, 0.15);
-
-              return FacialEmotionResult(
-                primaryEmotion: EmotionCategory.sadDepressed,
-                confidence: sadScore,
-                valenceScore: -sadScore,
-                arousalScore: 0.25,
-                emotionProbabilities: {
-                  EmotionCategory.sadDepressed: double.parse(sadScore.toStringAsFixed(2)),
-                  EmotionCategory.calmNeutral: double.parse(neutralScore.toStringAsFixed(2)),
-                  EmotionCategory.happy: double.parse(happyScore.toStringAsFixed(2)),
-                  EmotionCategory.anxious: 0.02,
-                  EmotionCategory.confusedAgitated: 0.01,
-                },
-                clinicalObservation:
-                    'Live Photo AI Vision Result: Face analyzed as SAD / Flat Affect with ${(sadScore * 100).toInt()}% confidence.',
-                facialActionUnits: const [
-                  'AU1: Inner Brow Raiser (0.82)',
-                  'AU15: Lip Corner Depressor (0.88)',
-                ],
-                analyzedAt: DateTime.now(),
-              );
+            if (dominant == 'happy' || dominant == 'surprise') {
+              category = EmotionCategory.happy;
+              valence = conf;
+              arousal = 0.50;
+              actionUnits = const ['AU6: Cheek Raiser', 'AU12: Lip Corner Puller'];
+            } else if (dominant == 'neutral') {
+              category = EmotionCategory.calmNeutral;
+              valence = 0.05;
+              arousal = 0.20;
+              actionUnits = const ['AU0: Neutral Baseline'];
+            } else if (dominant == 'sad' || dominant == 'disgust') {
+              category = EmotionCategory.sadDepressed;
+              valence = -conf;
+              arousal = 0.25;
+              actionUnits = const ['AU1: Inner Brow Raiser', 'AU15: Lip Corner Depressor'];
+            } else if (dominant == 'angry') {
+              category = EmotionCategory.confusedAgitated;
+              valence = -0.5 * conf;
+              arousal = 0.80;
+              actionUnits = const ['AU4: Brow Lowerer', 'AU7: Lid Tightener'];
             } else {
-              final happyScore = (0.75 + variance).clamp(0.68, 0.98);
-              final sadScore = (1.0 - happyScore - 0.05).clamp(0.01, 0.20);
-              final neutralScore = (1.0 - happyScore - sadScore).clamp(0.01, 0.12);
-
-              return FacialEmotionResult(
-                primaryEmotion: EmotionCategory.happy,
-                confidence: happyScore,
-                valenceScore: happyScore,
-                arousalScore: 0.45,
-                emotionProbabilities: {
-                  EmotionCategory.happy: double.parse(happyScore.toStringAsFixed(2)),
-                  EmotionCategory.calmNeutral: double.parse(neutralScore.toStringAsFixed(2)),
-                  EmotionCategory.sadDepressed: double.parse(sadScore.toStringAsFixed(2)),
-                  EmotionCategory.anxious: 0.01,
-                  EmotionCategory.confusedAgitated: 0.00,
-                },
-                clinicalObservation:
-                    'Live Photo AI Vision Result: Face analyzed as HAPPY with ${(happyScore * 100).toInt()}% confidence.',
-                facialActionUnits: const [
-                  'AU6: Cheek Raiser (0.88)',
-                  'AU12: Lip Corner Puller (0.92)',
-                ],
-                analyzedAt: DateTime.now(),
-              );
+              category = EmotionCategory.anxious;
+              valence = -0.6 * conf;
+              arousal = 0.70;
+              actionUnits = const ['AU1: Inner Brow Raiser', 'AU20: Lip Stretcher'];
             }
+
+            final Map<EmotionCategory, double> probabilities = {
+              EmotionCategory.happy: breakdown != null ? ((breakdown['happy'] as num? ?? 0) / 100.0) : (category == EmotionCategory.happy ? conf : 0.05),
+              EmotionCategory.calmNeutral: breakdown != null ? ((breakdown['neutral'] as num? ?? 0) / 100.0) : (category == EmotionCategory.calmNeutral ? conf : 0.05),
+              EmotionCategory.sadDepressed: breakdown != null ? ((breakdown['sad'] as num? ?? 0) / 100.0) : (category == EmotionCategory.sadDepressed ? conf : 0.05),
+              EmotionCategory.confusedAgitated: breakdown != null ? ((breakdown['angry'] as num? ?? 0) / 100.0) : (category == EmotionCategory.confusedAgitated ? conf : 0.05),
+              EmotionCategory.anxious: breakdown != null ? ((breakdown['fear'] as num? ?? 0) / 100.0) : (category == EmotionCategory.anxious ? conf : 0.05),
+            };
+
+            return FacialEmotionResult(
+              primaryEmotion: category,
+              confidence: conf,
+              valenceScore: valence,
+              arousalScore: arousal,
+              emotionProbabilities: probabilities,
+              clinicalObservation:
+                  'Real PyTorch Model Inference (FER-2013): Face classified as ${dominant.toUpperCase()} with ${(conf * 100).toStringAsFixed(1)}% model confidence.',
+              facialActionUnits: actionUnits,
+              analyzedAt: DateTime.now(),
+            );
           }
         }
       } catch (e) {
         debugPrint('PyTorch API live call fallback: $e');
       }
 
-      // Dynamic calculation if local processing without backend API endpoint connection
-      int byteSum = 0;
-      for (int i = 0; i < imageBytes.length; i += 32) {
-        byteSum += imageBytes[i];
-      }
-      final double variance = (byteSum % 20) / 100.0;
-      final isEvenHash = (byteSum % 2 == 0);
-
-      if (!isEvenHash) {
-        final sadScore = (0.74 + variance).clamp(0.68, 0.95);
-        final happyScore = (1.0 - sadScore - 0.04).clamp(0.02, 0.22);
-        final neutralScore = (1.0 - sadScore - happyScore).clamp(0.02, 0.14);
-
-        return FacialEmotionResult(
-          primaryEmotion: EmotionCategory.sadDepressed,
-          confidence: sadScore,
-          valenceScore: -sadScore,
-          arousalScore: 0.22,
-          emotionProbabilities: {
-            EmotionCategory.sadDepressed: double.parse(sadScore.toStringAsFixed(2)),
-            EmotionCategory.calmNeutral: double.parse(neutralScore.toStringAsFixed(2)),
-            EmotionCategory.happy: double.parse(happyScore.toStringAsFixed(2)),
-            EmotionCategory.anxious: 0.02,
-            EmotionCategory.confusedAgitated: 0.01,
-          },
-          clinicalObservation:
-              'Live Camera Capture AI Result: Face analyzed as SAD with ${(sadScore * 100).toInt()}% confidence.',
-          facialActionUnits: const [
-            'AU1: Inner Brow Raiser (0.80)',
-            'AU15: Lip Corner Depressor (0.90)',
-          ],
-          analyzedAt: DateTime.now(),
-        );
-      } else {
-        final happyScore = (0.78 + variance).clamp(0.70, 0.96);
-        final sadScore = (1.0 - happyScore - 0.04).clamp(0.01, 0.18);
-        final neutralScore = (1.0 - happyScore - sadScore).clamp(0.01, 0.12);
-
-        return FacialEmotionResult(
-          primaryEmotion: EmotionCategory.happy,
-          confidence: happyScore,
-          valenceScore: happyScore,
-          arousalScore: 0.42,
-          emotionProbabilities: {
-            EmotionCategory.happy: double.parse(happyScore.toStringAsFixed(2)),
-            EmotionCategory.calmNeutral: double.parse(neutralScore.toStringAsFixed(2)),
-            EmotionCategory.sadDepressed: double.parse(sadScore.toStringAsFixed(2)),
-            EmotionCategory.anxious: 0.01,
-            EmotionCategory.confusedAgitated: 0.00,
-          },
-          clinicalObservation:
-              'Live Camera Capture AI Result: Face analyzed as HAPPY with ${(happyScore * 100).toInt()}% confidence.',
-          facialActionUnits: const [
-            'AU6: Cheek Raiser (0.86)',
-            'AU12: Lip Corner Puller (0.90)',
-          ],
-          analyzedAt: DateTime.now(),
-        );
-      }
+      // Transparent Fallback when AI Microservice is Offline
+      return FacialEmotionResult(
+        primaryEmotion: preferredEmotionHint == 'Sad' ? EmotionCategory.sadDepressed : EmotionCategory.happy,
+        confidence: 0.70,
+        valenceScore: preferredEmotionHint == 'Sad' ? -0.70 : 0.70,
+        arousalScore: 0.35,
+        emotionProbabilities: const {
+          EmotionCategory.happy: 0.50,
+          EmotionCategory.calmNeutral: 0.30,
+          EmotionCategory.sadDepressed: 0.15,
+          EmotionCategory.confusedAgitated: 0.03,
+          EmotionCategory.anxious: 0.02,
+        },
+        clinicalObservation:
+            'Demo Fallback (AI Microservice Offline): Connect FastAPI on port 8000 for live PyTorch CNN inference.',
+        facialActionUnits: const ['AU6: Cheek Raiser (Simulated)'],
+        analyzedAt: DateTime.now(),
+      );
     }
 
     // 2. Intelligent asset/hint heuristic simulation

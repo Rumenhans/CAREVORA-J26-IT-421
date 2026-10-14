@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'common/app_text_field.dart';
 import 'common/glass_container.dart';
@@ -50,8 +51,8 @@ class _RegisterDialogState extends State<RegisterDialog> {
   Future<void> _fetchElderHomes() async {
     try {
       final res = await http
-          .get(Uri.parse('http://localhost:8081/api/elder-homes'))
-          .timeout(const Duration(seconds: 3));
+          .get(Uri.parse('${AppConfig.backendBaseUrl}/api/elder-homes'))
+          .timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
         final list = decoded['data'] as List?;
@@ -101,7 +102,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
       try {
         final regHomeRes = await http
             .post(
-              Uri.parse('http://localhost:8081/api/elder-homes/register'),
+              Uri.parse('${AppConfig.backendBaseUrl}/api/elder-homes/register'),
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({
                 'name': _newFacilityNameController.text.trim(),
@@ -146,7 +147,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
 
       await http
           .post(
-            Uri.parse('http://localhost:8081/api/auth/register'),
+            Uri.parse('${AppConfig.backendBaseUrl}/api/auth/register'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(reqBody),
           )

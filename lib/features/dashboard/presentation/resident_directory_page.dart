@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../../core/config/app_config.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/application/auth_controller.dart';
 
@@ -220,9 +221,9 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
     try {
       // 1. Fetch Residents scoped by backend role
       final res = await http.get(
-        Uri.parse('http://localhost:8081/api/residents'),
+        Uri.parse('${AppConfig.backendBaseUrl}/api/residents'),
         headers: {'Authorization': 'Bearer $token'},
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 4));
 
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
@@ -250,9 +251,9 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       // 2. If Doctor, fetch all users
       if (authState.isDoctor) {
         final usersRes = await http.get(
-          Uri.parse('http://localhost:8081/api/doctor/all-users'),
+          Uri.parse('${AppConfig.backendBaseUrl}/api/doctor/all-users'),
           headers: {'Authorization': 'Bearer $token'},
-        ).timeout(const Duration(seconds: 3));
+        ).timeout(const Duration(seconds: 4));
 
         if (usersRes.statusCode == 200) {
           final decoded = jsonDecode(usersRes.body);
