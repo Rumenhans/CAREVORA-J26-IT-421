@@ -1,3 +1,5 @@
+import os
+import json
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -44,6 +46,18 @@ def root():
             "trajectory": "RALPA Latent Progression Engine"
         }
     }
+
+@app.get("/api/ml/model-metrics")
+def get_model_metrics():
+    """
+    Returns empirical train & test accuracy, precision, recall, and F1-score
+    evaluated on the FER-2013 benchmark dataset.
+    """
+    metrics_path = os.path.join(os.path.dirname(__file__), "model_metrics.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r") as f:
+            return {"success": True, "data": json.load(f)}
+    return {"success": False, "message": "Metrics not found"}
 
 @app.post("/api/ml/analyze-photo")
 async def analyze_photo(file: UploadFile = File(...)):
