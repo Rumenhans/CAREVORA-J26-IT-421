@@ -1,0 +1,145 @@
+{
+  "model_architecture": "LightweightEmotionCNN (3-stage Conv2D + BatchNorm + Dropout + Linear)",
+  "dataset": "FER-2013 (Facial Expression Recognition 2013)",
+  "resolution": "48x48 RGB",
+  "num_classes": 7,
+  "classes": [
+    "angry",
+    "disgust",
+    "fear",
+    "happy",
+    "neutral",
+    "sad",
+    "surprise"
+  ],
+  "metrics": {
+    "test_accuracy_percent": 50.05,
+    "train_accuracy_percent": 50.91,
+    "total_test_samples": 7177,
+    "total_train_samples_evaluated": 3500,
+    "class_breakdown": {
+      "angry": {
+        "samples": 957,
+        "correct": 290,
+        "accuracy_percent": 30.3,
+        "precision": 0.374,
+        "recall": 0.303,
+        "f1_score": 0.335
+      },
+      "disgust": {
+        "samples": 111,
+        "correct": 0,
+        "accuracy_percent": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_score": 0.0
+      },
+      "fear": {
+        "samples": 1024,
+        "correct": 91,
+        "accuracy_percent": 8.89,
+        "precision": 0.326,
+        "recall": 0.089,
+        "f1_score": 0.14
+      },
+      "happy": {
+        "samples": 1774,
+        "correct": 1444,
+        "accuracy_percent": 81.4,
+        "precision": 0.634,
+        "recall": 0.814,
+        "f1_score": 0.713
+      },
+      "neutral": {
+        "samples": 1233,
+        "correct": 698,
+        "accuracy_percent": 56.61,
+        "precision": 0.418,
+        "recall": 0.566,
+        "f1_score": 0.481
+      },
+      "sad": {
+        "samples": 1247,
+        "correct": 541,
+        "accuracy_percent": 43.38,
+        "precision": 0.391,
+        "recall": 0.434,
+        "f1_score": 0.411
+      },
+      "surprise": {
+        "samples": 831,
+        "correct": 528,
+        "accuracy_percent": 63.54,
+        "precision": 0.666,
+        "recall": 0.635,
+        "f1_score": 0.65
+      }
+    },
+    "confusion_matrix": [
+      [
+        290,
+        0,
+        45,
+        168,
+        185,
+        230,
+        39
+      ],
+      [
+        53,
+        0,
+        4,
+        20,
+        11,
+        21,
+        2
+      ],
+      [
+        145,
+        0,
+        91,
+        166,
+        226,
+        248,
+        148
+      ],
+      [
+        71,
+        0,
+        19,
+        1444,
+        107,
+        98,
+        35
+      ],
+      [
+        75,
+        0,
+        17,
+        216,
+        698,
+        206,
+        21
+      ],
+      [
+        122,
+        0,
+        46,
+        186,
+        332,
+        541,
+        20
+      ],
+      [
+        20,
+        0,
+        57,
+        78,
+        110,
+        38,
+        528
+      ]
+    ]
+  },
+  "evaluation_timestamp": "2026-10-14 09:51:15"
+}

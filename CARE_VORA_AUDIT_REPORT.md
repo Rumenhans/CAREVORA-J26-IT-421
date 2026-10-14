@@ -162,10 +162,28 @@ Evaluated directly against `POST /api/ml/predict-ralpa` in [carevora-ai-service/
 
 ### Facial Emotion Recognition
 - **Endpoint:** `POST /api/ml/analyze-photo`
+- **Metrics Endpoint:** `GET /api/ml/model-metrics`
 - **Methodology:** Convolutional Neural Network forward pass on normalized 48x48 tensor.
 - **Model Architecture:** `LightweightEmotionCNN` (3 Conv2D blocks with BatchNorm, MaxPool, ReLU, Dropout, and Linear classifier).
-- **Model Weights:** Loaded from [emotion_model.pth](file:///c:/Users/HP/Desktop/research/CAREVORA-J26-IT-421/carevora-ai-service/emotion_model.pth).
-- **Execution Response:**
+- **Model Weights & Checkpoint:** [emotion_model.pth](file:///c:/Users/HP/Desktop/research/CAREVORA-J26-IT-421/carevora-ai-service/emotion_model.pth) & [emotion_model_checkpoint.pth](file:///c:/Users/HP/Desktop/research/CAREVORA-J26-IT-421/carevora-ai-service/emotion_model_checkpoint.pth)
+- **Saved Metrics JSON:** [model_metrics.json](file:///c:/Users/HP/Desktop/research/CAREVORA-J26-IT-421/carevora-ai-service/model_metrics.json)
+
+#### Empirical Benchmark Accuracy (FER-2013 Dataset)
+Evaluated across all **7,177 test samples** and **3,500 training samples** from the FER-2013 benchmark dataset:
+- **Overall Test Accuracy:** **50.05%** (3,592 / 7,177 correct)
+- **Overall Train Accuracy:** **50.91%** (1,782 / 3,500 correct)
+
+| Emotion Class | Test Samples | Correct Predictions | Class Accuracy (%) | Precision | Recall | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Happy** | 1,774 | 1,444 | **81.40%** | 0.634 | 0.814 | **0.713** |
+| **Surprise** | 831 | 528 | **63.54%** | 0.666 | 0.635 | **0.650** |
+| **Neutral** | 1,233 | 698 | **56.61%** | 0.418 | 0.566 | **0.481** |
+| **Sad** | 1,247 | 541 | **43.38%** | 0.391 | 0.434 | **0.411** |
+| **Angry** | 957 | 290 | **30.30%** | 0.374 | 0.303 | **0.335** |
+| **Fear** | 1,024 | 91 | **8.89%** | 0.326 | 0.089 | **0.140** |
+| **Disgust** | 111 | 0 | **0.00%** | 0.000 | 0.000 | **0.000** |
+
+- **Execution Sample Response:**
   ```json
   {
     "success": true,
