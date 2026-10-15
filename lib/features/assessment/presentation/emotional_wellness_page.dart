@@ -28,6 +28,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   // Default to question 5 (index 4) to strictly mirror Proposal Figure 11-4 on load!
   int _currentIndex = 4;
   final List<AssessmentQuestion> _questions = MockCarevoraData.emotionalQuestions;
+  final Map<int, bool?> _answers = {5: true};
 
   // Real-time analysis metrics
   String _selectedEmotion = 'Happy';
@@ -779,20 +780,70 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     }
   }
 
+  void _selectYesNoAnswer(int questionId, bool answer) {
+    setState(() {
+      _answers[questionId] = answer;
+      _updateQuestionContext();
+    });
+  }
+
   void _updateQuestionContext() {
     final q = _questions[_currentIndex];
-    // Dynamic simulated sample response per question
-    if (q.id == 5) {
-      _spokenText =
-          'Sometimes in the evenings, even when people are around, I feel alone in my thoughts.';
-    } else if (q.id == 6) {
-      _spokenText =
-          'I do feel left out occasionally when groups are laughing together in the lounge.';
-    } else if (q.id == 7) {
-      _spokenText =
-          'I attend morning tea, but I prefer sitting at the side quiet corner.';
-    } else {
-      _spokenText = 'Resident verbal response captured and transcribed via RALPA audio feature pipeline.';
+    final ans = _answers[q.id];
+
+    switch (q.id) {
+      case 1:
+        _spokenText = ans == false
+            ? "No, I felt a little low and tired when waking up today."
+            : "Yes, I had a good night's rest and feel quite peaceful today.";
+        break;
+      case 2:
+        _spokenText = ans == false
+            ? "No, sometimes it is hard to look forward to tomorrow."
+            : "Yes, I feel hopeful and look forward to our weekend visits.";
+        break;
+      case 3:
+        _spokenText = ans == false
+            ? "No, I haven't found anyone here I feel really close with."
+            : "Yes, I have two dear companions here at our tea table.";
+        break;
+      case 4:
+        _spokenText = ans == true
+            ? "Yes, sometimes in the evenings even when people are around, I feel alone in my thoughts."
+            : "No, I feel warmly included when others gather in the lounge.";
+        break;
+      case 5:
+        _spokenText = ans == true
+            ? "Yes, I find myself staying alone in my room resting for most of the day."
+            : "No, I like coming out to the garden or hallway in the afternoon.";
+        break;
+      case 6:
+        _spokenText = ans == false
+            ? "No, my relatives are far away and rarely call or visit."
+            : "Yes, my son and grandchildren call me every couple of days.";
+        break;
+      case 7:
+        _spokenText = ans == false
+            ? "No, I usually prefer sitting quietly on the side during group activities."
+            : "Yes, I enjoy taking part in the morning tea and light movements.";
+        break;
+      case 8:
+        _spokenText = ans == true
+            ? "Yes, having an attendant or companion walk with me gives me confidence."
+            : "No, I prefer my own quiet routine right now.";
+        break;
+      case 9:
+        _spokenText = ans == false
+            ? "No, I hesitate because the nurses always seem so busy."
+            : "Yes, the care staff always listen with patience when I speak.";
+        break;
+      case 10:
+        _spokenText = ans == true
+            ? "Yes, listening to soothing Buddhist pirith chants brings me deep calm."
+            : "No, I haven't tried listening to calming music lately.";
+        break;
+      default:
+        _spokenText = 'Resident verbal response captured and transcribed via RALPA audio feature pipeline.';
     }
   }
 
@@ -1480,6 +1531,24 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                           ],
                         ),
                       ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          _buildYesNoChoiceButton(
+                            label: 'Yes / ඔව්',
+                            isSelected: _answers[currentQ.id] == true,
+                            isYes: true,
+                            onTap: () => _selectYesNoAnswer(currentQ.id, true),
+                          ),
+                          const SizedBox(width: 12),
+                          _buildYesNoChoiceButton(
+                            label: 'No / නැත',
+                            isSelected: _answers[currentQ.id] == false,
+                            isYes: false,
+                            onTap: () => _selectYesNoAnswer(currentQ.id, false),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -2034,6 +2103,66 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildYesNoChoiceButton({
+    required String label,
+    required bool isSelected,
+    required bool isYes,
+    required VoidCallback onTap,
+  }) {
+    final activeColor = isYes ? AppColors.riskLow : const Color(0xFFF97316);
+    final activeBg = isYes ? AppColors.riskLowBg : const Color(0xFFFFF7ED);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? activeBg : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? activeColor : AppColors.border,
+              width: isSelected ? 2.0 : 1.2,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: activeColor.withValues(alpha: 0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : [],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isSelected
+                    ? (isYes ? LucideIcons.circleCheck : LucideIcons.circleX)
+                    : LucideIcons.circle,
+                size: 18,
+                color: isSelected ? activeColor : AppColors.muted,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  color: isSelected ? activeColor : AppColors.navy,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
