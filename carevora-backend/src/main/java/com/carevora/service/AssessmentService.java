@@ -138,24 +138,37 @@ public class AssessmentService {
                 .build());
 
         if (Boolean.TRUE.equals(request.getIncludeFacialCheck())) {
+            double actualFacialScore = request.getFacialScore() != null 
+                    ? Math.max(0.0, Math.min(100.0, request.getFacialScore())) 
+                    : 80.0;
+            String emotionLabel = request.getDominantEmotion() != null && !request.getDominantEmotion().isBlank()
+                    ? request.getDominantEmotion().toUpperCase()
+                    : "OBSERVED";
+            String facialDesc = request.getFacialConfidence() != null
+                    ? String.format("PyTorch FER inference detected %s with %.1f%% confidence", emotionLabel, request.getFacialConfidence() * 100.0)
+                    : String.format("Facial affect inference observed %s expression", emotionLabel);
+
             factors.add(ContributingFactor.builder()
                     .assessment(savedAssessment)
                     .resident(resident)
                     .title("Facial Affect Check")
-                    .score(86.0)
+                    .score(Math.round(actualFacialScore * 10.0) / 10.0)
                     .category("Facial")
-                    .description("Gentle facial cues indicate calm resting composure")
+                    .description(facialDesc)
                     .build());
         }
 
         if (Boolean.TRUE.equals(request.getIncludeVoiceCheck())) {
+            double actualVocalScore = request.getVocalScore() != null 
+                    ? Math.max(0.0, Math.min(100.0, request.getVocalScore())) 
+                    : 80.0;
             factors.add(ContributingFactor.builder()
                     .assessment(savedAssessment)
                     .resident(resident)
                     .title("Acoustic Tone Check")
-                    .score(82.0)
+                    .score(Math.round(actualVocalScore * 10.0) / 10.0)
                     .category("Voice")
-                    .description("Vocal modulation reflects clear and steady warmth")
+                    .description("Acoustic prosody analysis from active voice recording session")
                     .build());
         }
         contributingFactorRepository.saveAll(factors);

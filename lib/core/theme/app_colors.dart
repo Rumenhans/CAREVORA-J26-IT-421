@@ -24,6 +24,7 @@ class AppColors {
 
   // Accents
   static const Color accentPink = Color(0xFFE88BC4);
+  static const Color accentTeal = Color(0xFF0D9488);
   static const Color leafGreen = Color(0xFF6CC24A);
 
   // Clinical Risk Thresholds
