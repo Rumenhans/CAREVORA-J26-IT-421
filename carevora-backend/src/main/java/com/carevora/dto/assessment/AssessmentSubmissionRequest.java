@@ -26,4 +26,9 @@ public class AssessmentSubmissionRequest {
 
     @Builder.Default
     private Boolean includeVoiceCheck = false;
+
+    private Double facialScore;
+    private Double vocalScore;
+    private String dominantEmotion;
+    private Double facialConfidence;
 }

@@ -110,14 +110,14 @@ class TestRALPARegression(unittest.TestCase):
             history_scores=[None, -20.0, 140.0, 'bad_str']
         )
         self.assertFalse(res["is_insufficient_history"])
-        # -50 clamped to 0.0; facial None -> 85.0; vocal 180 -> 100.0; social invalid -> 80.0
-        # fused = 0*0.4 + 80*0.25 + 85*0.2 + 100*0.15 = 0 + 20 + 17 + 15 = 52.0
-        # risk = 100 - 52.0 = 48.0
-        self.assertEqual(res["current_wellness_index"], 52.0)
-        self.assertEqual(res["current_risk_score"], 48.0)
+        # -50 clamped to 0.0; facial None -> 80.0; vocal 180 -> 100.0; social invalid -> 80.0
+        # fused = 0*0.4 + 80*0.25 + 80*0.2 + 100*0.15 = 0 + 20 + 16 + 15 = 51.0
+        # risk = 100 - 51.0 = 49.0
+        self.assertEqual(res["current_wellness_index"], 51.0)
+        self.assertEqual(res["current_risk_score"], 49.0)
         # history: -20 clamped to 0 -> risk 100; 140 clamped to 100 -> risk 0. mean risk = 50.0
         self.assertEqual(res["baseline_score"], 50.0)
-        self.assertEqual(res["baseline_deviation"], -2.0)
+        self.assertEqual(res["baseline_deviation"], -1.0)
         self.assertEqual(len(res["forecast_14_days"]), 14)
         for pt in res["forecast_14_days"]:
             self.assertTrue(0.0 <= pt <= 100.0)

@@ -118,6 +118,7 @@ class FacialSessionAggregate {
   final bool hasSufficientInferences;
 
   int get validCount => successfulInferences;
+  String get dominantEmotion => dominantSessionEmotion?.name.toUpperCase() ?? 'NONE';
 
   const FacialSessionAggregate({
     required this.totalCapturesAttempted,

@@ -228,16 +228,32 @@ async def analyze_audio(file: UploadFile = File(...)):
 @app.post("/api/ml/predict-ralpa")
 def predict_ralpa_progression(req: MultimodalAssessmentRequest):
     # 1. Vision Emotion Inference
-    face_res = analyze_facial_affect(simulated_cues=req.facial_cues)
+    face_score = None
+    if req.facial_cues and isinstance(req.facial_cues, dict):
+        face_score = req.facial_cues.get('affect_score') or req.facial_cues.get('facial_score')
+    if face_score is None and req.raw_features and isinstance(req.raw_features, dict):
+        face_score = req.raw_features.get('facial_score')
     
+    face_res = analyze_facial_affect(simulated_cues=req.facial_cues) if req.facial_cues else {}
+    if face_score is None:
+        face_score = face_res.get('affect_score', 80.0)
+
     # 2. Audio Acoustic Inference
-    audio_res = analyze_vocal_affect(simulated_cues=req.vocal_cues)
+    vocal_score = None
+    if req.vocal_cues and isinstance(req.vocal_cues, dict):
+        vocal_score = req.vocal_cues.get('vocal_wellness_score') or req.vocal_cues.get('vocal_score')
+    if vocal_score is None and req.raw_features and isinstance(req.raw_features, dict):
+        vocal_score = req.raw_features.get('vocal_score')
+        
+    audio_res = analyze_vocal_affect(simulated_cues=req.vocal_cues) if req.vocal_cues else {}
+    if vocal_score is None:
+        vocal_score = audio_res.get('vocal_wellness_score', 80.0)
 
     # 3. Multimodal Latent Fusion & RALPA Trajectory Progression
     scores = {
         'questionnaire': req.questionnaire_score,
-        'facial': face_res.get('affect_score', 80.0),
-        'vocal': audio_res['vocal_wellness_score'],
+        'facial': float(face_score),
+        'vocal': float(vocal_score),
         'social': req.social_score or 80.0
     }
 

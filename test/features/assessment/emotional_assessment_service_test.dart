@@ -154,5 +154,49 @@ void main() {
       expect(payload, equals([0, 1, 0, 0, 1, 0, 0, 1, 0, 0]));
       expect(payload.every((v) => v == 0 || v == 1), isTrue);
     });
+
+    test('Correctly identifies exact missing question indices when partially answered', () {
+      // User answered 1, 4, 6, 7, 8, 9 (6 answered, missing 2, 3, 5, 10)
+      final partialAnswers = <int, bool?>{
+        1: true,
+        2: null,
+        3: null,
+        4: false,
+        5: null,
+        6: true,
+        7: true,
+        8: true,
+        9: true,
+        10: null,
+      };
+
+      expect(EmotionalAssessmentService.areAllQuestionsAnswered(partialAnswers), isFalse);
+      final missing = EmotionalAssessmentService.getUnansweredQuestions(partialAnswers);
+      expect(missing, equals([2, 3, 5, 10]));
+    });
+
+    test('Submission result parses complete multimodal payload including facial and voice', () {
+      final json = {
+        'id': 42,
+        'residentId': 1,
+        'overallScore': 80.0,
+        'emotionalScore': 80.0,
+        'socialScore': 75.0,
+        'status': 'STABLE',
+        'riskLevel': 'LOW',
+        'trajectory': 'STABLE',
+        'encouragingMessage': 'Mood and affect are stable.',
+        'facialCheckIncluded': true,
+        'voiceCheckIncluded': true,
+      };
+
+      final result = EmotionalAssessmentSubmissionResult.fromJson(json);
+      expect(result.id, 42);
+      expect(result.residentId, 1);
+      expect(result.overallScore, 80.0);
+      expect(result.facialCheckIncluded, isTrue);
+      expect(result.voiceCheckIncluded, isTrue);
+    });
   });
 }
+

@@ -167,6 +167,10 @@ class EmotionalAssessmentService {
     required List<int> answers,
     bool includeFacialCheck = false,
     bool includeVoiceCheck = false,
+    double? facialScore,
+    double? vocalScore,
+    String? dominantEmotion,
+    double? facialConfidence,
     String? token,
   }) async {
     final uri = Uri.parse('$baseUrl/api/assessments/submit');
@@ -184,6 +188,10 @@ class EmotionalAssessmentService {
       'answers': answers,
       'includeFacialCheck': includeFacialCheck,
       'includeVoiceCheck': includeVoiceCheck,
+      'facialScore': ?facialScore,
+      'vocalScore': ?vocalScore,
+      'dominantEmotion': ?dominantEmotion,
+      'facialConfidence': ?facialConfidence,
     };
 
     final http.Response res;

@@ -99,7 +99,23 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
             "emotion_breakdown_percent": {}
         }
 
-    if image_bytes is None or len(image_bytes) == 0:
+    if (image_bytes is None or len(image_bytes) == 0):
+        if simulated_cues:
+            affect_score = simulated_cues.get("affect_score") or simulated_cues.get("facial_score")
+            if affect_score is not None:
+                dominant = simulated_cues.get("dominant_emotion", "neutral")
+                mood = MOOD_SUMMARY.get(str(dominant).lower(), str(dominant).upper())
+                return {
+                    "status": "success",
+                    "model_available": True,
+                    "modality": "Facial Affect Summary",
+                    "affect_score": float(affect_score),
+                    "dominant_emotion": dominant,
+                    "mood_summary": mood,
+                    "confidence": float(simulated_cues.get("confidence", 0.8)),
+                    "emotion_breakdown_percent": simulated_cues.get("emotion_breakdown_percent", {}),
+                    "contributing_insight": f"Aggregated session facial affect analysis indicates {mood}."
+                }
         return {
             "status": "error",
             "model_available": True,
