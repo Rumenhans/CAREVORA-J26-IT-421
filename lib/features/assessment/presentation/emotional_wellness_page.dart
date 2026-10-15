@@ -813,49 +813,6 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     }
   }
 
-  void _selectSampleEmotion(String emotion, String assetPath, double conf, int lScore, int iScore) {
-    setState(() {
-      _selectedEmotion = emotion;
-      _currentFaceAsset = assetPath;
-      _capturedImageBytes = null;
-      _facialConfidence = conf;
-      _lonelinessScore = lScore;
-      _isolationScore = iScore;
-
-      if (emotion == 'Happy') {
-        _voiceEmotion = 'Neutral / Calm';
-        _voiceConfidence = 0.72;
-        _commLevel = 'Moderate';
-        _engagementLevel = 'High';
-        _responseTime = 'Normal';
-      } else if (emotion == 'Sad') {
-        _voiceEmotion = 'Melancholic / Low Pitch';
-        _voiceConfidence = 0.82;
-        _commLevel = 'Low';
-        _engagementLevel = 'Low';
-        _responseTime = 'Delayed';
-        _lonelinessScore = 78;
-        _isolationScore = 72;
-      } else if (emotion == 'Angry') {
-        _voiceEmotion = 'Agitated / Elevated Pitch';
-        _voiceConfidence = 0.76;
-        _commLevel = 'Defensive';
-        _engagementLevel = 'Medium';
-        _responseTime = 'Fast';
-        _lonelinessScore = 62;
-        _isolationScore = 65;
-      } else {
-        _voiceEmotion = 'Anxious / Tremor';
-        _voiceConfidence = 0.79;
-        _commLevel = 'Hesitant';
-        _engagementLevel = 'Low';
-        _responseTime = 'Variable';
-        _lonelinessScore = 74;
-        _isolationScore = 69;
-      }
-    });
-  }
-
   void _updateEmotionFromResult(FacialEmotionResult result) {
     if (result.status != FacialInferenceStatus.success) {
       if (mounted) {
@@ -2190,62 +2147,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           ],
           const SizedBox(height: 12),
 
-          // Detected Emotion Label and Selection Pills
+          // Real AI Detected Emotion Readout
           const Text(
-            'Detected Emotion:',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.muted),
+            'AI Detected Facial Emotion:',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.navy),
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              _buildEmotionTag(
-                'Happy',
-                'assets/images/landing/senior_happy_face.jpg',
-                '😊 Happy',
-                0.85,
-                67,
-                58,
-                isActive: _selectedEmotion == 'Happy',
-                activeColor: AppColors.riskLow,
-                activeBg: AppColors.riskLowBg,
-              ),
-              _buildEmotionTag(
-                'Sad',
-                'assets/images/landing/senior_sad_face.jpg',
-                '😢 Sad',
-                0.82,
-                78,
-                72,
-                isActive: _selectedEmotion == 'Sad',
-                activeColor: AppColors.riskHigh,
-                activeBg: AppColors.riskHighBg,
-              ),
-              _buildEmotionTag(
-                'Angry',
-                'assets/images/landing/senior_sad_face.jpg',
-                '😠 Angry',
-                0.74,
-                64,
-                65,
-                isActive: _selectedEmotion == 'Angry',
-                activeColor: AppColors.riskModerate,
-                activeBg: AppColors.riskModerateBg,
-              ),
-              _buildEmotionTag(
-                'Fear',
-                'assets/images/landing/senior_sad_face.jpg',
-                '😨 Fear',
-                0.78,
-                74,
-                69,
-                isActive: _selectedEmotion == 'Fear',
-                activeColor: AppColors.primary,
-                activeBg: AppColors.primarySoft,
-              ),
-            ],
-          ),
+          _buildAiDetectedEmotionDisplay(),
         ],
       ),
     );
@@ -2357,51 +2265,147 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     );
   }
 
-  Widget _buildEmotionTag(
-    String key,
-    String asset,
-    String label,
-    double conf,
-    int lScore,
-    int iScore, {
-    required bool isActive,
-    required Color activeColor,
-    required Color activeBg,
-  }) {
-    return InkWell(
-      onTap: () => _selectSampleEmotion(key, asset, conf, lScore, iScore),
-      borderRadius: BorderRadius.circular(20),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: isActive ? activeBg : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isActive ? activeColor : AppColors.border,
-            width: isActive ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                color: isActive ? activeColor : AppColors.navy,
+  Widget _buildAiDetectedEmotionDisplay() {
+    final status = _facialCaptureService.status;
+    final bool isRecording = _isRecording;
+    final bool hasPredictions = _facialCaptureService.aggregate.validCount > 0 || _capturedImageBytes != null;
+
+    Color bg;
+    Color border;
+    Color text;
+    String emoji;
+    String title;
+    String confidenceStr = '${(_facialConfidence * 100).toInt()}% Confidence';
+    String subtitle;
+
+    if (!isRecording && !hasPredictions) {
+      bg = Colors.white;
+      border = AppColors.border;
+      text = AppColors.muted;
+      emoji = '🎙️';
+      title = 'Standby for Voice Session';
+      confidenceStr = 'Awaiting Recording';
+      subtitle = 'Facial affect capture starts automatically when voice recording begins.';
+    } else if (status == FacialCaptureStatus.noFace) {
+      bg = AppColors.riskModerateBg;
+      border = AppColors.riskModerate.withValues(alpha: 0.5);
+      text = AppColors.riskModerate;
+      emoji = '🔍';
+      title = 'No Face Recognized';
+      confidenceStr = 'Reposition Senior';
+      subtitle = 'Ensure senior is positioned facing camera in adequate ambient lighting.';
+    } else if (status == FacialCaptureStatus.modelUnavailable) {
+      bg = AppColors.surfaceSecondary;
+      border = AppColors.border;
+      text = AppColors.navy;
+      emoji = '⚠️';
+      title = 'Inference Offline';
+      confidenceStr = 'Model Unavailable';
+      subtitle = 'Camera capture active; facial emotion scoring paused until AI microservice is online.';
+    } else {
+      switch (_selectedEmotion.toLowerCase()) {
+        case 'happy':
+        case 'cheerful':
+          bg = AppColors.riskLowBg;
+          border = AppColors.riskLow.withValues(alpha: 0.4);
+          text = AppColors.riskLow;
+          emoji = '😊';
+          title = 'Happy / Uplifted';
+          subtitle = 'Bilateral zygomaticus engagement detected. Consistent with positive emotional wellness.';
+          break;
+        case 'sad':
+        case 'depressed':
+          bg = AppColors.riskHighBg;
+          border = AppColors.riskHigh.withValues(alpha: 0.4);
+          text = AppColors.riskHigh;
+          emoji = '😔';
+          title = 'Sad / Affect Flattening';
+          subtitle = 'Depressed lip corners and brow tension observed. Informs RALPA affective drift analysis.';
+          break;
+        case 'angry':
+        case 'agitated':
+          bg = AppColors.riskModerateBg;
+          border = AppColors.riskModerate.withValues(alpha: 0.4);
+          text = AppColors.riskModerate;
+          emoji = '😠';
+          title = 'Agitated / Elevated Stress';
+          subtitle = 'Corrugator contraction and elevated vocal cadence detected.';
+          break;
+        case 'fear':
+        case 'anxious':
+          bg = AppColors.lavenderBg;
+          border = AppColors.lilac;
+          text = AppColors.primary;
+          emoji = '😨';
+          title = 'Anxious / Apprehensive';
+          subtitle = 'Upper eyelid elevation and vocal tremor indicators observed.';
+          break;
+        default:
+          bg = AppColors.surfaceSecondary;
+          border = AppColors.border;
+          text = AppColors.navy;
+          emoji = '😐';
+          title = 'Calm / Neutral Baseline';
+          subtitle = 'Resting facial expression with symmetrical prosody and stable valence.';
+          break;
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(emoji, style: const TextStyle(fontSize: 18)),
+                  const SizedBox(width: 8),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: text,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            if (isActive) ...[
-              const SizedBox(width: 4),
-              Text(
-                '${(conf * 100).toInt()}%',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: activeColor),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border),
+                ),
+                child: Text(
+                  confidenceStr,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: text,
+                  ),
+                ),
               ),
             ],
-          ],
-        ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.muted,
+              height: 1.3,
+            ),
+          ),
+        ],
       ),
     );
   }
