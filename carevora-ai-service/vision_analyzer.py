@@ -52,20 +52,28 @@ class LightweightEmotionCNN(nn.Module):
         return x
 
 _model_instance = None
+_model_loaded = False
 
 def get_trained_model():
-    global _model_instance
+    global _model_instance, _model_loaded
     if _model_instance is None:
         import os
-        _model_instance = LightweightEmotionCNN(num_classes=7)
         model_path = os.path.join(os.path.dirname(__file__), "emotion_model.pth")
+        if not os.path.exists(model_path):
+            print(f"Model file not found at {model_path}. Facial emotion model unavailable.")
+            _model_loaded = False
+            return None
         try:
-            _model_instance.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-            _model_instance.eval()
+            instance = LightweightEmotionCNN(num_classes=7)
+            instance.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+            instance.eval()
+            _model_instance = instance
+            _model_loaded = True
             print("Successfully loaded trained PyTorch emotion model weights!")
         except Exception as e:
-            print(f"Model weights file not found yet ({e}), running in evaluation fallback mode.")
-            _model_instance.eval()
+            print(f"Error loading emotion model weights ({e}). Facial inference unavailable.")
+            _model_instance = None
+            _model_loaded = False
     return _model_instance
 
 transform = transforms.Compose([
@@ -77,52 +85,81 @@ transform = transforms.Compose([
 def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None) -> dict:
     """
     Analyzes live captured photo image bytes using trained PyTorch FER CNN model.
+    Returns explicit status: 'success', 'no_face', 'unavailable', or 'error'.
+    Never substitutes mock predictions when model or image is unavailable.
     """
-    if image_bytes is not None:
-        try:
-            img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            img_tensor = transform(img).unsqueeze(0)
+    model = get_trained_model()
+    if model is None:
+        return {
+            "status": "unavailable",
+            "model_available": False,
+            "error": "PyTorch facial emotion recognition model is unavailable or weights not loaded",
+            "dominant_emotion": None,
+            "confidence": None,
+            "emotion_breakdown_percent": {}
+        }
+
+    if image_bytes is None or len(image_bytes) == 0:
+        return {
+            "status": "error",
+            "model_available": True,
+            "error": "No image data provided for analysis",
+            "dominant_emotion": None,
+            "confidence": None,
+            "emotion_breakdown_percent": {}
+        }
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    except Exception as e:
+        return {
+            "status": "error",
+            "model_available": True,
+            "error": f"Failed to decode image bytes: {e}",
+            "dominant_emotion": None,
+            "confidence": None,
+            "emotion_breakdown_percent": {}
+        }
+
+    try:
+        img_tensor = transform(img).unsqueeze(0)
+        with torch.no_grad():
+            outputs = model(img_tensor)
+            probabilities = torch.softmax(outputs, dim=1)[0].numpy()
             
-            model = get_trained_model()
-            with torch.no_grad():
-                outputs = model(img_tensor)
-                probabilities = torch.softmax(outputs, dim=1)[0].numpy()
-                
-            dominant_idx = np.argmax(probabilities)
-            dominant_emotion = EMOTION_CATEGORIES[dominant_idx]
-            confidence = float(probabilities[dominant_idx])
-            
-            # Map top emotions breakdown
-            emotion_scores = {
-                EMOTION_CATEGORIES[i]: round(float(probabilities[i] * 100), 1)
-                for i in range(len(EMOTION_CATEGORIES))
-            }
-            
-            is_happy = dominant_emotion in ['happy', 'surprise']
-            is_sad = dominant_emotion in ['sad', 'fear', 'angry', 'disgust']
-            
-            mood = MOOD_SUMMARY.get(dominant_emotion, dominant_emotion.upper())
-            
-            return {
-                "modality": "Facial Expression Analysis",
-                "dominant_emotion": dominant_emotion,
-                "mood_summary": mood,
-                "is_happy": is_happy,
-                "is_sad": is_sad,
-                "confidence": round(confidence, 2),
-                "emotion_breakdown_percent": emotion_scores,
-                "contributing_insight": f"Live captured photo analysis indicates person is {mood} with {round(confidence * 100, 1)}% confidence."
-            }
-        except Exception as e:
-            print(f"Error processing image bytes: {e}")
-            
-    # Fallback response
-    return {
-        "modality": "Facial Expression Analysis",
-        "dominant_emotion": "happy",
-        "mood_summary": "HAPPY",
-        "is_happy": True,
-        "is_sad": False,
-        "confidence": 0.92,
-        "contributing_insight": "Sample analysis indicates a positive and relaxed posture."
-    }
+        dominant_idx = int(np.argmax(probabilities))
+        dominant_emotion = EMOTION_CATEGORIES[dominant_idx]
+        confidence = float(probabilities[dominant_idx])
+        
+        # Map top emotions breakdown
+        emotion_scores = {
+            EMOTION_CATEGORIES[i]: round(float(probabilities[i] * 100), 1)
+            for i in range(len(EMOTION_CATEGORIES))
+        }
+        
+        is_happy = dominant_emotion in ['happy', 'surprise']
+        is_sad = dominant_emotion in ['sad', 'fear', 'angry', 'disgust']
+        
+        mood = MOOD_SUMMARY.get(dominant_emotion, dominant_emotion.upper())
+        
+        return {
+            "status": "success",
+            "model_available": True,
+            "modality": "Facial Expression Analysis",
+            "dominant_emotion": dominant_emotion,
+            "mood_summary": mood,
+            "is_happy": is_happy,
+            "is_sad": is_sad,
+            "confidence": round(confidence, 4),
+            "emotion_breakdown_percent": emotion_scores,
+            "contributing_insight": f"Live PyTorch CNN analysis indicates person is {mood} with {round(confidence * 100, 1)}% confidence."
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "model_available": True,
+            "error": f"Inference execution failed: {e}",
+            "dominant_emotion": None,
+            "confidence": None,
+            "emotion_breakdown_percent": {}
+        }
