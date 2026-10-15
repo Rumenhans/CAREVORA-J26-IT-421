@@ -52,6 +52,10 @@ class LandingNavbar extends StatelessWidget {
               icon: const Icon(LucideIcons.menu, color: AppColors.navy),
               onPressed: () => scaffoldKey.currentState?.openDrawer(),
             ),
+            tablet: (context) => IconButton(
+              icon: const Icon(LucideIcons.menu, color: AppColors.navy),
+              onPressed: () => scaffoldKey.currentState?.openDrawer(),
+            ),
             desktop: (context) => Row(
               children: [
                 _buildNavItem('Home', onScrollHome, activeSection == 'home'),
