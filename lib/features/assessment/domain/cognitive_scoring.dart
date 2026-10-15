@@ -1,11 +1,14 @@
 /// Carevora Cognitive Assessment Scoring & Domain Mapping (Flutter/Dart)
 ///
-/// Maps the 20-question cognitive battery to the 5 ACRF cognitive categories:
-/// - memory: Immediate registration and episodic recall (Q3, Q10, Q19)
-/// - attention: Calculation, backwards sequencing, and vigilance (Q4, Q8, Q14, Q18)
-/// - orientation: Temporal, spatial, and geopolitical awareness (Q1, Q2, Q9, Q16, Q20)
-/// - recall: Delayed verbal and episodic retrieval (Q5, Q15)
-/// - reasoning: Categorization, motor command execution, reading, and language (Q6, Q7, Q11, Q12, Q13, Q17)
+/// Maps the 10-question cognitive battery to the 5 ACRF cognitive categories:
+/// - orientation: Temporal orientation and calendar awareness (Q1, Q2)
+/// - memory: Immediate registration and verbal encoding (Q3, Q4)
+/// - attention: Calculation and magnitude discrimination (Q5, Q6)
+/// - recall: Delayed verbal recall and cued recognition (Q7, Q8)
+/// - reasoning: Visual confrontation naming and conceptual categorization (Q9, Q10)
+///
+/// Designed with short, elderly-friendly prompts answerable in 1-2 words.
+/// Non-diagnostic screening instrument for clinical decision support.
 library;
 
 class CognitiveQuestionItem {
@@ -44,34 +47,24 @@ class CognitiveScoring {
   };
 
   static const Map<int, String> questionDomainMap = {
-    1: 'orientation', // Date, day of week, month, year
-    2: 'orientation', // Current location, building, city
-    3: 'memory', // 3 objects immediate registration (Apple, Table, Penny)
-    4: 'attention', // Spell WORLD backwards
-    5: 'recall', // Delayed recall of 3 objects
-    6: 'reasoning', // Object naming (wristwatch, pencil)
-    7: 'reasoning', // Exact phrase repetition ("No ifs, ands, or buts")
-    8: 'attention', // Serial 7s subtraction from 100
-    9: 'orientation', // Current season
-    10: 'memory', // Past residential address
-    11: 'reasoning', // 3-stage command comprehension & execution
-    12: 'reasoning', // Reading comprehension and executive response
-    13: 'reasoning', // Coherent sentence composition
-    14: 'attention', // Categorical verbal animal fluency in 60s
-    15: 'recall', // Delayed episodic recall of visitors
-    16: 'orientation', // Floor awareness
-    17: 'reasoning', // Abstract similarities / categorization (Orange & Banana)
-    18: 'attention', // Sustained auditory vigilance tapping (letter 'A')
-    19: 'memory', // Short-term episodic breakfast recall
-    20: 'orientation', // Head of state identification (President / Prime Minister)
+    1: 'orientation', // Day of the week
+    2: 'orientation', // Current year
+    3: 'memory', // 3 objects immediate registration (Sun, Book, Tree)
+    4: 'memory', // Immediate repetition confirmation
+    5: 'attention', // Simple mental addition (2 + 3)
+    6: 'attention', // Number comparison (which is bigger: 3 or 8)
+    7: 'recall', // Delayed recall of 3 objects
+    8: 'recall', // Cued recognition of registered object
+    9: 'reasoning', // Visual confrontation naming (pen / watch)
+    10: 'reasoning', // Conceptual categorization (apple & orange)
   };
 
   static const Map<String, List<int>> questionIdsByDomain = {
-    'memory': [3, 10, 19],
-    'attention': [4, 8, 14, 18],
-    'orientation': [1, 2, 9, 16, 20],
-    'recall': [5, 15],
-    'reasoning': [6, 7, 11, 12, 13, 17],
+    'orientation': [1, 2],
+    'memory': [3, 4],
+    'attention': [5, 6],
+    'recall': [7, 8],
+    'reasoning': [9, 10],
   };
 
   static const List<CognitiveQuestionItem> questions = [
@@ -79,182 +72,108 @@ class CognitiveScoring {
       id: 1,
       category: 'Orientation',
       domain: 'orientation',
-      prompt: "What is today's date, including the day of the week, month, and year?",
-      aiTip: 'Listen for complete day, month, date, and year details without prompting.',
-      recommendedAnswerGuide:
-          'Full accuracy required for month and year; +/- 1 day permitted.',
+      prompt: 'What day is it today?',
+      aiTip: 'Temporal orientation. Accept day of the week (e.g. Monday).',
+      recommendedAnswerGuide: 'Correct day of the week.',
     ),
     CognitiveQuestionItem(
       id: 2,
       category: 'Orientation',
       domain: 'orientation',
-      prompt: 'Can you tell me where we are right now, including the building and the city?',
-      aiTip: 'Assess awareness of current facility name and municipal jurisdiction.',
-      recommendedAnswerGuide:
-          'Identification of elderly care facility and current town.',
+      prompt: 'What year is this?',
+      aiTip: 'Calendar awareness. Accept current four-digit year.',
+      recommendedAnswerGuide: 'Current year (e.g., 2026).',
     ),
     CognitiveQuestionItem(
       id: 3,
-      category: 'Memory',
+      category: 'Immediate Memory',
       domain: 'memory',
-      prompt: 'I am going to name three objects: Apple, Table, and Penny. Please repeat them back to me.',
-      aiTip: 'Patient must immediately register all three words clearly.',
+      prompt: 'Repeat these words: Sun, Book, Tree.',
+      aiTip: 'Immediate verbal registration of three common targets.',
       recommendedAnswerGuide:
-          'Instant registration score 1 point per correct item.',
+          'Score 1.0 if all 3 repeated, 0.5 for 1-2 words, 0.0 for none.',
     ),
     CognitiveQuestionItem(
       id: 4,
-      category: 'Attention',
-      domain: 'attention',
-      prompt: "Could you spell the word 'WORLD' backwards for me?",
-      aiTip: 'Expected answer sequence is D - L - R - O - W.',
+      category: 'Immediate Memory',
+      domain: 'memory',
+      prompt: 'Say those three words once more.',
+      aiTip: 'Reinforces memory encoding prior to delayed recall.',
       recommendedAnswerGuide:
-          'Award 1 point for each correctly sequenced letter.',
+          'Score 1.0 if all 3 repeated, 0.5 for 1-2 words, 0.0 for none.',
     ),
     CognitiveQuestionItem(
       id: 5,
-      category: 'Recall',
-      domain: 'recall',
-      prompt: 'What were the three objects I asked you to remember a few moments ago?',
-      aiTip: 'Evaluate delayed recall for: Apple, Table, Penny.',
-      recommendedAnswerGuide: 'No cues permitted for first attempt.',
+      category: 'Attention & Math',
+      domain: 'attention',
+      prompt: 'What is 2 plus 3?',
+      aiTip: 'Simple mental addition. Evaluates focus and basic arithmetic.',
+      recommendedAnswerGuide: '5 (Five).',
     ),
     CognitiveQuestionItem(
       id: 6,
-      category: 'Language & Reasoning',
-      domain: 'reasoning',
-      prompt: 'What do you call this object: a wristwatch? And what is this: a pencil?',
-      aiTip: 'Verify naming clarity for common everyday objects.',
-      recommendedAnswerGuide: 'Precise naming without circumlocution.',
+      category: 'Attention & Number',
+      domain: 'attention',
+      prompt: 'Which is bigger: 3 or 8?',
+      aiTip: 'Magnitude discrimination and focused attention.',
+      recommendedAnswerGuide: '8 (Eight).',
     ),
     CognitiveQuestionItem(
       id: 7,
-      category: 'Language & Reasoning',
-      domain: 'reasoning',
-      prompt: "Please repeat this exact phrase: 'No ifs, ands, or buts.'",
-      aiTip: 'Examine articulation and phonemic integrity.',
-      recommendedAnswerGuide: 'Single repetition strictly required.',
+      category: 'Delayed Recall',
+      domain: 'recall',
+      prompt: 'What were the three words from earlier?',
+      aiTip: 'Spontaneous delayed recall for: Sun, Book, Tree.',
+      recommendedAnswerGuide:
+          'Score 1.0 if all 3 recalled, 0.5 for 1-2 words, 0.0 for none.',
     ),
     CognitiveQuestionItem(
       id: 8,
-      category: 'Attention',
-      domain: 'attention',
-      prompt: 'Count backwards from 100 by subtracting 7 each time, starting with 93.',
-      aiTip: 'Check up to 5 serial subtractions: 93, 86, 79, 72, 65.',
-      recommendedAnswerGuide: 'Give 1 point per accurate mathematical step.',
+      category: 'Delayed Recall',
+      domain: 'recall',
+      prompt: 'Did you hear the word Sun earlier?',
+      aiTip: 'Cued recognition memory.',
+      recommendedAnswerGuide: "'Yes'.",
     ),
     CognitiveQuestionItem(
       id: 9,
-      category: 'Orientation',
-      domain: 'orientation',
-      prompt: 'What season of the year are we currently in?',
-      aiTip: 'Observe climate and calendar seasonal recognition.',
-      recommendedAnswerGuide:
-          'Permit flexibility during seasonal transition weeks.',
+      category: 'Language & Reasoning',
+      domain: 'reasoning',
+      prompt: 'What do you call this? (Show pen or watch.)',
+      aiTip: 'Visual confrontation naming of common everyday item.',
+      recommendedAnswerGuide: "'Pen' or 'Watch'.",
     ),
     CognitiveQuestionItem(
       id: 10,
-      category: 'Memory',
-      domain: 'memory',
-      prompt: 'Can you remember your home address from before moving to our care home?',
-      aiTip: 'Cross-reference with medical admission record.',
-      recommendedAnswerGuide: 'Validate street and locality.',
-    ),
-    CognitiveQuestionItem(
-      id: 11,
-      category: 'Executive & Reasoning',
-      domain: 'reasoning',
-      prompt: 'Take this piece of paper in your right hand, fold it in half, and put it on your lap.',
-      aiTip: 'Three-stage motor command comprehension test.',
-      recommendedAnswerGuide:
-          'Score 1 point per executed clause in correct sequence.',
-    ),
-    CognitiveQuestionItem(
-      id: 12,
-      category: 'Language & Reasoning',
-      domain: 'reasoning',
-      prompt:
-          'Please read the sentence shown on the screen and close your eyes.',
-      aiTip: 'Assesses reading comprehension and executive motor response.',
-      recommendedAnswerGuide: 'Immediate motor closing of eyes upon reading.',
-    ),
-    CognitiveQuestionItem(
-      id: 13,
-      category: 'Language & Reasoning',
-      domain: 'reasoning',
-      prompt:
-          "Write a complete sentence about today's weather or your thoughts.",
-      aiTip: 'Must contain subject, predicate, and form a coherent thought.',
-      recommendedAnswerGuide:
-          'Semantic validity irrespective of minor spelling errors.',
-    ),
-    CognitiveQuestionItem(
-      id: 14,
-      category: 'Attention',
-      domain: 'attention',
-      prompt: 'Name as many animals as you can think of in sixty seconds.',
-      aiTip:
-          'Standard verbal categorical fluency test (Target: >= 14 animals).',
-      recommendedAnswerGuide:
-          'Unique animal count recorded within 1 minute timer.',
-    ),
-    CognitiveQuestionItem(
-      id: 15,
-      category: 'Recall',
-      domain: 'recall',
-      prompt: 'Do you recall who visited you yesterday afternoon?',
-      aiTip: 'Episodic recent memory query corroborated with nursing log.',
-      recommendedAnswerGuide: 'Accurate name or familial relationship.',
-    ),
-    CognitiveQuestionItem(
-      id: 16,
-      category: 'Orientation',
-      domain: 'orientation',
-      prompt: 'What floor of the residence building are we currently on?',
-      aiTip: 'Immediate spatial floor and wing awareness.',
-      recommendedAnswerGuide: 'First floor / Residential Wing A.',
-    ),
-    CognitiveQuestionItem(
-      id: 17,
       category: 'Abstract Reasoning',
       domain: 'reasoning',
-      prompt:
-          'How are an orange and a banana alike? What category do they share?',
-      aiTip: 'Abstract reasoning and categorization test.',
-      recommendedAnswerGuide:
-          "Abstract answer 'Fruit' scores higher than concrete 'You eat them'.",
-    ),
-    CognitiveQuestionItem(
-      id: 18,
-      category: 'Attention',
-      domain: 'attention',
-      prompt: "Please tap the table each time you hear the letter 'A' as I read a list of letters.",
-      aiTip: 'Continuous sustained auditory vigilance test.',
-      recommendedAnswerGuide: 'Record omissions and commission errors.',
-    ),
-    CognitiveQuestionItem(
-      id: 19,
-      category: 'Memory',
-      domain: 'memory',
-      prompt: 'Can you describe what you had for breakfast this morning?',
-      aiTip: 'Short-term episodic retrieval matching dietary logs.',
-      recommendedAnswerGuide: 'Consistency with morning dietary tray record.',
-    ),
-    CognitiveQuestionItem(
-      id: 20,
-      category: 'Orientation',
-      domain: 'orientation',
-      prompt: 'Do you know who the current President or Prime Minister of the country is?',
-      aiTip: 'Long-term public knowledge recall.',
-      recommendedAnswerGuide: 'Correct identification of the head of state.',
+      prompt: 'Are an apple and an orange both fruits?',
+      aiTip: 'Semantic categorization and conceptual reasoning.',
+      recommendedAnswerGuide: "'Yes' (or 'Both fruits').",
     ),
   ];
 
+  /// Validates whether the 10-question battery is fully assessed with both saved responses and grades.
+  static bool isBatteryComplete({
+    required Map<int, String> responses,
+    required Map<int, double?> grades,
+  }) {
+    for (final q in questions) {
+      final hasAns = responses[q.id]?.trim().isNotEmpty == true;
+      final hasGrd = grades[q.id] != null;
+      if (!hasAns || !hasGrd) return false;
+    }
+    return true;
+  }
+
   /// Calculates per-domain accuracies in [0.0, 1.0] range based on caregiver grades (1.0, 0.5, 0.0).
-  /// Unanswered questions (null or absent) are treated as 0.0 (not automatically marked correct).
+  /// Strictly distinguishes between missing scores (null) and legitimate Incorrect scores (0.0).
+  /// If [allowIncomplete] is false (default), missing grades are rejected to prevent converting
+  /// unassessed items to zero.
   static Map<String, double> calculateDomainAccuracies(
-    Map<int, double?> grades,
-  ) {
+    Map<int, double?> grades, {
+    bool allowIncomplete = false,
+  }) {
     final Map<String, double> accuracies = {};
 
     for (final domain in domains) {
@@ -267,11 +186,15 @@ class CognitiveScoring {
       double sum = 0.0;
       for (final id in qIds) {
         final score = grades[id];
-        if (score != null && !score.isNaN) {
-          sum += score;
-        } else {
-          // Unanswered or null scores count as 0.0
+        if (score == null) {
+          if (!allowIncomplete) {
+            throw ArgumentError(
+              'Cannot calculate domain accuracy: Question $id has no clinical grade. Missing grades must not be converted to 0.0.',
+            );
+          }
           sum += 0.0;
+        } else if (!score.isNaN) {
+          sum += score;
         }
       }
 
