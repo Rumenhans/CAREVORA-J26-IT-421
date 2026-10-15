@@ -20,6 +20,8 @@ replay_pid*
 *.iws
 .idea/
 .vscode/
+.settings/
+**/.settings/
 
 # Flutter/Dart/Pub related
 **/doc/api/
