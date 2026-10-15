@@ -99,14 +99,14 @@ class EmotionalWellnessIntegrationTest {
     }
 
     @Test
-    @DisplayName("Submit assessment and verify persistence in database")
+    @DisplayName("Submit assessment and verify persistence in database with valid 10-item answers")
     void submitAssessmentAndVerifyPersistence() throws Exception {
         String token = obtainToken("dr.reed@carevora.com", "doctor123");
 
         String payload = """
                 {
                     "residentId": 1,
-                    "answers": [1, 2, 0, 1],
+                    "answers": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
                     "includeFacialCheck": true,
                     "includeVoiceCheck": true
                 }
@@ -118,6 +118,8 @@ class EmotionalWellnessIntegrationTest {
                         .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.residentId", is(1)))
+                .andExpect(jsonPath("$.data.overallScore", is(70.0)))
+                .andExpect(jsonPath("$.data.emotionalScore", is(70.0)))
                 .andExpect(jsonPath("$.data.contributingFactors", hasSize(3)))
                 .andExpect(jsonPath("$.data.recommendations", hasSize(greaterThanOrEqualTo(1))));
 
@@ -126,5 +128,93 @@ class EmotionalWellnessIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(greaterThanOrEqualTo(2))));
+    }
+
+    @Test
+    @DisplayName("Submit assessment with all favorable answers (all 0s) yields 100.0 wellness")
+    void submitAssessmentAllFavorableYields100() throws Exception {
+        String token = obtainToken("dr.reed@carevora.com", "doctor123");
+
+        String payload = """
+                {
+                    "residentId": 1,
+                    "answers": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    "includeFacialCheck": false,
+                    "includeVoiceCheck": false
+                }
+                """;
+
+        mockMvc.perform(post("/api/assessments/submit")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overallScore", is(100.0)))
+                .andExpect(jsonPath("$.data.emotionalScore", is(100.0)))
+                .andExpect(jsonPath("$.data.riskLevel", is("LOW")))
+                .andExpect(jsonPath("$.data.status", is("LOOKING_GOOD")));
+    }
+
+    @Test
+    @DisplayName("Submit assessment with all adverse answers (all 1s) yields 0.0 wellness")
+    void submitAssessmentAllAdverseYields0() throws Exception {
+        String token = obtainToken("dr.reed@carevora.com", "doctor123");
+
+        String payload = """
+                {
+                    "residentId": 1,
+                    "answers": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                    "includeFacialCheck": false,
+                    "includeVoiceCheck": false
+                }
+                """;
+
+        mockMvc.perform(post("/api/assessments/submit")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overallScore", is(0.0)))
+                .andExpect(jsonPath("$.data.emotionalScore", is(0.0)))
+                .andExpect(jsonPath("$.data.riskLevel", is("HIGH")))
+                .andExpect(jsonPath("$.data.status", is("NEEDS_ATTENTION")));
+    }
+
+    @Test
+    @DisplayName("Submit assessment with fewer than 10 answers rejected with 400 Bad Request")
+    void submitAssessmentFewerAnswersRejected() throws Exception {
+        String token = obtainToken("dr.reed@carevora.com", "doctor123");
+
+        String payload = """
+                {
+                    "residentId": 1,
+                    "answers": [0, 1, 0, 1]
+                }
+                """;
+
+        mockMvc.perform(post("/api/assessments/submit")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Submit assessment with invalid non-binary answers rejected with 400 Bad Request")
+    void submitAssessmentNonBinaryAnswersRejected() throws Exception {
+        String token = obtainToken("dr.reed@carevora.com", "doctor123");
+
+        String payload = """
+                {
+                    "residentId": 1,
+                    "answers": [0, 2, 0, 1, 0, 0, 1, 0, 0, 0]
+                }
+                """;
+
+        mockMvc.perform(post("/api/assessments/submit")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest());
     }
 }
