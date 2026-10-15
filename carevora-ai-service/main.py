@@ -44,6 +44,8 @@ class MultimodalAssessmentRequest(BaseModel):
     social_score: Optional[float] = 80.0
     history_scores: Optional[List[Any]] = None
     score_domain: Optional[str] = "wellness"
+    raw_features: Optional[Dict[str, Any]] = None
+
 
 
 # ============================================================================
@@ -170,7 +172,8 @@ def root():
         "models": {
             "facial": "Trained PyTorch FER-2013 CNN Model",
             "vocal": "CREMA-D Acoustic Feature Pipeline",
-            "trajectory": "RALPA Latent Progression Engine",
+            "high_risk": f"Colab Heterogeneous Ensemble (2xLightGBM, LogReg, HistGB; threshold {ralpa.high_risk_threshold})",
+            "trajectory": f"Colab Ensemble (2xLightGBM, LogReg; classes: {ralpa.trajectory_classes}) + RALPA Engine",
             "cognitive": "ACRF Engine & Random Forest Model (Trained on Synthetic Data - Experimental)"
         }
     }
@@ -239,7 +242,8 @@ def predict_ralpa_progression(req: MultimodalAssessmentRequest):
         resident_id=req.resident_id,
         current_scores=scores,
         history_scores=req.history_scores,
-        score_domain=req.score_domain or "wellness"
+        score_domain=req.score_domain or "wellness",
+        raw_features=req.raw_features
     )
 
     return {
