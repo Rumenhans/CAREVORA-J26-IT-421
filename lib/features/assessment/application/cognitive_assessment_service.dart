@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import '../../../core/config/app_config.dart';
 
 class CognitiveResidentProfile {
   final int id;
@@ -37,6 +38,74 @@ class CognitiveResidentProfile {
   }
 }
 
+class CognitiveSessionData {
+  final String sessionId;
+  final int residentId;
+  final String residentName;
+  final String status; // IN_PROGRESS, PENDING_CAREGIVER_REVIEW, COMPLETED
+  final Map<int, String> responses;
+  final Map<int, double> grades;
+  final Map<int, double> questionTimes;
+  final String? initiatedBy;
+  final String? reviewedBy;
+  final String? createdAt;
+  final String? updatedAt;
+
+  const CognitiveSessionData({
+    required this.sessionId,
+    required this.residentId,
+    required this.residentName,
+    required this.status,
+    required this.responses,
+    required this.grades,
+    required this.questionTimes,
+    this.initiatedBy,
+    this.reviewedBy,
+    this.createdAt,
+    this.updatedAt,
+  });
+
+  factory CognitiveSessionData.fromJson(Map<String, dynamic> json) {
+    final Map<int, String> resp = {};
+    if (json['responses'] is Map) {
+      (json['responses'] as Map).forEach((k, v) {
+        final id = int.tryParse(k.toString());
+        if (id != null && v != null) resp[id] = v.toString();
+      });
+    }
+
+    final Map<int, double> grd = {};
+    if (json['grades'] is Map) {
+      (json['grades'] as Map).forEach((k, v) {
+        final id = int.tryParse(k.toString());
+        if (id != null && v != null) grd[id] = (v as num).toDouble();
+      });
+    }
+
+    final Map<int, double> qt = {};
+    if (json['questionTimes'] is Map) {
+      (json['questionTimes'] as Map).forEach((k, v) {
+        final id = int.tryParse(k.toString());
+        if (id != null && v != null) qt[id] = (v as num).toDouble();
+      });
+    }
+
+    return CognitiveSessionData(
+      sessionId: json['sessionId'] as String? ?? '',
+      residentId: (json['residentId'] as num?)?.toInt() ?? 0,
+      residentName: json['residentName'] as String? ?? 'Resident',
+      status: json['status'] as String? ?? 'IN_PROGRESS',
+      responses: resp,
+      grades: grd,
+      questionTimes: qt,
+      initiatedBy: json['initiatedBy'] as String?,
+      reviewedBy: json['reviewedBy'] as String?,
+      createdAt: json['createdAt'] as String?,
+      updatedAt: json['updatedAt'] as String?,
+    );
+  }
+}
+
 class CognitiveSubmissionPayload {
   final int residentId;
   final double memory;
@@ -48,6 +117,9 @@ class CognitiveSubmissionPayload {
   final int? educationYears;
   final Map<String, double>? accuracies;
   final Map<String, double>? responseTimes;
+  final String? sessionId;
+  final Map<int, String>? responses;
+  final Map<int, double>? grades;
 
   const CognitiveSubmissionPayload({
     required this.residentId,
@@ -60,6 +132,9 @@ class CognitiveSubmissionPayload {
     this.educationYears,
     this.accuracies,
     this.responseTimes,
+    this.sessionId,
+    this.responses,
+    this.grades,
   });
 
   Map<String, dynamic> toJson() {
@@ -79,6 +154,19 @@ class CognitiveSubmissionPayload {
     if (responseTimes != null && responseTimes!.isNotEmpty) {
       map['responseTimes'] = responseTimes;
     }
+    if (sessionId != null && sessionId!.isNotEmpty) {
+      map['sessionId'] = sessionId;
+    }
+    if (responses != null && responses!.isNotEmpty) {
+      map['responses'] = {
+        for (final e in responses!.entries) e.key.toString(): e.value,
+      };
+    }
+    if (grades != null && grades!.isNotEmpty) {
+      map['grades'] = {
+        for (final e in grades!.entries) e.key.toString(): e.value,
+      };
+    }
     return map;
   }
 }
@@ -87,13 +175,14 @@ class CognitiveSubmissionResult {
   final int id;
   final int residentId;
   final String residentName;
-  final double memory;
-  final double attention;
-  final double orientation;
-  final double recall;
-  final double reasoning;
-  final double acrfScore;
+  final double? memory;
+  final double? attention;
+  final double? orientation;
+  final double? recall;
+  final double? reasoning;
+  final double? acrfScore;
   final String? mlPrediction;
+  final String? riskLevel;
   final bool? alertTriggered;
   final bool mlAvailable;
   final String mlModelType;
@@ -104,18 +193,23 @@ class CognitiveSubmissionResult {
   final String? clinicalDisclaimer;
   final String? assessedBy;
   final String? createdAt;
+  final String? sessionId;
+  final String status;
+  final Map<int, String>? responses;
+  final Map<int, double>? grades;
 
   const CognitiveSubmissionResult({
     required this.id,
     required this.residentId,
     required this.residentName,
-    required this.memory,
-    required this.attention,
-    required this.orientation,
-    required this.recall,
-    required this.reasoning,
-    required this.acrfScore,
+    this.memory,
+    this.attention,
+    this.orientation,
+    this.recall,
+    this.reasoning,
+    this.acrfScore,
     this.mlPrediction,
+    this.riskLevel,
     this.alertTriggered,
     required this.mlAvailable,
     required this.mlModelType,
@@ -126,6 +220,10 @@ class CognitiveSubmissionResult {
     this.clinicalDisclaimer,
     this.assessedBy,
     this.createdAt,
+    this.sessionId,
+    this.status = 'COMPLETED',
+    this.responses,
+    this.grades,
   });
 
   factory CognitiveSubmissionResult.fromJson(Map<String, dynamic> json) {
@@ -141,6 +239,24 @@ class CognitiveSubmissionResult {
     String? prediction = json['mlPrediction'] as String?;
     if (prediction == null && isAvailable) {
       prediction = mlEval['prediction']?.toString();
+    }
+
+    String? riskLevel = json['riskLevel'] as String?;
+    if (riskLevel == null || riskLevel.isEmpty) {
+      if (prediction != null && prediction.isNotEmpty) {
+        final p = prediction.toLowerCase();
+        if (p.contains('low')) {
+          riskLevel = 'Low Risk';
+        } else if (p.contains('mod')) {
+          riskLevel = 'Moderate Risk';
+        } else if (p.contains('high')) {
+          riskLevel = 'High Risk';
+        } else {
+          riskLevel = prediction;
+        }
+      } else {
+        riskLevel = 'Not Available';
+      }
     }
 
     bool? alert = json['alertTriggered'] as bool?;
@@ -161,17 +277,36 @@ class CognitiveSubmissionResult {
         ? mlEval['disclaimer'].toString()
         : 'This model was experimentally trained on synthetic data for research and demonstration purposes only. It is not clinically validated.';
 
+    Map<int, String>? parsedResp;
+    if (json['responses'] is Map) {
+      parsedResp = {};
+      (json['responses'] as Map).forEach((k, v) {
+        final id = int.tryParse(k.toString());
+        if (id != null && v != null) parsedResp![id] = v.toString();
+      });
+    }
+
+    Map<int, double>? parsedGrd;
+    if (json['grades'] is Map) {
+      parsedGrd = {};
+      (json['grades'] as Map).forEach((k, v) {
+        final id = int.tryParse(k.toString());
+        if (id != null && v != null) parsedGrd![id] = (v as num).toDouble();
+      });
+    }
+
     return CognitiveSubmissionResult(
       id: (json['id'] as num?)?.toInt() ?? 0,
       residentId: (json['residentId'] as num?)?.toInt() ?? 0,
       residentName: json['residentName'] as String? ?? 'Resident',
-      memory: (json['memory'] as num?)?.toDouble() ?? 0.0,
-      attention: (json['attention'] as num?)?.toDouble() ?? 0.0,
-      orientation: (json['orientation'] as num?)?.toDouble() ?? 0.0,
-      recall: (json['recall'] as num?)?.toDouble() ?? 0.0,
-      reasoning: (json['reasoning'] as num?)?.toDouble() ?? 0.0,
-      acrfScore: (json['acrfScore'] as num?)?.toDouble() ?? 0.0,
+      memory: (json['memory'] as num?)?.toDouble(),
+      attention: (json['attention'] as num?)?.toDouble(),
+      orientation: (json['orientation'] as num?)?.toDouble(),
+      recall: (json['recall'] as num?)?.toDouble(),
+      reasoning: (json['reasoning'] as num?)?.toDouble(),
+      acrfScore: (json['acrfScore'] as num?)?.toDouble(),
       mlPrediction: prediction,
+      riskLevel: riskLevel,
       alertTriggered: alert,
       mlAvailable: isAvailable,
       mlModelType: modelType,
@@ -182,6 +317,10 @@ class CognitiveSubmissionResult {
       clinicalDisclaimer: json['clinicalDisclaimer'] as String? ?? 'The ACRF score is an arithmetic weighted wellness metric. Non-diagnostic.',
       assessedBy: json['assessedBy'] as String? ?? 'Care Specialist',
       createdAt: json['createdAt'] as String?,
+      sessionId: json['sessionId'] as String?,
+      status: json['status'] as String? ?? 'COMPLETED',
+      responses: parsedResp,
+      grades: parsedGrd,
     );
   }
 }
@@ -198,7 +337,8 @@ class CognitiveApiException implements Exception {
 }
 
 class CognitiveAssessmentService {
-  static const String baseUrl = 'http://localhost:8081';
+  static http.Client? client;
+  static String get baseUrl => AppConfig.backendBaseUrl;
 
   /// Fetches residents accessible to the authenticated caregiver/doctor.
   static Future<List<CognitiveResidentProfile>> fetchResidents({
@@ -261,7 +401,133 @@ class CognitiveAssessmentService {
     }
   }
 
-  /// Submits the cognitive assessment to POST /api/cognitive/assessments/submit.
+  /// Initiates a brand-new assessment session with a unique UUID session identifier.
+  static Future<CognitiveSessionData> startSession({
+    required int residentId,
+    String? token,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/cognitive/assessments/sessions/start');
+    final Map<String, String> headers = {'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    final bodyJson = jsonEncode({'residentId': residentId});
+    final res = await http
+        .post(uri, headers: headers, body: bodyJson)
+        .timeout(const Duration(seconds: 8));
+
+    Map<String, dynamic>? decoded;
+    try {
+      decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+    } catch (_) {}
+
+    if (res.statusCode == 200 && decoded != null && decoded['success'] == true) {
+      final data = decoded['data'] as Map<String, dynamic>;
+      return CognitiveSessionData.fromJson(data);
+    }
+
+    final String message = decoded?['message'] as String? ??
+        'Failed to start cognitive assessment session (HTTP ${res.statusCode})';
+    throw CognitiveApiException(message, statusCode: res.statusCode);
+  }
+
+  /// Saves resident answers to the existing backend and database, transitioning status to Pending Caregiver Review.
+  static Future<CognitiveSessionData> saveResponses({
+    required String sessionId,
+    required Map<int, String> responses,
+    required Map<int, double> questionTimes,
+    String? token,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/cognitive/assessments/sessions/$sessionId/responses');
+    final Map<String, String> headers = {'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    final bodyJson = jsonEncode({
+      'responses': {for (final e in responses.entries) e.key.toString(): e.value},
+      'questionTimes': {for (final e in questionTimes.entries) e.key.toString(): e.value},
+    });
+
+    final res = await http
+        .post(uri, headers: headers, body: bodyJson)
+        .timeout(const Duration(seconds: 8));
+
+    Map<String, dynamic>? decoded;
+    try {
+      decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+    } catch (_) {}
+
+    if (res.statusCode == 200 && decoded != null && decoded['success'] == true) {
+      final data = decoded['data'] as Map<String, dynamic>;
+      return CognitiveSessionData.fromJson(data);
+    }
+
+    final String message = decoded?['message'] as String? ??
+        'Failed to save resident responses to backend (HTTP ${res.statusCode})';
+    throw CognitiveApiException(message, statusCode: res.statusCode);
+  }
+
+  /// Retrieves any pending cognitive assessment session and responses for caregiver clinical grading.
+  static Future<CognitiveSessionData?> getPendingSession({
+    required int residentId,
+    String? token,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/cognitive/assessments/sessions/pending/resident/$residentId');
+    final Map<String, String> headers = {'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    try {
+      final res = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded != null && decoded['data'] != null) {
+          return CognitiveSessionData.fromJson(decoded['data'] as Map<String, dynamic>);
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches historical cognitive assessments for a resident, ordered newest first.
+  static Future<List<CognitiveSubmissionResult>> fetchHistory({
+    required int residentId,
+    String? token,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/cognitive/assessments/resident/$residentId');
+    final Map<String, String> headers = {'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    final clientToUse = client ?? http.Client();
+    final res = await clientToUse
+        .get(uri, headers: headers)
+        .timeout(const Duration(seconds: 6));
+    if (res.statusCode == 200) {
+      final decoded = jsonDecode(res.body);
+      final list = decoded['data'] as List?;
+      if (list != null) {
+        return list
+            .map((e) => CognitiveSubmissionResult.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    }
+    throw CognitiveApiException(
+      'Failed to load cognitive assessment history (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
+    );
+  }
+
+  /// Submits the completed cognitive assessment with caregiver grades to POST /api/cognitive/assessments/submit.
   static Future<CognitiveSubmissionResult> submitAssessment({
     required CognitiveSubmissionPayload payload,
     String? token,

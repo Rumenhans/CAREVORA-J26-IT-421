@@ -58,6 +58,12 @@ public class CognitiveAssessmentSubmissionRequest {
 
     private Map<String, Double> responseTimes;
 
+    private String sessionId;
+
+    private Map<Integer, String> responses;
+
+    private Map<Integer, Double> grades;
+
     public CognitiveAssessmentSubmissionRequest(
             Long residentId,
             Double memory,
@@ -79,5 +85,25 @@ public class CognitiveAssessmentSubmissionRequest {
         this.educationYears = educationYears;
         this.accuracies = accuracies;
         this.responseTimes = responseTimes;
+    }
+
+    public CognitiveAssessmentSubmissionRequest(
+            Long residentId,
+            Double memory,
+            Double attention,
+            Double orientation,
+            Double recall,
+            Double reasoning,
+            Integer age,
+            Integer educationYears,
+            Map<String, Double> accuracies,
+            Map<String, Double> responseTimes,
+            String sessionId,
+            Map<Integer, String> responses,
+            Map<Integer, Double> grades) {
+        this(residentId, memory, attention, orientation, recall, reasoning, age, educationYears, accuracies, responseTimes);
+        this.sessionId = sessionId;
+        this.responses = responses;
+        this.grades = grades;
     }
 }
