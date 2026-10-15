@@ -33,30 +33,36 @@ class CarevoraLogo extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             _buildIcon(),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'CAREVORA',
-                  style: AppTextStyles.wordmarkSmall.copyWith(
-                    fontSize: size * 0.55,
-                    color: isDark ? Colors.white : AppColors.navy,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2.0,
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'CAREVORA',
+                    style: AppTextStyles.wordmarkSmall.copyWith(
+                      fontSize: size * 0.55,
+                      color: isDark ? Colors.white : AppColors.navy,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2.0,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                Text(
-                  'Compassionate Care, Smarter Tomorrow',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: (size * 0.24).clamp(10.0, 13.0),
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? Colors.white70 : AppColors.muted,
+                  Text(
+                    'Compassionate Care, Smarter Tomorrow',
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: (size * 0.24).clamp(9.5, 12.0),
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white70 : AppColors.muted,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         );

@@ -27,8 +27,8 @@ class DesktopSidebar extends ConsumerWidget {
     final elderHomeName = authState.elderHomeName;
 
     String initials = 'CV';
-    final parts = userName.trim().split(' ');
-    if (parts.length >= 2) {
+    final parts = userName.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
       initials = '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     } else if (parts.isNotEmpty && parts[0].isNotEmpty) {
       initials = parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
@@ -44,7 +44,7 @@ class DesktopSidebar extends ConsumerWidget {
         children: [
           // Logo & Brand Header
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
             child: isCollapsed
                 ? const CarevoraLogo(variant: LogoVariant.iconOnly, size: 36)
                 : const CarevoraLogo(variant: LogoVariant.full, size: 36),

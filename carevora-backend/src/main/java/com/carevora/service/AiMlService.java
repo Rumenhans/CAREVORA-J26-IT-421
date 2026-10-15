@@ -4,9 +4,11 @@ import com.carevora.dto.ApiResponse;
 import com.carevora.dto.cognitive.CognitiveAiResult;
 import com.carevora.dto.cognitive.CognitiveAssessmentResponse;
 import com.carevora.entity.Assessment;
+import com.carevora.entity.CognitiveAssessment;
 import com.carevora.entity.Resident;
 import com.carevora.exception.AiServiceException;
 import com.carevora.repository.AssessmentRepository;
+import com.carevora.repository.CognitiveAssessmentRepository;
 import com.carevora.repository.ResidentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +34,7 @@ public class AiMlService {
     private final RestTemplate restTemplate;
     private final AssessmentRepository assessmentRepository;
     private final ResidentRepository residentRepository;
+    private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
     private final String aiServiceBaseUrl;
 
     @Autowired
@@ -39,11 +42,13 @@ public class AiMlService {
             RestTemplate restTemplate,
             AssessmentRepository assessmentRepository,
             ResidentRepository residentRepository,
+            @Autowired(required = false) CognitiveAssessmentRepository cognitiveAssessmentRepository,
             @Value("${application.ai-service.base-url:http://127.0.0.1:8000}") String aiServiceBaseUrl
     ) {
         this.restTemplate = restTemplate;
         this.assessmentRepository = assessmentRepository;
         this.residentRepository = residentRepository;
+        this.cognitiveAssessmentRepository = cognitiveAssessmentRepository;
         this.aiServiceBaseUrl = (aiServiceBaseUrl != null && aiServiceBaseUrl.endsWith("/"))
                 ? aiServiceBaseUrl.substring(0, aiServiceBaseUrl.length() - 1)
                 : aiServiceBaseUrl;
@@ -53,7 +58,7 @@ public class AiMlService {
             RestTemplate restTemplate,
             String aiServiceBaseUrl
     ) {
-        this(restTemplate, null, null, aiServiceBaseUrl);
+        this(restTemplate, null, null, null, aiServiceBaseUrl);
     }
 
     public ApiResponse<Map<String, Object>> predictTrajectory(Long residentId) {
@@ -167,6 +172,39 @@ public class AiMlService {
         }
         if (responseTimes != null && !responseTimes.isEmpty()) {
             requestPayload.put("response_times", responseTimes);
+        }
+
+        // Obtain historical assessments strictly for this resident in chronological order
+        // This guarantees resident isolation without cross-resident contamination
+        int assessmentNumber = 1;
+        List<Map<String, Object>> pastHistoryList = Collections.emptyList();
+
+        if (cognitiveAssessmentRepository != null && residentId != null) {
+            List<CognitiveAssessment> historyList = cognitiveAssessmentRepository.findByResidentIdOrderByCreatedAtDesc(residentId);
+            assessmentNumber = historyList.size() + 1;
+            if (!historyList.isEmpty()) {
+                pastHistoryList = new ArrayList<>();
+                // History query is ordered DESC for UI history listing; reverse to chronological order (ASC)
+                List<CognitiveAssessment> chronological = new ArrayList<>(historyList);
+                Collections.reverse(chronological);
+                for (int i = 0; i < chronological.size(); i++) {
+                    CognitiveAssessment past = chronological.get(i);
+                    Map<String, Object> h = new HashMap<>();
+                    h.put("resident_id", residentId);
+                    h.put("assessment_number", i + 1);
+                    h.put("memory_score", past.getMemoryScore());
+                    h.put("attention_score", past.getAttentionScore());
+                    h.put("orientation_score", past.getOrientationScore());
+                    h.put("recall_score", past.getRecallScore());
+                    h.put("reasoning_score", past.getReasoningScore());
+                    pastHistoryList.add(h);
+                }
+            }
+        }
+
+        requestPayload.put("assessment_number", assessmentNumber);
+        if (!pastHistoryList.isEmpty()) {
+            requestPayload.put("history", pastHistoryList);
         }
 
         try {
