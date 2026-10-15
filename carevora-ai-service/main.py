@@ -196,12 +196,15 @@ def get_model_metrics():
 async def analyze_photo(file: UploadFile = File(...)):
     """
     Endpoint to receive a live captured photo from mobile/web camera,
-    process it through trained PyTorch FER model, and return whether person is HAPPY or SAD.
+    process it through trained PyTorch FER model, and return facial affect analysis.
+    Explicitly reports success, no_face, unavailable, or error states.
     """
     contents = await file.read()
     res = analyze_facial_affect(image_bytes=contents)
+    is_success = res.get("status") == "success"
     return {
-        "success": True,
+        "success": is_success,
+        "status": res.get("status", "error"),
         "filename": file.filename,
         "analysis": res
     }

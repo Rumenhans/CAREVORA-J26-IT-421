@@ -11,7 +11,16 @@ enum EmotionCategory {
   anxious,
 }
 
+enum FacialInferenceStatus {
+  success,
+  noFaceDetected,
+  modelUnavailable,
+  networkError,
+  clientError,
+}
+
 class FacialEmotionResult {
+  final FacialInferenceStatus status;
   final EmotionCategory primaryEmotion;
   final double confidence;
   final double valenceScore; // -1.0 (very negative/sad) to +1.0 (very positive/happy)
@@ -20,8 +29,12 @@ class FacialEmotionResult {
   final String clinicalObservation;
   final List<String> facialActionUnits; // AU6 cheek raiser, AU12 lip corner puller, etc.
   final DateTime analyzedAt;
+  final String? dominantEmotionRaw;
+  final Map<String, double>? rawBreakdown;
+  final String? errorMessage;
 
   const FacialEmotionResult({
+    this.status = FacialInferenceStatus.success,
     required this.primaryEmotion,
     required this.confidence,
     required this.valenceScore,
@@ -30,9 +43,22 @@ class FacialEmotionResult {
     required this.clinicalObservation,
     required this.facialActionUnits,
     required this.analyzedAt,
+    this.dominantEmotionRaw,
+    this.rawBreakdown,
+    this.errorMessage,
   });
 
+  bool get isSuccess => status == FacialInferenceStatus.success;
+  bool get isModelUnavailable => status == FacialInferenceStatus.modelUnavailable;
+  bool get isNoFace => status == FacialInferenceStatus.noFaceDetected;
+  bool get hasError => status == FacialInferenceStatus.networkError || status == FacialInferenceStatus.clientError;
+
   String get emotionLabel {
+    if (!isSuccess) {
+      if (isModelUnavailable) return 'Model Unavailable';
+      if (isNoFace) return 'No Face Detected';
+      return 'Inference Offline';
+    }
     switch (primaryEmotion) {
       case EmotionCategory.happy:
         return 'Happy / Uplifted';
@@ -48,6 +74,11 @@ class FacialEmotionResult {
   }
 
   String get emoji {
+    if (!isSuccess) {
+      if (isModelUnavailable) return '⚠️';
+      if (isNoFace) return '👤';
+      return '❌';
+    }
     switch (primaryEmotion) {
       case EmotionCategory.happy:
         return '😊';
@@ -61,20 +92,95 @@ class FacialEmotionResult {
         return '😟';
     }
   }
+
+  factory FacialEmotionResult.unavailable({
+    String message = 'Facial emotion recognition model is offline or unavailable on the AI server.',
+  }) {
+    return FacialEmotionResult(
+      status: FacialInferenceStatus.modelUnavailable,
+      primaryEmotion: EmotionCategory.calmNeutral,
+      confidence: 0.0,
+      valenceScore: 0.0,
+      arousalScore: 0.0,
+      emotionProbabilities: const {},
+      clinicalObservation: message,
+      facialActionUnits: const [],
+      analyzedAt: DateTime.now(),
+      errorMessage: message,
+    );
+  }
+
+  factory FacialEmotionResult.noFace({
+    String message = 'No human face detected or frame is obstructed.',
+  }) {
+    return FacialEmotionResult(
+      status: FacialInferenceStatus.noFaceDetected,
+      primaryEmotion: EmotionCategory.calmNeutral,
+      confidence: 0.0,
+      valenceScore: 0.0,
+      arousalScore: 0.0,
+      emotionProbabilities: const {},
+      clinicalObservation: message,
+      facialActionUnits: const [],
+      analyzedAt: DateTime.now(),
+      errorMessage: message,
+    );
+  }
+
+  factory FacialEmotionResult.networkError({
+    required String message,
+  }) {
+    return FacialEmotionResult(
+      status: FacialInferenceStatus.networkError,
+      primaryEmotion: EmotionCategory.calmNeutral,
+      confidence: 0.0,
+      valenceScore: 0.0,
+      arousalScore: 0.0,
+      emotionProbabilities: const {},
+      clinicalObservation: message,
+      facialActionUnits: const [],
+      analyzedAt: DateTime.now(),
+      errorMessage: message,
+    );
+  }
 }
 
 class FacialEmotionAiService {
-  /// Analyzes live captured camera image bytes or asset sample via PyTorch FastAPI Microservice
+  final http.Client _client;
+  final String _baseUrl;
+
+  FacialEmotionAiService({
+    http.Client? client,
+    String? baseUrl,
+  })  : _client = client ?? http.Client(),
+        _baseUrl = baseUrl ?? AppConfig.aiServiceBaseUrl;
+
+  static final FacialEmotionAiService _instance = FacialEmotionAiService();
+  static FacialEmotionAiService get instance => _instance;
+
+  /// Analyzes live captured camera image bytes or asset sample via PyTorch FastAPI Microservice.
+  /// Never returns fabricated mock inference when the server/model fails.
   static Future<FacialEmotionResult> analyzeImage({
     Uint8List? imageBytes,
     String? assetPath,
     String? preferredEmotionHint,
+  }) {
+    return _instance.analyze(
+      imageBytes: imageBytes,
+      assetPath: assetPath,
+      preferredEmotionHint: preferredEmotionHint,
+    );
+  }
+
+  Future<FacialEmotionResult> analyze({
+    Uint8List? imageBytes,
+    String? assetPath,
+    String? preferredEmotionHint,
   }) async {
-    // 1. If real camera image bytes passed, call live PyTorch FastAPI backend (/api/ml/analyze-photo)
+    // 1. Live camera image bytes analysis via PyTorch FastAPI backend (/api/ml/analyze-photo)
     if (imageBytes != null && imageBytes.isNotEmpty) {
       try {
-        final host = AppConfig.aiServiceBaseUrl;
-        final uri = Uri.parse('$host/api/ml/analyze-photo');
+        final uri = Uri.parse('$_baseUrl/api/ml/analyze-photo');
         final request = http.MultipartRequest('POST', uri);
         request.files.add(
           http.MultipartFile.fromBytes(
@@ -84,19 +190,53 @@ class FacialEmotionAiService {
           ),
         );
 
-        final streamedResponse = await request.send().timeout(
+        final streamedResponse = await _client.send(request).timeout(
               const Duration(seconds: 6),
             );
+
+        final responseBody = await streamedResponse.stream.bytesToString();
         if (streamedResponse.statusCode == 200) {
-          final responseBody = await streamedResponse.stream.bytesToString();
-          final jsonMap = jsonDecode(responseBody);
-          if (jsonMap['success'] == true && jsonMap['analysis'] != null) {
-            final analysis = jsonMap['analysis'];
-            final String dominant = (analysis['dominant_emotion'] ?? 'happy').toString().toLowerCase();
+          final jsonMap = jsonDecode(responseBody) as Map<String, dynamic>;
+          final String statusStr = (jsonMap['status'] ?? jsonMap['analysis']?['status'] ?? '').toString().toLowerCase();
+
+          if (jsonMap['model_available'] == false ||
+              statusStr == 'unavailable' ||
+              statusStr == 'model_unavailable' ||
+              statusStr == 'model_retired') {
+            return FacialEmotionResult.unavailable(
+              message: jsonMap['analysis']?['error']?.toString() ??
+                  jsonMap['message']?.toString() ??
+                  'PyTorch facial emotion recognition model is offline or uninitialized.',
+            );
+          }
+
+          if (statusStr == 'no_face' || statusStr == 'no_face_detected') {
+            return FacialEmotionResult.noFace(
+              message: jsonMap['analysis']?['error']?.toString() ??
+                  'No face recognized in captured frame.',
+            );
+          }
+
+          if (jsonMap['analysis'] != null && jsonMap['analysis'] is Map) {
+            final analysis = jsonMap['analysis'] as Map<String, dynamic>;
+            final String dominant = (analysis['dominant_emotion'] ?? '').toString().toLowerCase();
+
+            if (dominant.isEmpty) {
+              return FacialEmotionResult.unavailable(
+                message: 'AI service returned empty emotion analysis.',
+              );
+            }
+
             final double conf = (analysis['confidence'] is num)
                 ? (analysis['confidence'] as num).toDouble()
-                : 0.85;
-            final breakdown = analysis['emotion_breakdown_percent'] as Map<String, dynamic>?;
+                : 0.0;
+            final rawBreakdownMap = analysis['emotion_breakdown_percent'] as Map<String, dynamic>?;
+            final Map<String, double> parsedRawBreakdown = {};
+            if (rawBreakdownMap != null) {
+              rawBreakdownMap.forEach((k, v) {
+                if (v is num) parsedRawBreakdown[k] = v.toDouble();
+              });
+            }
 
             EmotionCategory category;
             double valence;
@@ -131,14 +271,15 @@ class FacialEmotionAiService {
             }
 
             final Map<EmotionCategory, double> probabilities = {
-              EmotionCategory.happy: breakdown != null ? ((breakdown['happy'] as num? ?? 0) / 100.0) : (category == EmotionCategory.happy ? conf : 0.05),
-              EmotionCategory.calmNeutral: breakdown != null ? ((breakdown['neutral'] as num? ?? 0) / 100.0) : (category == EmotionCategory.calmNeutral ? conf : 0.05),
-              EmotionCategory.sadDepressed: breakdown != null ? ((breakdown['sad'] as num? ?? 0) / 100.0) : (category == EmotionCategory.sadDepressed ? conf : 0.05),
-              EmotionCategory.confusedAgitated: breakdown != null ? ((breakdown['angry'] as num? ?? 0) / 100.0) : (category == EmotionCategory.confusedAgitated ? conf : 0.05),
-              EmotionCategory.anxious: breakdown != null ? ((breakdown['fear'] as num? ?? 0) / 100.0) : (category == EmotionCategory.anxious ? conf : 0.05),
+              EmotionCategory.happy: (parsedRawBreakdown['happy'] ?? 0.0) / 100.0,
+              EmotionCategory.calmNeutral: (parsedRawBreakdown['neutral'] ?? 0.0) / 100.0,
+              EmotionCategory.sadDepressed: (parsedRawBreakdown['sad'] ?? 0.0) / 100.0,
+              EmotionCategory.confusedAgitated: (parsedRawBreakdown['angry'] ?? 0.0) / 100.0,
+              EmotionCategory.anxious: (parsedRawBreakdown['fear'] ?? 0.0) / 100.0,
             };
 
             return FacialEmotionResult(
+              status: FacialInferenceStatus.success,
               primaryEmotion: category,
               confidence: conf,
               valenceScore: valence,
@@ -148,121 +289,101 @@ class FacialEmotionAiService {
                   'Real PyTorch Model Inference (FER-2013): Face classified as ${dominant.toUpperCase()} with ${(conf * 100).toStringAsFixed(1)}% model confidence.',
               facialActionUnits: actionUnits,
               analyzedAt: DateTime.now(),
+              dominantEmotionRaw: dominant,
+              rawBreakdown: parsedRawBreakdown,
             );
           }
+        } else {
+          return FacialEmotionResult.networkError(
+            message: 'AI Service returned HTTP ${streamedResponse.statusCode}',
+          );
         }
       } catch (e) {
-        debugPrint('PyTorch API live call fallback: $e');
+        debugPrint('PyTorch API call failed: $e');
+        return FacialEmotionResult.networkError(
+          message: 'Failed to reach AI microservice at $_baseUrl: $e',
+        );
       }
-
-      // Transparent Fallback when AI Microservice is Offline
-      return FacialEmotionResult(
-        primaryEmotion: preferredEmotionHint == 'Sad' ? EmotionCategory.sadDepressed : EmotionCategory.happy,
-        confidence: 0.70,
-        valenceScore: preferredEmotionHint == 'Sad' ? -0.70 : 0.70,
-        arousalScore: 0.35,
-        emotionProbabilities: const {
-          EmotionCategory.happy: 0.50,
-          EmotionCategory.calmNeutral: 0.30,
-          EmotionCategory.sadDepressed: 0.15,
-          EmotionCategory.confusedAgitated: 0.03,
-          EmotionCategory.anxious: 0.02,
-        },
-        clinicalObservation:
-            'Demo Fallback (AI Microservice Offline): Connect FastAPI on port 8000 for live PyTorch CNN inference.',
-        facialActionUnits: const ['AU6: Cheek Raiser (Simulated)'],
-        analyzedAt: DateTime.now(),
-      );
     }
 
-    // 2. Intelligent asset/hint heuristic simulation
-    await Future.delayed(const Duration(milliseconds: 700));
-
+    // 2. Sample asset observation (only used when explicitly selecting demo sample cards)
+    await Future.delayed(const Duration(milliseconds: 300));
     if (preferredEmotionHint != null) {
-      if (preferredEmotionHint == 'happy') return _buildHappyResult();
-      if (preferredEmotionHint == 'sad') return _buildSadResult();
-      if (preferredEmotionHint == 'neutral') return _buildNeutralResult();
+      if (preferredEmotionHint.toLowerCase() == 'happy') return _buildHappySample();
+      if (preferredEmotionHint.toLowerCase() == 'sad') return _buildSadSample();
+      if (preferredEmotionHint.toLowerCase() == 'neutral') return _buildNeutralSample();
     }
-
     if (assetPath != null) {
-      if (assetPath.contains('happy')) return _buildHappyResult();
-      if (assetPath.contains('sad')) return _buildSadResult();
+      if (assetPath.contains('happy')) return _buildHappySample();
+      if (assetPath.contains('sad')) return _buildSadSample();
       if (assetPath.contains('neutral') || assetPath.contains('calm')) {
-        return _buildNeutralResult();
+        return _buildNeutralSample();
       }
     }
 
-    return _buildHappyResult();
+    return _buildHappySample();
   }
 
-  static FacialEmotionResult _buildHappyResult() {
+  static FacialEmotionResult _buildHappySample() {
     return FacialEmotionResult(
+      status: FacialInferenceStatus.success,
       primaryEmotion: EmotionCategory.happy,
-      confidence: 0.94,
+      confidence: 0.85,
       valenceScore: 0.82,
       arousalScore: 0.45,
-      emotionProbabilities: {
-        EmotionCategory.happy: 0.94,
-        EmotionCategory.calmNeutral: 0.04,
-        EmotionCategory.anxious: 0.01,
-        EmotionCategory.sadDepressed: 0.01,
-        EmotionCategory.confusedAgitated: 0.00,
+      emotionProbabilities: const {
+        EmotionCategory.happy: 0.85,
+        EmotionCategory.calmNeutral: 0.10,
+        EmotionCategory.anxious: 0.02,
+        EmotionCategory.sadDepressed: 0.02,
+        EmotionCategory.confusedAgitated: 0.01,
       },
-      clinicalObservation:
-          'Positive bilateral zygomaticus activation (Duchenne smile). Face analyzed as HAPPY.',
-      facialActionUnits: const [
-        'AU6: Cheek Raiser (0.88)',
-        'AU12: Lip Corner Puller (0.92)',
-        'AU25: Lips Part (0.75)',
-      ],
+      clinicalObservation: 'Face analyzed as HAPPY: Bilateral zygomaticus major engagement (Smile).',
+      facialActionUnits: const ['AU6: Cheek Raiser', 'AU12: Lip Corner Puller'],
       analyzedAt: DateTime.now(),
+      dominantEmotionRaw: 'happy',
     );
   }
 
-  static FacialEmotionResult _buildSadResult() {
+  static FacialEmotionResult _buildSadSample() {
     return FacialEmotionResult(
+      status: FacialInferenceStatus.success,
       primaryEmotion: EmotionCategory.sadDepressed,
-      confidence: 0.89,
+      confidence: 0.82,
       valenceScore: -0.68,
       arousalScore: 0.22,
-      emotionProbabilities: {
-        EmotionCategory.sadDepressed: 0.89,
-        EmotionCategory.calmNeutral: 0.07,
-        EmotionCategory.anxious: 0.03,
-        EmotionCategory.confusedAgitated: 0.01,
-        EmotionCategory.happy: 0.00,
+      emotionProbabilities: const {
+        EmotionCategory.sadDepressed: 0.82,
+        EmotionCategory.calmNeutral: 0.10,
+        EmotionCategory.anxious: 0.04,
+        EmotionCategory.confusedAgitated: 0.02,
+        EmotionCategory.happy: 0.02,
       },
-      clinicalObservation:
-          'Depressor anguli oris contraction detected. Corrugator tension. Face analyzed as SAD.',
-      facialActionUnits: const [
-        'AU1: Inner Brow Raiser (0.78)',
-        'AU4: Brow Lowerer (0.84)',
-        'AU15: Lip Corner Depressor (0.91)',
-      ],
+      clinicalObservation: 'Face analyzed as SAD: Corrugator supercilii contraction, lip corner depression.',
+      facialActionUnits: const ['AU1: Inner Brow Raiser', 'AU15: Lip Corner Depressor'],
       analyzedAt: DateTime.now(),
+      dominantEmotionRaw: 'sad',
     );
   }
 
-  static FacialEmotionResult _buildNeutralResult() {
+  static FacialEmotionResult _buildNeutralSample() {
     return FacialEmotionResult(
+      status: FacialInferenceStatus.success,
       primaryEmotion: EmotionCategory.calmNeutral,
-      confidence: 0.91,
-      valenceScore: 0.08,
+      confidence: 0.78,
+      valenceScore: 0.05,
       arousalScore: 0.15,
-      emotionProbabilities: {
-        EmotionCategory.calmNeutral: 0.91,
-        EmotionCategory.happy: 0.05,
-        EmotionCategory.sadDepressed: 0.02,
-        EmotionCategory.anxious: 0.02,
-        EmotionCategory.confusedAgitated: 0.00,
+      emotionProbabilities: const {
+        EmotionCategory.calmNeutral: 0.78,
+        EmotionCategory.happy: 0.12,
+        EmotionCategory.sadDepressed: 0.05,
+        EmotionCategory.anxious: 0.03,
+        EmotionCategory.confusedAgitated: 0.02,
       },
-      clinicalObservation:
-          'Resting neutral baseline posture. Symmetrical facial expression.',
-      facialActionUnits: const [
-        'AU0: Neutral Baseline (0.95)',
-        'AU43: Eyes Open / Focused (0.90)',
-      ],
+      clinicalObservation: 'Face analyzed as NEUTRAL: Relaxed frontalis, symmetrical resting baseline.',
+      facialActionUnits: const ['AU0: Neutral Baseline'],
       analyzedAt: DateTime.now(),
+      dominantEmotionRaw: 'neutral',
     );
   }
 }

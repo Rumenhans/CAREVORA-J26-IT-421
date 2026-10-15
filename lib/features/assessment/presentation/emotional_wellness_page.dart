@@ -14,6 +14,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../data/mock/mock_carevora_data.dart';
 import '../../../data/models/carevora_models.dart';
 import '../application/facial_emotion_ai_service.dart';
+import '../application/automatic_facial_capture_service.dart';
 import '../application/emotional_assessment_service.dart';
 import '../../auth/application/auth_controller.dart';
 
@@ -49,11 +50,15 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   String _responseTime = 'Normal';
 
   // Voice recording & timers
-  bool _isRecording = true;
-  int _recordSeconds = 12;
+  bool _isRecording = false;
+  int _recordSeconds = 0;
   Timer? _recordTimer;
   String _spokenText =
       'Sometimes in the evenings, even when people are around, I feel alone in my thoughts.';
+
+  // Automatic Facial Affect Capture & Consent
+  late final AutomaticFacialCaptureService _facialCaptureService;
+  bool _hasFacialConsent = false;
 
   // Speech and Voice engines
   late FlutterTts _flutterTts;
@@ -137,7 +142,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _loadResidentData(_currentResident.id);
     _initAnimations();
     _initVoiceEngines();
-    _startRecordingTimer();
+    _initFacialCapture();
   }
 
   void _initActivitiesAndHistory() {
@@ -599,8 +604,120 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     }
   }
 
+  void _initFacialCapture() {
+    _facialCaptureService = AutomaticFacialCaptureService();
+    _facialCaptureService.onStatusChanged = (status) {
+      if (mounted) {
+        setState(() {});
+      }
+    };
+    _facialCaptureService.onFrameCaptured = (bytes) {
+      if (mounted) {
+        setState(() {
+          _capturedImageBytes = bytes;
+        });
+      }
+    };
+    _facialCaptureService.onFrameAnalyzed = (result) {
+      if (mounted) {
+        _handleAutomaticCaptureResult(result);
+      }
+    };
+  }
+
+  void _handleAutomaticCaptureResult(FacialEmotionResult result) {
+    if (!mounted) return;
+    if (result.status == FacialInferenceStatus.success) {
+      _updateEmotionFromResult(result);
+    } else {
+      debugPrint('Automatic facial capture status: ${result.status} (${result.clinicalObservation})');
+    }
+  }
+
+  Future<bool> _ensureFacialObservationConsent() async {
+    if (_hasFacialConsent) return true;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: const [
+            Icon(LucideIcons.camera, color: AppColors.primary, size: 22),
+            SizedBox(width: 10),
+            Text('Facial Affect Consent', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.lavenderBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.lilac),
+              ),
+              child: Row(
+                children: const [
+                  Icon(LucideIcons.shieldCheck, color: AppColors.primary, size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Elderly-Care Research Protocol (RALPA)',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.navy, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'To support longitudinal affective prediction, Carevora periodically captures front-camera video frames (approx. every 5 seconds) while the resident is speaking.',
+              style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.body),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '• Video frames are processed in volatile memory only and discarded immediately.\n'
+              '• No images or video are permanently stored.\n'
+              '• Camera access can be stopped at any moment by pausing recording.',
+              style: TextStyle(fontSize: 12, height: 1.4, color: AppColors.muted),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Decline (Audio Only)', style: TextStyle(color: AppColors.muted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Grant Consent & Start'),
+          ),
+        ],
+      ),
+    );
+
+    final granted = result ?? false;
+    if (mounted) {
+      setState(() {
+        _hasFacialConsent = granted;
+      });
+    }
+    _facialCaptureService.grantConsent(granted);
+    return granted;
+  }
+
   @override
   void dispose() {
+    _facialCaptureService.dispose();
     _recordTimer?.cancel();
     _waveController.dispose();
     _scannerController.dispose();
@@ -614,12 +731,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     await _flutterTts.speak(currentQ.audioPrompt);
   }
 
-  void _toggleRecording() async {
-    setState(() {
-      _isRecording = !_isRecording;
-    });
-
-    if (_isRecording) {
+  Future<void> _toggleRecording() async {
+    if (!_isRecording) {
+      final consentGranted = await _ensureFacialObservationConsent();
+      if (!mounted) return;
+      setState(() {
+        _isRecording = true;
+      });
       _startRecordingTimer();
       if (_speechEnabled) {
         _speech.listen(onResult: (result) {
@@ -630,11 +748,18 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           }
         });
       }
+      if (consentGranted) {
+        await _facialCaptureService.startCaptureForVoiceRecording();
+      }
     } else {
+      setState(() {
+        _isRecording = false;
+      });
       _recordTimer?.cancel();
       if (_speechEnabled) {
         await _speech.stop();
       }
+      _facialCaptureService.stopCapture();
     }
   }
 
@@ -732,6 +857,22 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   }
 
   void _updateEmotionFromResult(FacialEmotionResult result) {
+    if (result.status != FacialInferenceStatus.success) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.clinicalObservation),
+            backgroundColor: result.status == FacialInferenceStatus.noFaceDetected
+                ? AppColors.riskModerate
+                : AppColors.riskHigh,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() {
       _facialConfidence = result.confidence;
       if (result.primaryEmotion == EmotionCategory.happy) {
@@ -746,6 +887,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _selectedEmotion = 'Angry';
         _lonelinessScore = 65;
         _isolationScore = 62;
+      } else if (result.primaryEmotion == EmotionCategory.calmNeutral) {
+        _selectedEmotion = 'Happy';
+        _lonelinessScore = 54;
+        _isolationScore = 50;
       } else {
         _selectedEmotion = 'Fear';
         _lonelinessScore = 70;
@@ -927,6 +1072,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   }
 
   void _showEndAssessmentDialog() {
+    if (_isRecording) {
+      _toggleRecording();
+    }
     final allAnswered = EmotionalAssessmentService.areAllQuestionsAnswered(_answers);
     final missingQuestions = EmotionalAssessmentService.getUnansweredQuestions(_answers);
     final calculatedWellness = EmotionalAssessmentService.calculateWellnessScore(_answers);
@@ -1107,7 +1255,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                           final result = await EmotionalAssessmentService.submitAssessment(
                             residentId: residentId,
                             answers: answersPayload,
-                            includeFacialCheck: _capturedImageBytes != null,
+                            includeFacialCheck:
+                                (_capturedImageBytes != null || _facialCaptureService.aggregate.validCount > 0),
                             includeVoiceCheck: true,
                             token: token,
                           );
@@ -1850,28 +1999,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 'Camera (Facial Expression)',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.navy),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.riskLowBg,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.fiber_manual_record, size: 8, color: AppColors.riskLow),
-                    SizedBox(width: 4),
-                    Text(
-                      'Live',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.riskLow,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildFacialCaptureStatusBadge(),
             ],
           ),
           const SizedBox(height: 12),
@@ -1990,10 +2118,76 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       ],
                     ),
                   ),
+
+                  // Live auto-capture bottom status overlay
+                  Positioned(
+                    bottom: 6,
+                    left: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _facialCaptureService.isAutoCapturing
+                                ? LucideIcons.activity
+                                : LucideIcons.shieldCheck,
+                            size: 11,
+                            color: _facialCaptureService.isAutoCapturing
+                                ? AppColors.leafGreen
+                                : Colors.white70,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _facialCaptureService.isAutoCapturing
+                                  ? 'Auto-capture active (5s interval) • ${_facialCaptureService.aggregate.validCount} valid samples'
+                                  : (_hasFacialConsent
+                                      ? 'Consent granted • Auto-captures during voice'
+                                      : 'Consent required for auto facial capture'),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
+          if (_facialCaptureService.status == FacialCaptureStatus.modelUnavailable) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.riskModerateBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.riskModerate.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(LucideIcons.alertTriangle, size: 14, color: AppColors.riskModerate),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'PyTorch FER Model offline on FastAPI. Frames captured safely without fabricating scores.',
+                      style: TextStyle(fontSize: 10, color: AppColors.navy, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
 
           // Detected Emotion Label and Selection Pills
@@ -2051,6 +2245,112 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 activeBg: AppColors.primarySoft,
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFacialCaptureStatusBadge() {
+    final status = _facialCaptureService.status;
+    Color bg;
+    Color fg;
+    String text;
+    IconData icon;
+
+    switch (status) {
+      case FacialCaptureStatus.capturing:
+        bg = AppColors.primarySoft;
+        fg = AppColors.primary;
+        text = 'Capturing';
+        icon = LucideIcons.camera;
+        break;
+      case FacialCaptureStatus.analyzing:
+        bg = AppColors.lavenderBg;
+        fg = AppColors.primary;
+        text = 'Analyzing AI';
+        icon = LucideIcons.sparkles;
+        break;
+      case FacialCaptureStatus.noFace:
+        bg = AppColors.riskModerateBg;
+        fg = AppColors.riskModerate;
+        text = 'No Face';
+        icon = LucideIcons.alertCircle;
+        break;
+      case FacialCaptureStatus.modelUnavailable:
+        bg = AppColors.border;
+        fg = AppColors.navy;
+        text = 'Model Offline';
+        icon = LucideIcons.alertTriangle;
+        break;
+      case FacialCaptureStatus.consentRequired:
+        bg = AppColors.riskModerateBg;
+        fg = AppColors.riskModerate;
+        text = 'Consent Needed';
+        icon = LucideIcons.shieldAlert;
+        break;
+      case FacialCaptureStatus.permissionDenied:
+        bg = AppColors.riskHighBg;
+        fg = AppColors.riskHigh;
+        text = 'Perm Denied';
+        icon = LucideIcons.shieldAlert;
+        break;
+      case FacialCaptureStatus.cameraUnavailable:
+        bg = AppColors.border;
+        fg = AppColors.muted;
+        text = 'No Camera';
+        icon = LucideIcons.videoOff;
+        break;
+      case FacialCaptureStatus.networkError:
+        bg = AppColors.riskHighBg;
+        fg = AppColors.riskHigh;
+        text = 'Network Err';
+        icon = LucideIcons.wifiOff;
+        break;
+      case FacialCaptureStatus.standby:
+        bg = AppColors.riskLowBg;
+        fg = AppColors.riskLow;
+        text = 'Auto (Voice)';
+        icon = Icons.fiber_manual_record;
+        break;
+      case FacialCaptureStatus.error:
+        bg = AppColors.riskHighBg;
+        fg = AppColors.riskHigh;
+        text = 'Error';
+        icon = LucideIcons.alertOctagon;
+        break;
+      case FacialCaptureStatus.initializingCamera:
+        bg = AppColors.lavenderBg;
+        fg = AppColors.primary;
+        text = 'Init Camera';
+        icon = LucideIcons.loader;
+        break;
+      case FacialCaptureStatus.idle:
+        bg = AppColors.border;
+        fg = AppColors.muted;
+        text = 'Standby';
+        icon = LucideIcons.video;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: fg),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: fg,
+            ),
           ),
         ],
       ),
