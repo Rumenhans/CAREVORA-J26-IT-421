@@ -74,8 +74,7 @@ public class Resident {
     private Double socialScore = 80.0;
 
     @Column(name = "cognitive_score")
-    @Builder.Default
-    private Double cognitiveScore = 75.0;
+    private Double cognitiveScore;
 
     @Column(name = "last_assessment_date")
     private LocalDateTime lastAssessmentDate;

@@ -62,6 +62,10 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   bool _isSubmitting = false;
   String? _submitError;
 
+  // Session lifecycle & persistence
+  String? _sessionId;
+  String _sessionStatus = 'IN_PROGRESS'; // 'IN_PROGRESS', 'PENDING_CAREGIVER_REVIEW', 'COMPLETED'
+
   // Animated waveform controller
   late AnimationController _waveformController;
 
@@ -244,11 +248,89 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       _isListening = false;
       _isSpeaking = false;
       _speechStatusMessage = null;
+      _sessionId = null;
+      _sessionStatus = 'IN_PROGRESS';
     });
     _loadSavedResidentResponses(residentId);
   }
 
+  Future<void> _startNewAssessmentSession() async {
+    final residentId = _resident?.id ?? ref.read(authProvider).state.residentId;
+    if (residentId == null) return;
+    final token = ref.read(authProvider).state.token;
+
+    _saveCurrentQuestionState();
+    setState(() {
+      _grades.clear();
+      _responses.clear();
+      _questionTimes.clear();
+      _currentIndex = 0;
+      _responseController.clear();
+      _sessionElapsedSeconds = 0;
+      _sessionId = null;
+      _sessionStatus = 'IN_PROGRESS';
+    });
+
+    try {
+      final session = await CognitiveAssessmentService.startSession(
+        residentId: residentId,
+        token: token,
+      );
+      if (mounted) {
+        setState(() {
+          _sessionId = session.sessionId;
+          _sessionStatus = 'IN_PROGRESS';
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadSavedResidentResponses(int residentId) async {
+    final token = ref.read(authProvider).state.token;
+
+    // 1. First retrieve active/pending session from the existing backend
+    try {
+      final pendingSession = await CognitiveAssessmentService.getPendingSession(
+        residentId: residentId,
+        token: token,
+      );
+      if (pendingSession != null && mounted) {
+        setState(() {
+          _sessionId = pendingSession.sessionId;
+          _sessionStatus = pendingSession.status;
+          if (pendingSession.responses.isNotEmpty) {
+            _responses.addAll(pendingSession.responses);
+          }
+          if (pendingSession.grades.isNotEmpty) {
+            _grades.addAll(pendingSession.grades);
+          }
+          if (pendingSession.questionTimes.isNotEmpty) {
+            _questionTimes.addAll(pendingSession.questionTimes);
+          }
+          _responseController.text =
+              _responses[_questions[_currentIndex].id] ?? '';
+        });
+        return;
+      }
+    } catch (_) {}
+
+    // 2. If no pending session, start a new session on backend
+    if (_sessionId == null) {
+      try {
+        final newSession = await CognitiveAssessmentService.startSession(
+          residentId: residentId,
+          token: token,
+        );
+        if (mounted) {
+          setState(() {
+            _sessionId = newSession.sessionId;
+            _sessionStatus = 'IN_PROGRESS';
+          });
+        }
+      } catch (_) {}
+    }
+
+    // 3. SharedPreferences offline fallback
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedJson = prefs.getString('cognitive_responses_$residentId');
@@ -259,7 +341,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             decoded.forEach((key, val) {
               final qId = int.tryParse(key);
               if (qId != null && val is String && val.trim().isNotEmpty) {
-                _responses[qId] = val;
+                _responses[qId] ??= val;
               }
             });
             _responseController.text =
@@ -273,6 +355,22 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   Future<void> _persistResponses() async {
     final rId = _resident?.id ?? ref.read(authProvider).state.residentId;
     if (rId == null) return;
+
+    final token = ref.read(authProvider).state.token;
+
+    // Save to existing backend H2 database
+    if (_sessionId != null) {
+      try {
+        await CognitiveAssessmentService.saveResponses(
+          sessionId: _sessionId!,
+          responses: _responses,
+          questionTimes: _questionTimes,
+          token: token,
+        );
+      } catch (_) {}
+    }
+
+    // Local SharedPreferences fallback
     try {
       final prefs = await SharedPreferences.getInstance();
       final map = {
@@ -505,6 +603,12 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         educationYears: _resident?.educationYears,
         accuracies: accuracies,
         responseTimes: responseTimes,
+        sessionId: _sessionId,
+        responses: _responses,
+        grades: {
+          for (final e in _grades.entries)
+            if (e.value != null) e.key: e.value!,
+        },
       );
 
       final result = await CognitiveAssessmentService.submitAssessment(
@@ -515,6 +619,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       if (mounted) {
         setState(() {
           _isSubmitting = false;
+          _sessionStatus = 'COMPLETED';
         });
         Navigator.of(context, rootNavigator: true).pop(); // Dismiss confirm
         _showResultDialog(result);
@@ -533,7 +638,31 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _saveCurrentQuestionState();
     if (_answeredCount < _totalCount) return;
 
+    final token = ref.read(authProvider).state.token;
+    final rId = _resident?.id ?? ref.read(authProvider).state.residentId;
+
     setState(() => _isSubmitting = true);
+
+    try {
+      if (_sessionId == null && rId != null) {
+        final session = await CognitiveAssessmentService.startSession(
+          residentId: rId,
+          token: token,
+        );
+        _sessionId = session.sessionId;
+      }
+
+      if (_sessionId != null) {
+        await CognitiveAssessmentService.saveResponses(
+          sessionId: _sessionId!,
+          responses: _responses,
+          questionTimes: _questionTimes,
+          token: token,
+        );
+        _sessionStatus = 'PENDING_CAREGIVER_REVIEW';
+      }
+    } catch (_) {}
+
     await _persistResponses();
 
     if (mounted) {
@@ -616,64 +745,167 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Widget _buildTopNavBar() {
+    Color statusBg;
+    Color statusColor;
+    String statusLabel;
+    IconData statusIcon;
+
+    if (_sessionStatus == 'COMPLETED') {
+      statusBg = const Color(0xFFDCFCE7);
+      statusColor = const Color(0xFF15803D);
+      statusLabel = 'Completed';
+      statusIcon = LucideIcons.circleCheckBig;
+    } else if (_sessionStatus == 'PENDING_CAREGIVER_REVIEW') {
+      statusBg = const Color(0xFFFEF3C7);
+      statusColor = const Color(0xFFB45309);
+      statusLabel = 'Pending Caregiver Review';
+      statusIcon = LucideIcons.alertCircle;
+    } else {
+      statusBg = const Color(0xFFEFF6FF);
+      statusColor = const Color(0xFF1D4ED8);
+      statusLabel = 'In Progress';
+      statusIcon = LucideIcons.clock;
+    }
+
     return Wrap(
       alignment: WrapAlignment.spaceBetween,
       crossAxisAlignment: WrapCrossAlignment.center,
       spacing: 12,
       runSpacing: 8,
       children: [
-        InkWell(
-          onTap: () => context.go('/dashboard'),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
-                SizedBox(width: 6),
-                Text(
-                  'Back to Overview',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(LucideIcons.clock, size: 13, color: AppColors.primary),
-              const SizedBox(width: 6),
-              const Text(
-                'Session Elapsed: ',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.body,
-                  fontWeight: FontWeight.w500,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: () => context.go('/dashboard/residents'),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
+                    SizedBox(width: 6),
+                    Text(
+                      'Resident Directory',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                _formatElapsed(_sessionElapsedSeconds),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.navy,
+            ),
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: statusBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(statusIcon, size: 13, color: statusColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    statusLabel,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_sessionId != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  '#${_sessionId!.length > 18 ? _sessionId!.substring(0, 18) : _sessionId}',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
+                  ),
                 ),
               ),
             ],
-          ),
+          ],
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: _startNewAssessmentSession,
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(LucideIcons.plus, size: 13, color: AppColors.primary),
+                    SizedBox(width: 4),
+                    Text(
+                      'New Assessment',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.clock, size: 13, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Session Elapsed: ',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.body,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    _formatElapsed(_sessionElapsedSeconds),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navy,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -2818,7 +3050,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '${result.acrfScore.toStringAsFixed(1)} / 100',
+                        '${result.acrfScore != null ? result.acrfScore!.toStringAsFixed(1) : 'N/A'} / 100',
                         style: const TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.w800,
@@ -2844,15 +3076,15 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildCategoryBadge('Memory', result.memory, '25%'),
-                    _buildCategoryBadge('Attention', result.attention, '20%'),
+                    _buildCategoryBadge('Memory', result.memory ?? 0.0, '25%'),
+                    _buildCategoryBadge('Attention', result.attention ?? 0.0, '20%'),
                     _buildCategoryBadge(
                       'Orientation',
-                      result.orientation,
+                      result.orientation ?? 0.0,
                       '20%',
                     ),
-                    _buildCategoryBadge('Recall', result.recall, '20%'),
-                    _buildCategoryBadge('Reasoning', result.reasoning, '15%'),
+                    _buildCategoryBadge('Recall', result.recall ?? 0.0, '20%'),
+                    _buildCategoryBadge('Reasoning', result.reasoning ?? 0.0, '15%'),
                   ],
                 ),
                 const SizedBox(height: 16),
