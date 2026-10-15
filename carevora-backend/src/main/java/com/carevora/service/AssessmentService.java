@@ -11,6 +11,7 @@ import com.carevora.entity.Resident;
 import com.carevora.enums.RiskLevel;
 import com.carevora.enums.TrajectoryStatus;
 import com.carevora.enums.WellnessStatus;
+import com.carevora.exception.BadRequestException;
 import com.carevora.exception.ResourceNotFoundException;
 import com.carevora.repository.AssessmentRepository;
 import com.carevora.repository.ContributingFactorRepository;
@@ -36,22 +37,55 @@ public class AssessmentService {
 
     @Transactional
     public ApiResponse<AssessmentResponse> submitAssessment(AssessmentSubmissionRequest request) {
+        if (request == null || request.getResidentId() == null) {
+            throw new BadRequestException("Resident ID is required");
+        }
+
+        // Validate that exactly 10 questionnaire answers are present
+        if (request.getAnswers() == null || request.getAnswers().size() != 10) {
+            throw new BadRequestException("Exactly 10 questionnaire answers are required");
+        }
+
+        // Validate that every answer is either 0 (favorable) or 1 (adverse)
+        for (int i = 0; i < request.getAnswers().size(); i++) {
+            Integer ans = request.getAnswers().get(i);
+            if (ans == null || (ans != 0 && ans != 1)) {
+                throw new BadRequestException("Questionnaire answer at index " + i + " must be either 0 (favorable) or 1 (adverse)");
+            }
+        }
+
         Resident resident = residentRepository.findById(request.getResidentId())
                 .orElseThrow(() -> new ResourceNotFoundException("Resident not found with id: " + request.getResidentId()));
 
-        double avgVal = 0.0;
-        if (request.getAnswers() != null && !request.getAnswers().isEmpty()) {
-            double sum = request.getAnswers().stream().mapToDouble(Integer::doubleValue).sum();
-            avgVal = sum / request.getAnswers().size();
-        }
+        // Calculate questionnaire wellness as clamp(100 - avgVal * 100, 0, 100)
+        double sum = request.getAnswers().stream().mapToDouble(Integer::doubleValue).sum();
+        double avgVal = sum / request.getAnswers().size();
+        double score = Math.max(0.0, Math.min(100.0, 100.0 - (avgVal * 100.0)));
+        score = Math.round(score * 10.0) / 10.0;
 
-        double score = Math.max(40.0, Math.min(96.0, 100.0 - (avgVal * 20.0)));
-        double emotionalScore = Math.min(100.0, score + 2.0);
-        double socialScore = Math.max(0.0, score - 2.0);
+        // Overall score and emotional score represent wellness (higher = better wellness)
+        double emotionalScore = score;
+
+        // Preserve independent social score; do not fabricate social measurements from questionnaire
+        Double socialScore = resident.getSocialScore() != null ? resident.getSocialScore() : 80.0;
 
         WellnessStatus status = score >= 75.0 ? WellnessStatus.LOOKING_GOOD : (score >= 60.0 ? WellnessStatus.STABLE : WellnessStatus.NEEDS_ATTENTION);
         RiskLevel risk = score >= 75.0 ? RiskLevel.LOW : (score >= 60.0 ? RiskLevel.MODERATE : RiskLevel.HIGH);
-        TrajectoryStatus trajectory = TrajectoryStatus.IMPROVING;
+
+        // Derive longitudinal trajectory from resident's prior emotional score snapshot
+        TrajectoryStatus trajectory;
+        Double prevScore = resident.getEmotionalScore();
+        if (prevScore != null) {
+            if (score - prevScore > 2.0) {
+                trajectory = TrajectoryStatus.IMPROVING;
+            } else if (prevScore - score > 2.0) {
+                trajectory = TrajectoryStatus.INCREASING_RISK;
+            } else {
+                trajectory = TrajectoryStatus.STABLE;
+            }
+        } else {
+            trajectory = score >= 75.0 ? TrajectoryStatus.IMPROVING : (score >= 60.0 ? TrajectoryStatus.STABLE : TrajectoryStatus.INCREASING_RISK);
+        }
 
         String encouragingMsg = score >= 75.0 
                 ? "You're doing wonderfully today! Your emotional wellness is shining."
@@ -71,24 +105,24 @@ public class AssessmentService {
                 .build();
 
         List<AssessmentAnswer> answers = new ArrayList<>();
-        if (request.getAnswers() != null) {
-            for (int i = 0; i < request.getAnswers().size(); i++) {
-                answers.add(AssessmentAnswer.builder()
-                        .assessment(assessment)
-                        .questionId("q" + (i + 1))
-                        .selectedIndex(request.getAnswers().get(i))
-                        .build());
-            }
+        for (int i = 0; i < request.getAnswers().size(); i++) {
+            answers.add(AssessmentAnswer.builder()
+                    .assessment(assessment)
+                    .questionId("q" + (i + 1))
+                    .selectedIndex(request.getAnswers().get(i))
+                    .build());
         }
         assessment.setAnswers(answers);
         Assessment savedAssessment = assessmentRepository.save(assessment);
 
-        // Update Resident current snapshot
+        // Update Resident current snapshot (preserving independent socialScore)
         resident.setCurrentStatus(status);
         resident.setRiskLevel(risk);
         resident.setTrajectory(trajectory);
         resident.setEmotionalScore(emotionalScore);
-        resident.setSocialScore(socialScore);
+        if (resident.getSocialScore() == null) {
+            resident.setSocialScore(socialScore);
+        }
         resident.setLastAssessmentDate(LocalDateTime.now());
         residentRepository.save(resident);
 
@@ -100,7 +134,7 @@ public class AssessmentService {
                 .title("Daily Questionnaire")
                 .score(score)
                 .category("Questionnaire")
-                .description("Self-reported answers to emotional and social prompts")
+                .description("Self-reported answers to emotional wellness prompts")
                 .build());
 
         if (Boolean.TRUE.equals(request.getIncludeFacialCheck())) {

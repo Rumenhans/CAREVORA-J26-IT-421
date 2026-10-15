@@ -249,7 +249,7 @@ print("="*75)
 # Submit valid assessment for Sarah (Resident 1) as Caregiver 1
 submit_payload = {
     "residentId": 1,
-    "answers": [1, 2, 1, 2, 1],
+    "answers": [0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
     "includeFacialCheck": True,
     "includeVoiceCheck": True
 }

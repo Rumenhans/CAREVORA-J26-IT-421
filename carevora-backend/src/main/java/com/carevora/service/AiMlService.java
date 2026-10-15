@@ -80,6 +80,7 @@ public class AiMlService {
             List<Assessment> assessments = assessmentRepository.findByResidentIdOrderByCreatedAtDesc(residentId);
             historyScores = assessments.stream()
                     .map(Assessment::getOverallScore)
+                    .filter(java.util.Objects::nonNull)
                     .collect(Collectors.toList());
             // Assessments query is ordered DESC for UI history listing; reverse to chronological order (ASC) for longitudinal temporal regression
             Collections.reverse(historyScores);

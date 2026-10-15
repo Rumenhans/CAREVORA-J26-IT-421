@@ -14,6 +14,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../data/mock/mock_carevora_data.dart';
 import '../../../data/models/carevora_models.dart';
 import '../application/facial_emotion_ai_service.dart';
+import '../application/emotional_assessment_service.dart';
 import '../../auth/application/auth_controller.dart';
 
 class EmotionalWellnessPage extends ConsumerStatefulWidget {
@@ -25,10 +26,12 @@ class EmotionalWellnessPage extends ConsumerStatefulWidget {
 
 class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     with TickerProviderStateMixin {
-  // Default to question 5 (index 4) to strictly mirror Proposal Figure 11-4 on load!
-  int _currentIndex = 4;
+  // Start from Question 1 (index 0)
+  int _currentIndex = 0;
   final List<AssessmentQuestion> _questions = MockCarevoraData.emotionalQuestions;
-  final Map<int, bool?> _answers = {5: true};
+  final Map<int, bool?> _answers = {};
+  bool _isSubmittingAssessment = false;
+  String? _submissionError;
 
   // Real-time analysis metrics
   String _selectedEmotion = 'Happy';
@@ -908,88 +911,261 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     );
   }
 
+  int _resolveBackendResidentId() {
+    final authState = ref.read(authProvider).state;
+    if (authState.residentId != null) {
+      return authState.residentId!;
+    }
+    final parsed = int.tryParse(_currentResident.id);
+    if (parsed != null) {
+      if (parsed == 9002 || _currentResident.name.contains('Sarah')) return 1;
+      if (parsed == 9003 || _currentResident.name.contains('Arthur')) return 2;
+      if (parsed == 9004 || _currentResident.name.contains('Margaret')) return 3;
+      if (parsed <= 100) return parsed;
+    }
+    return 1;
+  }
+
   void _showEndAssessmentDialog() {
+    final allAnswered = EmotionalAssessmentService.areAllQuestionsAnswered(_answers);
+    final missingQuestions = EmotionalAssessmentService.getUnansweredQuestions(_answers);
+    final calculatedWellness = EmotionalAssessmentService.calculateWellnessScore(_answers);
+    final calculatedRisk = EmotionalAssessmentService.calculateLonelinessRiskScore(calculatedWellness);
+
+    final riskTier = calculatedRisk >= 65.0
+        ? 'High Risk'
+        : (calculatedRisk >= 40.0 ? 'Moderate Risk' : 'Low Risk');
+    final riskColor = calculatedRisk >= 65.0
+        ? AppColors.riskHigh
+        : (calculatedRisk >= 40.0 ? AppColors.riskModerate : AppColors.riskLow);
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: const [
-            Icon(LucideIcons.alertTriangle, color: AppColors.riskModerate, size: 22),
-            SizedBox(width: 10),
-            Text('End Loneliness & Social Assessment?',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'The current session data will be processed through the RALPA (Resident-Adaptive Longitudinal Prediction Algorithm) pipeline to update Mr. James Perera\'s baseline and risk trajectory.',
-              style: TextStyle(fontSize: 13, color: AppColors.body, height: 1.4),
+      barrierDismissible: !_isSubmittingAssessment,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Icon(
+                  allAnswered ? LucideIcons.clipboardCheck : LucideIcons.alertTriangle,
+                  color: allAnswered ? AppColors.primary : AppColors.riskModerate,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'End Loneliness & Social Assessment?',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceSecondary,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Loneliness Index:', style: TextStyle(fontWeight: FontWeight.w600)),
-                      Text('$_lonelinessScore (Moderate Risk)',
-                          style: const TextStyle(
-                              color: AppColors.riskModerate, fontWeight: FontWeight.bold)),
-                    ],
+                  Text(
+                    'Assessment summary for ${_currentResident.name}. Answers will be submitted to the Carevora clinical repository.',
+                    style: const TextStyle(fontSize: 13, color: AppColors.body, height: 1.4),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Social Isolation Index:', style: TextStyle(fontWeight: FontWeight.w600)),
-                      Text('$_isolationScore (High Risk)',
-                          style: const TextStyle(
-                              color: AppColors.riskHigh, fontWeight: FontWeight.bold)),
-                    ],
+                  const SizedBox(height: 14),
+
+                  if (!allAnswered) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7ED),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFF97316)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(LucideIcons.alertCircle, color: Color(0xFFF97316), size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Incomplete Questionnaire',
+                                  style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFC2410C)),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Please answer all 10 questions before submitting. Unanswered question(s): ${missingQuestions.join(', ')}.',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF9A3412)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceSecondary,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Questionnaire Wellness Score:', style: TextStyle(fontWeight: FontWeight.w600)),
+                            Text(
+                              '${calculatedWellness.toStringAsFixed(1)}% (Higher is Better)',
+                              style: const TextStyle(color: AppColors.riskLow, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Loneliness & Isolation Risk:', style: TextStyle(fontWeight: FontWeight.w600)),
+                            Text(
+                              '${calculatedRisk.toStringAsFixed(1)}% ($riskTier)',
+                              style: TextStyle(color: riskColor, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Questions Answered:', style: TextStyle(fontWeight: FontWeight.w600)),
+                            Text(
+                              '${10 - missingQuestions.length} of 10 completed',
+                              style: TextStyle(
+                                color: allAnswered ? AppColors.navy : AppColors.riskModerate,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: const [
-                      Text('Predicted Trajectory:', style: TextStyle(fontWeight: FontWeight.w600)),
-                      Text('Slow Deterioration (Action Req.)',
-                          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
+
+                  if (_submissionError != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.riskHighBg,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.riskHigh),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(LucideIcons.xCircle, color: AppColors.riskHigh, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _submissionError!,
+                              style: const TextStyle(fontSize: 12, color: AppColors.riskHigh),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Continue Session'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.go('/dashboard');
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            child: const Text('Save & Finish Assessment'),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: _isSubmittingAssessment ? null : () => Navigator.pop(context),
+                child: const Text('Continue Session'),
+              ),
+              ElevatedButton(
+                onPressed: (!allAnswered || _isSubmittingAssessment)
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          _isSubmittingAssessment = true;
+                          _submissionError = null;
+                        });
+
+                        final token = ref.read(authProvider).state.token;
+                        final residentId = _resolveBackendResidentId();
+                        final answersPayload = EmotionalAssessmentService.buildAnswersPayload(_answers);
+
+                        final messenger = ScaffoldMessenger.of(context);
+                        final navigator = Navigator.of(dialogCtx);
+                        final router = GoRouter.of(context);
+
+                        try {
+                          final result = await EmotionalAssessmentService.submitAssessment(
+                            residentId: residentId,
+                            answers: answersPayload,
+                            includeFacialCheck: _capturedImageBytes != null,
+                            includeVoiceCheck: true,
+                            token: token,
+                          );
+
+                          if (!mounted) return;
+
+                          setState(() {
+                            _lonelinessScore = calculatedRisk.round();
+                            _isolationScore = calculatedRisk.round();
+                            _isSubmittingAssessment = false;
+                          });
+
+                          navigator.pop();
+
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Assessment #${result.id} saved successfully! Wellness score: ${result.overallScore.toStringAsFixed(1)}%.',
+                              ),
+                              backgroundColor: AppColors.riskLow,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+
+                          router.go('/dashboard');
+                        } catch (e) {
+                          if (mounted) {
+                            setDialogState(() {
+                              _isSubmittingAssessment = false;
+                              _submissionError = e.toString();
+                            });
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Submission failed: $e'),
+                                backgroundColor: AppColors.riskHigh,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                ),
+                child: _isSubmittingAssessment
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Save & Finish Assessment'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
