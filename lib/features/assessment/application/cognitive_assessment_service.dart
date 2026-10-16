@@ -432,11 +432,13 @@ class CognitiveAssessmentService {
     throw CognitiveApiException(message, statusCode: res.statusCode);
   }
 
-  /// Saves resident answers to the existing backend and database, transitioning status to Pending Caregiver Review.
+  /// Saves resident answers to the existing backend and database.
   static Future<CognitiveSessionData> saveResponses({
     required String sessionId,
     required Map<int, String> responses,
     required Map<int, double> questionTimes,
+    String? status,
+    bool? autoFinalize,
     String? token,
   }) async {
     final uri = Uri.parse('$baseUrl/api/cognitive/assessments/sessions/$sessionId/responses');
@@ -445,10 +447,13 @@ class CognitiveAssessmentService {
       headers['Authorization'] = 'Bearer $token';
     }
 
-    final bodyJson = jsonEncode({
+    final Map<String, dynamic> bodyMap = {
       'responses': {for (final e in responses.entries) e.key.toString(): e.value},
       'questionTimes': {for (final e in questionTimes.entries) e.key.toString(): e.value},
-    });
+    };
+    if (status != null) bodyMap['status'] = status;
+    if (autoFinalize != null) bodyMap['autoFinalize'] = autoFinalize;
+    final bodyJson = jsonEncode(bodyMap);
 
     final res = await http
         .post(uri, headers: headers, body: bodyJson)

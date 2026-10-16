@@ -15,4 +15,6 @@ public class SaveCognitiveResponsesRequest {
 
     private Map<Integer, String> responses;
     private Map<Integer, Double> questionTimes;
+    private String status;
+    private Boolean autoFinalize;
 }
