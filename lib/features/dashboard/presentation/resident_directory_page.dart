@@ -1158,7 +1158,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             ],
           ),
           const SizedBox(height: 16),
-          const Text('Latest Score (ACRF)', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          const Text('Task Accuracy Score', style: TextStyle(fontSize: 12, color: AppColors.muted)),
           const SizedBox(height: 2),
           Text(
             scoreDisplay,
@@ -1175,12 +1175,40 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             runSpacing: 4,
             children: [
               const Text(
-                'Risk Level:',
+                'AI Risk Prediction:',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               _buildRiskBadge(riskLevelDisplay),
             ],
           ),
+          if (completedAssessments.isNotEmpty &&
+              completedAssessments.first.acrfScore != null &&
+              completedAssessments.first.acrfScore! >= 85.0 &&
+              (riskLevelDisplay.toLowerCase().contains('moderate') ||
+                  riskLevelDisplay.toLowerCase().contains('high'))) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7).withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.info, size: 14, color: Color(0xFFB45309)),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'AI prediction also considers response latency, longitudinal features, and other model inputs alongside task accuracy.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF92400E), height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: [
@@ -1740,7 +1768,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Overall ACRF Score', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const Text('Task Accuracy Score', style: TextStyle(fontSize: 11, color: AppColors.muted)),
                               const SizedBox(height: 2),
                               Text(
                                 scoreText,
@@ -1751,7 +1779,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Cognitive Risk', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const Text('AI Risk Prediction', style: TextStyle(fontSize: 11, color: AppColors.muted)),
                               const SizedBox(height: 2),
                               _buildRiskBadge(riskLabel),
                             ],
@@ -1781,6 +1809,33 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           _buildDomainChip('Reasoning', item.reasoning),
                         ],
                       ),
+                      if (item.acrfScore != null &&
+                          item.acrfScore! >= 85.0 &&
+                          (riskLabel.toLowerCase().contains('moderate') ||
+                              riskLabel.toLowerCase().contains('high'))) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7).withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(LucideIcons.info, size: 13, color: Color(0xFFB45309)),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'AI prediction also considers response latency, longitudinal features, and other model inputs alongside task accuracy.',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFF92400E), height: 1.3),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       Row(
                         children: [

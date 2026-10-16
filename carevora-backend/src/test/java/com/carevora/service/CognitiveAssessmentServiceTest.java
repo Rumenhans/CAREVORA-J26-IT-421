@@ -541,4 +541,60 @@ class CognitiveAssessmentServiceTest {
         assertNull(resp2.getMlPrediction());
         assertNull(resp2.getMlModelEvaluation().getPrediction());
     }
+
+    @Test
+    void testSubmitAssessment_100PercentAcrfWithModeratePrediction_PreservesBothIndependently() {
+        authenticateUser("doctor@carevora.com");
+        when(residentRepository.findById(100L)).thenReturn(Optional.of(resident));
+        when(userRepository.findByEmail("doctor@carevora.com")).thenReturn(Optional.of(doctorUser));
+
+        CognitiveAssessmentSubmissionRequest req = CognitiveAssessmentSubmissionRequest.builder()
+                .residentId(100L)
+                .memory(100.0)
+                .attention(100.0)
+                .orientation(100.0)
+                .recall(100.0)
+                .reasoning(100.0)
+                .age(78)
+                .educationYears(12)
+                .accuracies(Map.of("memory", 1.0, "attention", 1.0, "orientation", 1.0, "recall", 1.0, "reasoning", 1.0))
+                .responseTimes(Map.of("memory", 12.0, "attention", 5.8, "orientation", 21.2, "recall", 18.2, "reasoning", 10.9))
+                .build();
+
+        CognitiveAiResult mockAiResult = CognitiveAiResult.builder()
+                .acrfScore(100.0)
+                .rawWeightedScore(100.0)
+                .scale("0-100")
+                .scoringDirection("Higher is better")
+                .mlModelEvaluation(CognitiveAssessmentResponse.MlModelStatusDto.builder()
+                        .available(true)
+                        .modelType("RandomForestClassifier")
+                        .prediction("Moderate")
+                        .probabilities(Map.of("Low", 0.29, "Moderate", 0.65, "High", 0.06))
+                        .alertTriggered(false)
+                        .build())
+                .categoryContributions(Collections.emptyList())
+                .weightsApplied(Collections.emptyMap())
+                .build();
+
+        when(aiMlService.predictCognitive(eq(100L), eq(100.0), eq(100.0), eq(100.0), eq(100.0), eq(100.0),
+                eq(78), eq(12), eq(req.getAccuracies()), eq(req.getResponseTimes())))
+                .thenReturn(mockAiResult);
+
+        when(cognitiveAssessmentRepository.save(any(CognitiveAssessment.class)))
+                .thenAnswer(inv -> {
+                    CognitiveAssessment a = inv.getArgument(0);
+                    a.setId(96L);
+                    return a;
+                });
+
+        ApiResponse<CognitiveAssessmentResponse> res = cognitiveAssessmentService.submitAssessment(req);
+        assertTrue(res.isSuccess());
+        assertNotNull(res.getData());
+
+        // Verifies both are preserved independently
+        assertEquals(100.0, res.getData().getAcrfScore(), "ACRF task accuracy score must remain 100.0%");
+        assertEquals("Moderate", res.getData().getMlPrediction(), "ML model prediction must remain Moderate");
+        assertEquals("Moderate Risk", res.getData().getRiskLevel(), "Risk level must remain Moderate Risk");
+    }
 }

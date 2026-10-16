@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -51,6 +52,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   bool _speechInitialized = false;
   bool _speechAvailable = false;
   String? _speechStatusMessage;
+  int _activeListeningSessionId = 0;
 
   // Resident Context
   CognitiveResidentProfile? _resident;
@@ -87,10 +89,13 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
   @override
   void dispose() {
+    _activeListeningSessionId++;
     _sessionTimer?.cancel();
     _waveformController.dispose();
     _flutterTts.stop();
-    _speech.stop();
+    _speech.statusListener = null;
+    _speech.errorListener = null;
+    _speech.cancel();
     _responseController.dispose();
     super.dispose();
   }
@@ -107,7 +112,13 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     try {
       await _flutterTts.setLanguage('en-US');
       await _flutterTts.setSpeechRate(0.48);
+      _flutterTts.setStartHandler(() {
+        if (mounted) setState(() => _isSpeaking = true);
+      });
       _flutterTts.setCompletionHandler(() {
+        if (mounted) setState(() => _isSpeaking = false);
+      });
+      _flutterTts.setCancelHandler(() {
         if (mounted) setState(() => _isSpeaking = false);
       });
       _flutterTts.setErrorHandler((_) {
@@ -118,25 +129,101 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
   Future<void> _initSpeech() async {
     _speech = stt.SpeechToText();
-    try {
-      final available = await _speech.initialize(
-        onStatus: (status) {
-          if (mounted) {
-            setState(() {
-              if (status == 'notListening' || status == 'done') {
-                _isListening = false;
+
+    void statusHandler(String status) {
+      debugPrint(
+        '[CARE-STT] [5. Status Change] [6. Stop/Cancel Reason] status="$status", '
+        'speechListening=${_speech.isListening}, isListeningState=$_isListening, '
+        'buffer="${_responseController.text}"',
+      );
+      if (mounted) {
+        setState(() {
+          if (status == 'notListening' || status == 'done') {
+            _isListening = false;
+            final text = _responseController.text.trim();
+            debugPrint(
+              '[CARE-STT] [7. Final Save Tracking] End status "$status". '
+              'Buffer to save: "$text", targetQ=${_currentIndex < _questions.length ? _questions[_currentIndex].id : -1}',
+            );
+            if (_currentIndex < _questions.length) {
+              final qId = _questions[_currentIndex].id;
+              if (text.isNotEmpty) {
+                _responses[qId] = text;
+                _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
+                _speechStatusMessage = 'Voice response captured.';
+                _persistResponses();
+              } else {
+                if (_speechStatusMessage == 'Listening... Speak now.') {
+                  _speechStatusMessage =
+                      'Speech not recognized. Please tap the microphone to retry or type your answer.';
+                }
               }
-            });
+            }
           }
-        },
-        onError: (val) {
-          if (mounted) {
-            setState(() {
-              _isListening = false;
-              _speechStatusMessage = 'Audio note: ${val.errorMsg}';
-            });
+        });
+      }
+    }
+
+    void errorHandler(dynamic val) {
+      String errorMsg = 'Unknown error';
+      bool permanent = false;
+      try {
+        errorMsg = val?.errorMsg?.toString() ?? val?.toString() ?? 'Unknown error';
+        permanent = val?.permanent == true;
+      } catch (_) {
+        errorMsg = val.toString();
+      }
+      debugPrint(
+        '[CARE-STT] [5. Recognition Error] [6. Stop/Cancel Reason] '
+        'errorMsg="$errorMsg", permanent=$permanent',
+      );
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          final existing = _responseController.text.trim();
+          if (existing.isNotEmpty && _currentIndex < _questions.length) {
+            final qId = _questions[_currentIndex].id;
+            _responses[qId] = existing;
+            if (_grades[qId] == null) {
+              _grades[qId] = CognitiveScoring.scoreQuestion(qId, existing);
+            }
+            _speechStatusMessage = 'Voice response captured.';
+            _persistResponses();
+          } else {
+            if (errorMsg.contains('no-speech') || errorMsg.contains('error_no_match')) {
+              _speechStatusMessage =
+                  'Speech not recognized. Please tap the microphone to retry or type your answer.';
+            } else if (errorMsg.contains('not-allowed') || errorMsg.contains('permission')) {
+              _speechStatusMessage =
+                  'Microphone permission denied. Please allow microphone access in Chrome or type your answer.';
+            } else if (errorMsg.contains('network')) {
+              _speechStatusMessage =
+                  'Speech service network issue. Please check connection or type your answer.';
+            } else {
+              _speechStatusMessage =
+                  'Audio note: $errorMsg. Please retry or type your answer.';
+            }
           }
-        },
+        });
+      }
+    }
+
+    _speech.statusListener = statusHandler;
+    _speech.errorListener = errorHandler;
+
+    try {
+      debugPrint('[CARE-STT] [2. Init] Initializing SpeechToText engine...');
+      final available = await _speech.initialize(
+        onStatus: statusHandler,
+        onError: errorHandler,
+      );
+      bool hasPerm = false;
+      try {
+        hasPerm = await _speech.hasPermission;
+      } catch (_) {}
+      debugPrint(
+        '[CARE-STT] [2. Init Status] available=$available, hasPermission=$hasPerm, '
+        'isAvailable=${_speech.isAvailable}, hasError=${_speech.hasError}',
       );
       if (mounted) {
         setState(() {
@@ -149,6 +236,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         });
       }
     } catch (e) {
+      debugPrint('[CARE-STT] [2. Init Status] Exception during initialize: $e');
       if (mounted) {
         setState(() {
           _speechInitialized = true;
@@ -412,9 +500,10 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   void _saveCurrentQuestionState() {
+    _activeListeningSessionId++;
     _recordCurrentQuestionDuration();
     if (_isSpeaking) _flutterTts.stop();
-    if (_isListening) _speech.stop();
+    if (_isListening || _speech.isListening) _speech.stop();
     final qId = _questions[_currentIndex].id;
     final text = _responseController.text;
     _responses[qId] = text;
@@ -425,6 +514,24 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Future<void> _toggleTts(String text) async {
+    if (_isListening || _speech.isListening) {
+      _activeListeningSessionId++;
+      debugPrint('[CARE-STT] [6. Stop/Cancel Reason] Stopped microphone because TTS audio playback started.');
+      await _speech.stop();
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          final text = _responseController.text.trim();
+          if (text.isNotEmpty && _currentIndex < _questions.length) {
+            final qId = _questions[_currentIndex].id;
+            _responses[qId] = text;
+            _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
+            _speechStatusMessage = 'Voice response captured.';
+            _persistResponses();
+          }
+        });
+      }
+    }
     if (_isSpeaking) {
       await _flutterTts.stop();
       if (mounted) setState(() => _isSpeaking = false);
@@ -435,62 +542,128 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Future<void> _toggleListening() async {
-    if (_isListening) {
+    final qId = _currentIndex < _questions.length ? _questions[_currentIndex].id : -1;
+    debugPrint(
+      '[CARE-STT] [1. Mic Pressed] qId=$qId, isListening=$_isListening, '
+      'speechListening=${_speech.isListening}, isSpeaking=$_isSpeaking, '
+      'speechAvailable=$_speechAvailable, speechInitialized=$_speechInitialized, '
+      'currentBuffer="${_responseController.text}"',
+    );
+
+    // 1. Promptly stop any active TTS output so audio playback does not conflict with microphone capture
+    if (_isSpeaking) {
+      await _flutterTts.stop();
+      if (mounted) setState(() => _isSpeaking = false);
+    }
+
+    if (_isListening || _speech.isListening) {
+      _activeListeningSessionId++;
+      debugPrint(
+        '[CARE-STT] [6. Stop/Cancel Reason] User tapped to stop listening. '
+        'qId=$qId, finalBuffer="${_responseController.text}"',
+      );
       await _speech.stop();
       if (mounted) {
         setState(() {
           _isListening = false;
-          final qId = _questions[_currentIndex].id;
-          _responses[qId] = _responseController.text;
+          final text = _responseController.text.trim();
+          if (text.isNotEmpty) {
+            _responses[qId] = text;
+            _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
+            _speechStatusMessage = 'Voice response captured.';
+            _persistResponses();
+          } else {
+            _speechStatusMessage =
+                'Speech not recognized. Please tap the microphone to retry or type your answer.';
+          }
         });
-        _persistResponses();
       }
-    } else {
-      if (!_speechInitialized) {
-        await _initSpeech();
-      }
-      if (!_speechAvailable) {
-        setState(() {
-          _speechStatusMessage =
-              'Microphone not available. Please enter the answer manually below or apply caregiver clinical scoring.';
-        });
-        return;
-      }
+      return;
+    }
 
+    if (!_speechInitialized) {
+      await _initSpeech();
+    }
+    if (!_speechAvailable) {
+      debugPrint('[CARE-STT] [3. Listen Failed] Speech not available. Cannot start listening.');
       setState(() {
-        _isListening = true;
-        _speechStatusMessage = 'Listening... Speak now.';
+        _speechStatusMessage =
+            'Microphone not available. Please enter the answer manually below or apply caregiver clinical scoring.';
       });
+      return;
+    }
 
-      try {
-        await _speech.listen(
-          onResult: (result) {
-            if (mounted) {
-              setState(() {
-                _responseController.text = result.recognizedWords;
-                final qId = _questions[_currentIndex].id;
-                _responses[qId] = result.recognizedWords;
-                if (result.finalResult) {
-                  _isListening = false;
-                  _speechStatusMessage = 'Voice response captured.';
-                }
-              });
-              _persistResponses();
-            }
-          },
-          listenOptions: stt.SpeechListenOptions(
-            listenMode: stt.ListenMode.confirmation,
-            cancelOnError: true,
-            partialResults: true,
-          ),
-        );
-      } catch (err) {
-        if (mounted) {
-          setState(() {
-            _isListening = false;
-            _speechStatusMessage = 'Recording note: $err';
-          });
-        }
+    setState(() {
+      _isListening = true;
+      _speechStatusMessage = 'Listening... Speak now.';
+    });
+
+    final currentSessionId = ++_activeListeningSessionId;
+    final targetQId = qId;
+
+    try {
+      debugPrint(
+        '[CARE-STT] [3. Listen Start Attempt] Calling _speech.listen for qId=$targetQId (session $currentSessionId), '
+        'currentText="${_responseController.text}"',
+      );
+      await _speech.listen(
+        onResult: (result) {
+          if (currentSessionId != _activeListeningSessionId ||
+              _currentIndex >= _questions.length ||
+              _questions[_currentIndex].id != targetQId) {
+            debugPrint(
+              '[CARE-STT] Discarding late callback: session $currentSessionId vs active $_activeListeningSessionId, '
+              'targetQ=$targetQId vs current=${_currentIndex < _questions.length ? _questions[_currentIndex].id : -1}',
+            );
+            return;
+          }
+
+          final incoming = result.recognizedWords;
+          final incomingTrimmed = incoming.trim();
+          final prevText = _responseController.text.trim();
+
+          debugPrint(
+            '[CARE-STT] [4. onResult] qId=$targetQId, recognizedWords="$incoming", '
+            'finalResult=${result.finalResult}, confidence=${result.confidence.toStringAsFixed(2)}',
+          );
+
+          // Never wipe valid recognized text with an empty callback
+          if (incomingTrimmed.isEmpty && prevText.isNotEmpty) {
+            debugPrint('[CARE-STT] Preserving existing non-empty text, ignoring empty callback.');
+            return;
+          }
+
+          if (mounted) {
+            setState(() {
+              if (incomingTrimmed.isNotEmpty) {
+                _responseController.text = incoming;
+                _responseController.selection = TextSelection.collapsed(
+                  offset: incoming.length,
+                );
+                _responses[targetQId] = incoming;
+              }
+            });
+            // NOTE: We do not invoke _persistResponses() on partial callbacks.
+            // Persistence is handled when the session ends naturally or is stopped.
+          }
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.dictation,
+          listenFor: const Duration(seconds: 45),
+          pauseFor: kIsWeb ? null : const Duration(seconds: 5),
+          cancelOnError: false,
+          partialResults: true,
+          localeId: 'en_US',
+        ),
+      );
+      debugPrint('[CARE-STT] [3. Listen Started] Session active: speechListening=${_speech.isListening}');
+    } catch (err) {
+      debugPrint('[CARE-STT] [3. Listen Failed] Exception while starting listen: $err');
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          _speechStatusMessage = 'Recording note: $err';
+        });
       }
     }
   }
@@ -1365,7 +1538,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     ),
                     IconButton(
                       icon: Icon(
-                        _isSpeaking ? LucideIcons.volumeX : LucideIcons.volume2,
+                        _isSpeaking ? LucideIcons.volume2 : LucideIcons.volumeX,
                         size: 20,
                         color: _isSpeaking
                             ? AppColors.primaryDeep
