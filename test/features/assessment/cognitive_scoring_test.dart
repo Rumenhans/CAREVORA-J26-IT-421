@@ -49,7 +49,7 @@ void main() {
         6: 'Which is bigger: 3 or 8?',
         7: 'What were the three words from earlier?',
         8: 'Did you hear the word Sun earlier?',
-        9: 'What do you call this? (Show pen or watch.)',
+        9: 'What do you use to tell the time?',
         10: 'Are an apple and an orange both fruits?',
       };
 
@@ -559,6 +559,312 @@ void main() {
           : (available.isNotEmpty ? available.first.id : null);
 
       expect(safeValue, equals(10));
+    });
+  });
+
+  group('Automatic Scoring Engine Tests (Deterministic Rubrics)', () {
+    final refDate = DateTime(2026, 10, 16); // Friday, 2026
+
+    test('Q1: What day is it today?', () {
+      expect(CognitiveScoring.scoreQuestion(1, 'Friday', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(1, 'Today is Friday!', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(1, 'it is friday morning', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(1, 'Monday', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(1, null, referenceDate: refDate), isNull);
+      expect(CognitiveScoring.scoreQuestion(1, '   ', referenceDate: refDate), isNull);
+    });
+
+    test('Q2: What year is this?', () {
+      expect(CognitiveScoring.scoreQuestion(2, '2026', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(2, 'The year is 2026.', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(2, 'twenty twenty-six', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(2, '2025', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(2, null, referenceDate: refDate), isNull);
+    });
+
+    test('Q3, Q4, Q7: Memory questions with partial credit and duplicate-word protection', () {
+      // 3 distinct words -> 1.0
+      expect(CognitiveScoring.scoreQuestion(3, 'Sun, Book, Tree', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(4, 'Tree, book and sun', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(7, 'I remember Sun, Book, Tree.', referenceDate: refDate), equals(1.0));
+
+      // 1-2 distinct words -> 0.5 (partial credit)
+      expect(CognitiveScoring.scoreQuestion(3, 'Sun and Book', referenceDate: refDate), equals(0.5));
+      expect(CognitiveScoring.scoreQuestion(4, 'Just tree', referenceDate: refDate), equals(0.5));
+
+      // Duplicate word does not inflate score: "Sun sun sun" has only 1 distinct word -> 0.5, NOT 1.0!
+      expect(CognitiveScoring.scoreQuestion(3, 'Sun sun sun', referenceDate: refDate), equals(0.5));
+      expect(CognitiveScoring.scoreQuestion(7, 'Book book book', referenceDate: refDate), equals(0.5));
+
+      // 0 matching words -> 0.0
+      expect(CognitiveScoring.scoreQuestion(3, 'Dog cat bird', referenceDate: refDate), equals(0.0));
+
+      // Missing response -> null (never 0.0)
+      expect(CognitiveScoring.scoreQuestion(3, null, referenceDate: refDate), isNull);
+      expect(CognitiveScoring.scoreQuestion(7, '', referenceDate: refDate), isNull);
+    });
+
+    test('Q5: What is 2 plus 3?', () {
+      expect(CognitiveScoring.scoreQuestion(5, '5', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(5, 'five', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(5, 'It is 5.', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(5, 'That makes five', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(5, '6', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(5, null, referenceDate: refDate), isNull);
+    });
+
+    test('Q6: Which is bigger: 3 or 8?', () {
+      expect(CognitiveScoring.scoreQuestion(6, '8', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(6, 'eight', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(6, '8 is bigger', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(6, '3 is bigger', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(6, null, referenceDate: refDate), isNull);
+    });
+
+    test('Q8: Did you hear the word Sun earlier?', () {
+      expect(CognitiveScoring.scoreQuestion(8, 'Yes', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(8, 'yeah I did', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(8, 'I heard sun', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(8, 'No', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(8, 'I did not', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(8, null, referenceDate: refDate), isNull);
+    });
+
+    test('Q9: What do you use to tell the time?', () {
+      // Direct correct answers
+      expect(CognitiveScoring.scoreQuestion(9, 'clock', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'watch', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'A clock', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'The watch', referenceDate: refDate), equals(1.0));
+
+      // Semantically equivalent timekeeping instruments
+      expect(CognitiveScoring.scoreQuestion(9, 'wall clock', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'wristwatch', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'wrist watch', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'smart watch', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'smartwatch', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'alarm clock', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'timepiece', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'sundial', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'hourglass', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'I use a clock to tell the time', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'I check my watch', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'A clock or a watch', referenceDate: refDate), equals(1.0));
+
+      // Capitalization and surrounding whitespace ignored
+      expect(CognitiveScoring.scoreQuestion(9, 'CLOCK', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, '   watch   ', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(9, '  A Wristwatch  ', referenceDate: refDate), equals(1.0));
+
+      // Incorrect objects
+      expect(CognitiveScoring.scoreQuestion(9, 'Pen', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'Shoe', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'calendar', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'telephone', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'mirror', referenceDate: refDate), equals(0.0));
+
+      // Disallowed idioms / non-instrument uses of "clock"
+      expect(CognitiveScoring.scoreQuestion(9, 'biological clock', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'body clock', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'working around the clock', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'clock in', referenceDate: refDate), equals(0.0));
+
+      // Negation and denial expressions
+      expect(CognitiveScoring.scoreQuestion(9, 'not a clock', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'no clock', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'without a watch', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'I don\'t know', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(9, 'I do not use a clock', referenceDate: refDate), equals(0.0));
+
+      // Missing or empty responses
+      expect(CognitiveScoring.scoreQuestion(9, null, referenceDate: refDate), isNull);
+      expect(CognitiveScoring.scoreQuestion(9, '', referenceDate: refDate), isNull);
+      expect(CognitiveScoring.scoreQuestion(9, '   ', referenceDate: refDate), isNull);
+    });
+
+    test('Q10: Are an apple and an orange both fruits?', () {
+      expect(CognitiveScoring.scoreQuestion(10, 'Yes', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(10, 'both fruits', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(10, 'Yes they are fruits', referenceDate: refDate), equals(1.0));
+      expect(CognitiveScoring.scoreQuestion(10, 'No, vegetables', referenceDate: refDate), equals(0.0));
+      expect(CognitiveScoring.scoreQuestion(10, null, referenceDate: refDate), isNull);
+    });
+
+    test('autoScoreBattery handles complete battery and missing answers properly', () {
+      final Map<int, String> fullResponses = {
+        1: 'Friday',
+        2: '2026',
+        3: 'Sun, Book, Tree',
+        4: 'Sun, Book, Tree',
+        5: '5',
+        6: '8',
+        7: 'Sun, Book, Tree',
+        8: 'Yes',
+        9: 'A clock',
+        10: 'both fruits',
+      };
+
+      expect(CognitiveScoring.isAllQuestionsAnswered(fullResponses), isTrue);
+      expect(CognitiveScoring.getUnansweredQuestionIds(fullResponses), isEmpty);
+
+      final fullGrades = CognitiveScoring.autoScoreBattery(fullResponses, referenceDate: refDate);
+      expect(fullGrades.length, equals(10));
+      for (int i = 1; i <= 10; i++) {
+        expect(fullGrades[i], equals(1.0));
+      }
+
+      final accuracies = CognitiveScoring.calculateDomainAccuracies(fullGrades);
+      final domainScores = CognitiveScoring.calculateDomainScores(accuracies);
+      final acrf = CognitiveScoring.calculateAcrfWeightedScore(domainScores);
+      expect(acrf, equals(100.0));
+
+      // With missing answer
+      final Map<int, String> incompleteResponses = {
+        1: 'Friday',
+        3: 'Sun, Book', // partial
+        // 2, 4..10 missing
+      };
+
+      expect(CognitiveScoring.isAllQuestionsAnswered(incompleteResponses), isFalse);
+      final unanswered = CognitiveScoring.getUnansweredQuestionIds(incompleteResponses);
+      expect(unanswered, contains(2));
+      expect(unanswered, contains(4));
+
+      final incompleteGrades = CognitiveScoring.autoScoreBattery(incompleteResponses, referenceDate: refDate);
+      expect(incompleteGrades[1], equals(1.0));
+      expect(incompleteGrades[2], isNull); // MUST remain null, NOT 0.0
+      expect(incompleteGrades[3], equals(0.5));
+      expect(incompleteGrades[4], isNull); // MUST remain null, NOT 0.0
+    });
+  });
+
+  group('Cognitive Assessment Submission Flow & Error Handling Tests', () {
+    test('1. CognitiveSubmissionPayload serializes all 10 responses, grades, and domain metrics', () {
+      final payload = CognitiveSubmissionPayload(
+        residentId: 1,
+        memory: 80.0,
+        attention: 85.0,
+        orientation: 90.0,
+        recall: 75.0,
+        reasoning: 80.0,
+        age: 78,
+        educationYears: 12,
+        sessionId: 'test-session-123',
+        responses: {
+          1: 'Friday',
+          2: '2026',
+          3: 'Sun, Book, Tree',
+          4: 'Sun, Book, Tree',
+          5: '5',
+          6: '8',
+          7: 'Sun, Book, Tree',
+          8: 'Yes',
+          9: 'A clock',
+          10: 'both fruits',
+        },
+        grades: {
+          1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0,
+          6: 1.0, 7: 1.0, 8: 1.0, 9: 1.0, 10: 1.0,
+        },
+        accuracies: {'memory': 1.0, 'attention': 1.0, 'orientation': 1.0, 'recall': 1.0, 'reasoning': 1.0},
+        responseTimes: {'memory': 2.5, 'attention': 1.8, 'orientation': 3.0, 'recall': 2.0, 'reasoning': 2.2},
+      );
+
+      final jsonMap = payload.toJson();
+      expect(jsonMap['residentId'], equals(1));
+      expect(jsonMap['memory'], equals(80.0));
+      expect(jsonMap['sessionId'], equals('test-session-123'));
+      expect(jsonMap['responses']['1'], equals('Friday'));
+      expect(jsonMap['responses']['10'], equals('both fruits'));
+      expect(jsonMap['grades']['1'], equals(1.0));
+      expect(jsonMap['accuracies']['memory'], equals(1.0));
+      expect(jsonMap['responseTimes']['attention'], equals(1.8));
+    });
+
+    test('2. Unanswered questions block submission with specific missing question IDs', () {
+      final partialResponses = <int, String>{
+        1: 'Friday',
+        2: '2026',
+        // 3 to 10 missing
+      };
+
+      final unanswered = CognitiveScoring.getUnansweredQuestionIds(partialResponses);
+      expect(unanswered.length, equals(8));
+      expect(unanswered, containsAll([3, 4, 5, 6, 7, 8, 9, 10]));
+      expect(CognitiveScoring.isAllQuestionsAnswered(partialResponses), isFalse);
+    });
+
+    test('3. CognitiveSubmissionResult correctly parses completed result with ML prediction', () {
+      final jsonResponse = {
+        'id': 101,
+        'residentId': 1,
+        'residentName': 'Sarah Jenkins',
+        'memory': 90.0,
+        'attention': 85.0,
+        'orientation': 100.0,
+        'recall': 80.0,
+        'reasoning': 85.0,
+        'acrfScore': 88.5,
+        'mlPrediction': 'Low Risk',
+        'riskLevel': 'Low Risk',
+        'alertTriggered': false,
+        'status': 'COMPLETED',
+        'mlModelEvaluation': {
+          'available': true,
+          'prediction': 'Low Risk',
+          'statusMessage': 'Prediction available',
+          'probabilities': {'Low': 0.85, 'Moderate': 0.12, 'High': 0.03},
+        },
+        'assessedBy': 'Eleanor Vance',
+      };
+
+      final result = CognitiveSubmissionResult.fromJson(jsonResponse);
+      expect(result.id, equals(101));
+      expect(result.residentName, equals('Sarah Jenkins'));
+      expect(result.acrfScore, equals(88.5));
+      expect(result.status, equals('COMPLETED'));
+      expect(result.mlAvailable, isTrue);
+      expect(result.riskLevel, equals('Low Risk'));
+      expect(result.probabilities?['Low'], equals(0.85));
+    });
+
+    test('4. CognitiveSubmissionResult correctly parses COMPLETED_PREDICTION_UNAVAILABLE without fabricating risk', () {
+      final jsonResponse = {
+        'id': 102,
+        'residentId': 1,
+        'residentName': 'Sarah Jenkins',
+        'memory': 70.0,
+        'attention': 65.0,
+        'orientation': 80.0,
+        'recall': 60.0,
+        'reasoning': 70.0,
+        'acrfScore': 69.0,
+        'status': 'COMPLETED_PREDICTION_UNAVAILABLE',
+        'mlModelEvaluation': {
+          'available': false,
+          'prediction': null,
+          'statusMessage': 'ML inference unavailable: missing demographic features',
+        },
+      };
+
+      final result = CognitiveSubmissionResult.fromJson(jsonResponse);
+      expect(result.id, equals(102));
+      expect(result.acrfScore, equals(69.0));
+      expect(result.status, equals('COMPLETED_PREDICTION_UNAVAILABLE'));
+      expect(result.mlAvailable, isFalse);
+      expect(result.riskLevel, equals('Not Available'));
+    });
+
+    test('5. CognitiveApiException preserves HTTP status and readable error message', () {
+      const exception = CognitiveApiException(
+        'Duplicate submission detected: Assessment session sess-123 has already been completed.',
+        statusCode: 400,
+        errorCode: 'DUPLICATE_SUBMISSION',
+      );
+
+      expect(exception.message, contains('Duplicate submission detected'));
+      expect(exception.statusCode, equals(400));
+      expect(exception.toString(), equals('Duplicate submission detected: Assessment session sess-123 has already been completed.'));
     });
   });
 }

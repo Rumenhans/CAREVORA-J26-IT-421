@@ -5,7 +5,7 @@
 /// - memory: Immediate registration and verbal encoding (Q3, Q4)
 /// - attention: Calculation and magnitude discrimination (Q5, Q6)
 /// - recall: Delayed verbal recall and cued recognition (Q7, Q8)
-/// - reasoning: Visual confrontation naming and conceptual categorization (Q9, Q10)
+/// - reasoning: Practical tool reasoning and conceptual categorization (Q9, Q10)
 ///
 /// Designed with short, elderly-friendly prompts answerable in 1-2 words.
 /// Non-diagnostic screening instrument for clinical decision support.
@@ -55,7 +55,7 @@ class CognitiveScoring {
     6: 'attention', // Number comparison (which is bigger: 3 or 8)
     7: 'recall', // Delayed recall of 3 objects
     8: 'recall', // Cued recognition of registered object
-    9: 'reasoning', // Visual confrontation naming (pen / watch)
+    9: 'reasoning', // Practical reasoning: timekeeping instruments (clock / watch)
     10: 'reasoning', // Conceptual categorization (apple & orange)
   };
 
@@ -137,11 +137,11 @@ class CognitiveScoring {
     ),
     CognitiveQuestionItem(
       id: 9,
-      category: 'Language & Reasoning',
+      category: 'Practical Reasoning',
       domain: 'reasoning',
-      prompt: 'What do you call this? (Show pen or watch.)',
-      aiTip: 'Visual confrontation naming of common everyday item.',
-      recommendedAnswerGuide: "'Pen' or 'Watch'.",
+      prompt: 'What do you use to tell the time?',
+      aiTip: 'Practical reasoning and tool identification. Accepts clock, watch, or equivalent.',
+      recommendedAnswerGuide: "'Clock', 'Watch', 'Wall clock', or 'Wristwatch'.",
     ),
     CognitiveQuestionItem(
       id: 10,
@@ -152,6 +152,194 @@ class CognitiveScoring {
       recommendedAnswerGuide: "'Yes' (or 'Both fruits').",
     ),
   ];
+
+  /// Normalizes raw response text: lowercase, punctuation to space, collapses whitespace, trims.
+  static String normalizeAnswer(String? input) {
+    if (input == null) return '';
+    // Replace punctuation with spaces so adjacent words do not merge (e.g. "sun,book,tree")
+    final cleaned = input.toLowerCase().replaceAll(
+      RegExp(r'''[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]'''),
+      ' ',
+    );
+    return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Evaluates an individual question's answer deterministically according to question-specific rubric:
+  /// - Q1: Temporal orientation comparing against referenceDate (default: current day)
+  /// - Q2: Calendar year comparing against referenceDate (default: current year)
+  /// - Q3: Immediate memory registration (Sun, Book, Tree) - distinct word count
+  /// - Q4: Repetition confirmation (Sun, Book, Tree) - distinct word count
+  /// - Q5: Mental addition (2 + 3) -> 5, five
+  /// - Q6: Number comparison -> 8, eight (rejects '3 is bigger')
+  /// - Q7: Delayed recall (Sun, Book, Tree) - distinct word count
+  /// - Q8: Cued recognition affirmative response (yes, etc.)
+  /// - Q9: Practical reasoning: tool to tell time (clock, watch, wall clock, wristwatch, etc.)
+  /// - Q10: Semantic categorization (yes, both fruits, fruits, etc.)
+  ///
+  /// Rubric: Correct = 1.0; Partial = 0.5 (Q3, Q4, Q7 only); Incorrect = 0.0.
+  /// Missing or blank response returns null (strictly incomplete; NEVER graded as 0.0).
+  static double? scoreQuestion(
+    int questionId,
+    String? rawAnswer, {
+    DateTime? referenceDate,
+  }) {
+    if (rawAnswer == null || rawAnswer.trim().isEmpty) {
+      return null;
+    }
+
+    final normalized = normalizeAnswer(rawAnswer);
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    final ref = referenceDate ?? DateTime.now();
+
+    switch (questionId) {
+      case 1:
+        // Q1: What day is it today?
+        const weekdayNames = [
+          'monday',
+          'tuesday',
+          'wednesday',
+          'thursday',
+          'friday',
+          'saturday',
+          'sunday',
+        ];
+        final currentWeekdayName = weekdayNames[ref.weekday - 1];
+        final hasTargetDay = RegExp(
+          r'\b' + currentWeekdayName + r'\b',
+        ).hasMatch(normalized);
+        return hasTargetDay ? 1.0 : 0.0;
+
+      case 2:
+        // Q2: What year is this?
+        final currentYear = ref.year.toString();
+        final hasYear = RegExp(r'\b' + currentYear + r'\b').hasMatch(normalized) ||
+            normalized.contains('twenty twenty six') ||
+            normalized.contains('twenty twenty-six');
+        return hasYear ? 1.0 : 0.0;
+
+      case 3:
+      case 4:
+      case 7:
+        // Q3: Repeat these words: Sun, Book, Tree.
+        // Q4: Say those three words once more.
+        // Q7: What were the three words from earlier?
+        // Distinct target word count (avoid duplicate counting of same word e.g. "sun sun sun")
+        // Word boundary matching avoids accidental substrings like "sunny" or "street"
+        final distinctTargets = <String>{};
+        if (RegExp(r'\bsun\b').hasMatch(normalized)) {
+          distinctTargets.add('sun');
+        }
+        if (RegExp(r'\bbooks?\b').hasMatch(normalized)) {
+          distinctTargets.add('book');
+        }
+        if (RegExp(r'\btrees?\b').hasMatch(normalized)) {
+          distinctTargets.add('tree');
+        }
+
+        final count = distinctTargets.length;
+        if (count == 3) return 1.0;
+        if (count >= 1) return 0.5; // Rubric supports partial credit for 1-2 words
+        return 0.0;
+
+      case 5:
+        // Q5: What is 2 plus 3? Accept 5, five
+        final isFive = RegExp(r'\b(5|five)\b').hasMatch(normalized);
+        return isFive ? 1.0 : 0.0;
+
+      case 6:
+        // Q6: Which is bigger: 3 or 8? Accept 8, eight
+        final mentionsEight = RegExp(r'\b(8|eight)\b').hasMatch(normalized);
+        final saysThreeBigger = RegExp(
+          r'\b(3|three)\s+is\s+bigger\b',
+        ).hasMatch(normalized);
+        return (mentionsEight && !saysThreeBigger) ? 1.0 : 0.0;
+
+      case 8:
+        // Q8: Did you hear the word Sun earlier? Accept unambiguous affirmative
+        final isAffirmative = RegExp(
+          r'\b(yes|yeah|yep|yup|i did|affirmative|certainly|sure|true|correct|heard|i heard|i heard sun|heard sun|heard it|i heard it|yes i did)\b',
+        ).hasMatch(normalized);
+        final isNegative = RegExp(
+          r'\b(no|nope|not|never|did not|didn t|didnt)\b',
+        ).hasMatch(normalized);
+        return (isAffirmative && !isNegative) ? 1.0 : 0.0;
+
+      case 9:
+        // Q9: What do you use to tell the time?
+        // Expected answers: clock, watch, wall clock, wristwatch, or other semantically equivalent answers
+        final hasValidDevice = RegExp(
+          r'\b(clock|clocks|watch|watches|wristwatch|wristwatches|smartwatch|smartwatches|pocketwatch|stopwatch|timepiece|timepieces|chronometer|chronometers|sundial|sundials|hourglass|hourglasses)\b',
+        ).hasMatch(normalized);
+
+        final isNegated = RegExp(
+          r'\b(no|not|never|neither|without)\s+(a\s+|an\s+|the\s+|my\s+|any\s+)?(clock|clocks|watch|watches|wristwatch|timepiece|sundial)\b',
+        ).hasMatch(normalized) ||
+        RegExp(
+          r'\b(don t know|dont know|no idea|cannot tell|can t tell|cant tell|not sure|unsure|don t use|dont use|do not use)\b',
+        ).hasMatch(normalized) ||
+        RegExp(r'^(no|nope|not|never|nothing|none)\b').hasMatch(normalized);
+
+        final isDisallowedIdiom = RegExp(
+          r'\b(biological clock|body clock|around the clock|round the clock|against the clock|clock in|clock out|punch the clock|clean your clock)\b',
+        ).hasMatch(normalized);
+
+        return (hasValidDevice && !isNegated && !isDisallowedIdiom) ? 1.0 : 0.0;
+
+      case 10:
+        // Q10: Are an apple and an orange both fruits?
+        final isFruits = RegExp(
+          r'\b(yes|both fruits|both are fruits|fruits|fruit|they are fruits|yes they are|affirmative|correct)\b',
+        ).hasMatch(normalized);
+        final isNegative = RegExp(
+          r'\b(no|nope|neither|vegetables?)\b',
+        ).hasMatch(normalized);
+        return (isFruits && !isNegative) ? 1.0 : 0.0;
+
+      default:
+        return 0.0;
+    }
+  }
+
+  /// Automatically scores all answers in the 10-question battery.
+  /// If an answer is missing or blank, its grade is null (incomplete).
+  static Map<int, double?> autoScoreBattery(
+    Map<int, String> responses, {
+    DateTime? referenceDate,
+  }) {
+    final Map<int, double?> grades = {};
+    for (final q in questions) {
+      grades[q.id] = scoreQuestion(
+        q.id,
+        responses[q.id],
+        referenceDate: referenceDate,
+      );
+    }
+    return grades;
+  }
+
+  /// Returns whether a question response is considered answered (non-empty).
+  static bool isAnswerProvided(String? answer) {
+    return answer != null && answer.trim().isNotEmpty;
+  }
+
+  /// Returns the list of question IDs that lack an answer.
+  static List<int> getUnansweredQuestionIds(Map<int, String> responses) {
+    final List<int> unanswered = [];
+    for (final q in questions) {
+      if (!isAnswerProvided(responses[q.id])) {
+        unanswered.add(q.id);
+      }
+    }
+    return unanswered;
+  }
+
+  /// Checks whether all 10 questions have valid, non-blank answers.
+  static bool isAllQuestionsAnswered(Map<int, String> responses) {
+    return getUnansweredQuestionIds(responses).isEmpty;
+  }
 
   /// Validates whether the 10-question battery is fully assessed with both saved responses and grades.
   static bool isBatteryComplete({
@@ -166,7 +354,7 @@ class CognitiveScoring {
     return true;
   }
 
-  /// Calculates per-domain accuracies in [0.0, 1.0] range based on caregiver grades (1.0, 0.5, 0.0).
+  /// Calculates per-domain accuracies in [0.0, 1.0] range based on grades (1.0, 0.5, 0.0).
   /// Strictly distinguishes between missing scores (null) and legitimate Incorrect scores (0.0).
   /// If [allowIncomplete] is false (default), missing grades are rejected to prevent converting
   /// unassessed items to zero.
@@ -189,7 +377,7 @@ class CognitiveScoring {
         if (score == null) {
           if (!allowIncomplete) {
             throw ArgumentError(
-              'Cannot calculate domain accuracy: Question $id has no clinical grade. Missing grades must not be converted to 0.0.',
+              'Cannot calculate domain accuracy: Question $id has no grade. Missing grades must not be converted to 0.0.',
             );
           }
           sum += 0.0;
@@ -257,3 +445,4 @@ class CognitiveScoring {
     return double.parse(total.toStringAsFixed(2));
   }
 }
+

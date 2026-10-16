@@ -1017,7 +1017,10 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
   /// Card 1 — Cognitive Wellness
   Widget _buildCognitiveWellnessCard(ResidentItem r, [double? cardWidth]) {
     final completedAssessments = _residentCognitiveHistory
-        .where((a) => a.status.toUpperCase() == 'COMPLETED')
+        .where((a) {
+          final s = a.status.toUpperCase();
+          return s == 'COMPLETED' || s == 'COMPLETED_PREDICTION_UNAVAILABLE';
+        })
         .toList();
     final int completedCount = completedAssessments.length;
 
@@ -1048,19 +1051,40 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
         scoreDisplay = '${latestRecord.acrfScore!.toStringAsFixed(1)}%';
         hasCompletedScore = true;
       } else {
-        scoreDisplay = 'Not available';
+        scoreDisplay = 'No cognitive assessments yet';
       }
-      riskLevelDisplay = (latestRecord.riskLevel != null && latestRecord.riskLevel!.isNotEmpty)
-          ? latestRecord.riskLevel!
-          : (latestRecord.mlPrediction != null && latestRecord.mlPrediction!.isNotEmpty
-              ? latestRecord.mlPrediction!
-              : 'Not Available');
-      statusDisplay = 'Completed';
+
+      final hasPrediction = (latestRecord.riskLevel != null &&
+              latestRecord.riskLevel!.isNotEmpty &&
+              latestRecord.riskLevel != 'Not Available' &&
+              latestRecord.riskLevel != 'Risk Level Not Available') ||
+          (latestRecord.mlPrediction != null &&
+              latestRecord.mlPrediction!.isNotEmpty);
+
+      if (latestRecord.status.toUpperCase() == 'COMPLETED_PREDICTION_UNAVAILABLE' ||
+          !hasPrediction) {
+        riskLevelDisplay = 'Risk Level Not Available';
+      } else if (latestRecord.riskLevel != null &&
+          latestRecord.riskLevel!.isNotEmpty &&
+          latestRecord.riskLevel != 'Not Available') {
+        riskLevelDisplay = latestRecord.riskLevel!;
+      } else {
+        riskLevelDisplay = latestRecord.mlPrediction!;
+      }
+
+      if (latestRecord.status.toUpperCase() == 'COMPLETED_PREDICTION_UNAVAILABLE') {
+        statusDisplay = 'Completed (No ML)';
+        statusBg = const Color(0xFFDBEAFE);
+        statusColor = const Color(0xFF1D4ED8);
+      } else {
+        statusDisplay = 'Completed';
+        statusBg = const Color(0xFFDCFCE7);
+        statusColor = const Color(0xFF15803D);
+      }
+
       dateDisplay = latestRecord.createdAt != null
           ? _formatDate(latestRecord.createdAt!)
           : 'None recorded';
-      statusBg = const Color(0xFFDCFCE7);
-      statusColor = const Color(0xFF15803D);
     } else if (pendingAssessments.isNotEmpty) {
       final latestPending = pendingAssessments.first;
       scoreDisplay = 'Pending Review';
@@ -1134,7 +1158,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             ],
           ),
           const SizedBox(height: 16),
-          const Text('Latest Score (ACRF)', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          const Text('Task Accuracy Score', style: TextStyle(fontSize: 12, color: AppColors.muted)),
           const SizedBox(height: 2),
           Text(
             scoreDisplay,
@@ -1151,12 +1175,40 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             runSpacing: 4,
             children: [
               const Text(
-                'Risk Level:',
+                'AI Risk Prediction:',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               _buildRiskBadge(riskLevelDisplay),
             ],
           ),
+          if (completedAssessments.isNotEmpty &&
+              completedAssessments.first.acrfScore != null &&
+              completedAssessments.first.acrfScore! >= 85.0 &&
+              (riskLevelDisplay.toLowerCase().contains('moderate') ||
+                  riskLevelDisplay.toLowerCase().contains('high'))) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7).withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.info, size: 14, color: Color(0xFFB45309)),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'AI prediction also considers response latency, longitudinal features, and other model inputs alongside task accuracy.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF92400E), height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: [
@@ -1618,19 +1670,26 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                 final item = _residentCognitiveHistory[index];
                 final dateStr = item.createdAt != null ? _formatDate(item.createdAt!) : 'Date N/A';
                 final isCompleted = item.status.toUpperCase() == 'COMPLETED';
+                final isCompletedNoMl = item.status.toUpperCase() == 'COMPLETED_PREDICTION_UNAVAILABLE';
                 final isPending = item.status.toUpperCase().contains('PENDING');
 
                 final String statusLabel = isCompleted
                     ? 'Completed'
-                    : (isPending ? 'Pending Caregiver Review' : item.status);
+                    : (isCompletedNoMl
+                        ? 'Completed (No ML)'
+                        : (isPending ? 'Pending Caregiver Review' : item.status));
 
                 final Color statusBg = isCompleted
                     ? const Color(0xFFDCFCE7)
-                    : (isPending ? const Color(0xFFFEF3C7) : AppColors.surfaceSecondary);
+                    : (isCompletedNoMl
+                        ? const Color(0xFFDBEAFE)
+                        : (isPending ? const Color(0xFFFEF3C7) : AppColors.surfaceSecondary));
 
                 final Color statusColor = isCompleted
                     ? const Color(0xFF15803D)
-                    : (isPending ? const Color(0xFFB45309) : AppColors.body);
+                    : (isCompletedNoMl
+                        ? const Color(0xFF1D4ED8)
+                        : (isPending ? const Color(0xFFB45309) : AppColors.body));
 
                 final String sessionLabel = item.sessionId != null && item.sessionId!.isNotEmpty
                     ? item.sessionId!
@@ -1640,10 +1699,21 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                     ? '${item.acrfScore!.toStringAsFixed(1)}%'
                     : (isPending ? 'Pending Review' : 'Not Available');
 
-                final String riskLabel = item.riskLevel ??
-                    (item.mlPrediction != null && item.mlPrediction!.isNotEmpty
-                        ? item.mlPrediction!
-                        : 'Not Available');
+                final hasItemPrediction = (item.riskLevel != null &&
+                        item.riskLevel!.isNotEmpty &&
+                        item.riskLevel != 'Not Available' &&
+                        item.riskLevel != 'Risk Level Not Available') ||
+                    (item.mlPrediction != null && item.mlPrediction!.isNotEmpty);
+
+                final String riskLabel = isPending
+                    ? 'Not Available'
+                    : (isCompletedNoMl || !hasItemPrediction
+                        ? 'Risk Level Not Available'
+                        : (item.riskLevel != null &&
+                                item.riskLevel!.isNotEmpty &&
+                                item.riskLevel != 'Not Available'
+                            ? item.riskLevel!
+                            : item.mlPrediction!));
 
                 final bool isExpanded = _expandedHistoryIndex == index;
 
@@ -1698,7 +1768,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Overall ACRF Score', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const Text('Task Accuracy Score', style: TextStyle(fontSize: 11, color: AppColors.muted)),
                               const SizedBox(height: 2),
                               Text(
                                 scoreText,
@@ -1709,7 +1779,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Cognitive Risk', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const Text('AI Risk Prediction', style: TextStyle(fontSize: 11, color: AppColors.muted)),
                               const SizedBox(height: 2),
                               _buildRiskBadge(riskLabel),
                             ],
@@ -1739,6 +1809,33 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           _buildDomainChip('Reasoning', item.reasoning),
                         ],
                       ),
+                      if (item.acrfScore != null &&
+                          item.acrfScore! >= 85.0 &&
+                          (riskLabel.toLowerCase().contains('moderate') ||
+                              riskLabel.toLowerCase().contains('high'))) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7).withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(LucideIcons.info, size: 13, color: Color(0xFFB45309)),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'AI prediction also considers response latency, longitudinal features, and other model inputs alongside task accuracy.',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFF92400E), height: 1.3),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       Row(
                         children: [
@@ -1747,7 +1844,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                           Expanded(
                             child: Text(
                               isPending
-                                  ? 'AI Inference: Pending caregiver clinical grading'
+                                  ? 'AI Inference: Pending completion'
                                   : (item.mlAvailable
                                       ? 'AI Prediction: ${item.mlModelType} (${item.mlStatusMessage})'
                                       : 'AI Inference: ${item.mlStatusMessage}'),
@@ -1788,7 +1885,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                                 Text(
                                   isExpanded
                                       ? 'Hide Question Responses & Grades'
-                                      : 'Inspect Responses & Clinical Grades (10 Questions)',
+                                      : 'Inspect Responses & Auto-Grades (10 Questions)',
                                   style: const TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,

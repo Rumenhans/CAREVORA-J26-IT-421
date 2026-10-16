@@ -20,30 +20,26 @@ public class CognitiveAssessmentSubmissionRequest {
     @NotNull(message = "Resident ID is required")
     private Long residentId;
 
-    @NotNull(message = "Memory score is required")
     @DecimalMin(value = "0.0", message = "Memory score must be >= 0.0")
     @DecimalMax(value = "100.0", message = "Memory score must be <= 100.0")
     private Double memory;
 
-    @NotNull(message = "Attention score is required")
     @DecimalMin(value = "0.0", message = "Attention score must be >= 0.0")
     @DecimalMax(value = "100.0", message = "Attention score must be <= 100.0")
     private Double attention;
 
-    @NotNull(message = "Orientation score is required")
     @DecimalMin(value = "0.0", message = "Orientation score must be >= 0.0")
     @DecimalMax(value = "100.0", message = "Orientation score must be <= 100.0")
     private Double orientation;
 
-    @NotNull(message = "Recall score is required")
     @DecimalMin(value = "0.0", message = "Recall score must be >= 0.0")
     @DecimalMax(value = "100.0", message = "Recall score must be <= 100.0")
     private Double recall;
 
-    @NotNull(message = "Reasoning score is required")
     @DecimalMin(value = "0.0", message = "Reasoning score must be >= 0.0")
     @DecimalMax(value = "100.0", message = "Reasoning score must be <= 100.0")
     private Double reasoning;
+
 
     // Optional task & demographic features for Random Forest ML model inference (synthetic training experiment)
     @Min(value = 1, message = "Age must be >= 1")

@@ -18,6 +18,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,11 +37,14 @@ import java.util.stream.Collectors;
 @Service
 public class AiMlService {
 
+    private static final Logger log = LoggerFactory.getLogger(AiMlService.class);
+
     private final RestTemplate restTemplate;
     private final AssessmentRepository assessmentRepository;
     private final ResidentRepository residentRepository;
     private final SocialAuditRepository socialAuditRepository;
     private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
+    private final ObjectMapper objectMapper;
     private final String aiServiceBaseUrl;
 
     @Autowired
@@ -47,6 +54,7 @@ public class AiMlService {
             ResidentRepository residentRepository,
             SocialAuditRepository socialAuditRepository,
             @Autowired(required = false) CognitiveAssessmentRepository cognitiveAssessmentRepository,
+            @Autowired(required = false) ObjectMapper objectMapper,
             @Value("${application.ai-service.base-url:http://127.0.0.1:8000}") String aiServiceBaseUrl
     ) {
         this.restTemplate = restTemplate;
@@ -54,6 +62,7 @@ public class AiMlService {
         this.residentRepository = residentRepository;
         this.socialAuditRepository = socialAuditRepository;
         this.cognitiveAssessmentRepository = cognitiveAssessmentRepository;
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
         this.aiServiceBaseUrl = (aiServiceBaseUrl != null && aiServiceBaseUrl.endsWith("/"))
                 ? aiServiceBaseUrl.substring(0, aiServiceBaseUrl.length() - 1)
                 : aiServiceBaseUrl;
@@ -61,9 +70,20 @@ public class AiMlService {
 
     public AiMlService(
             RestTemplate restTemplate,
+            AssessmentRepository assessmentRepository,
+            ResidentRepository residentRepository,
+            SocialAuditRepository socialAuditRepository,
+            CognitiveAssessmentRepository cognitiveAssessmentRepository,
             String aiServiceBaseUrl
     ) {
-        this(restTemplate, null, null, null, null, aiServiceBaseUrl);
+        this(restTemplate, assessmentRepository, residentRepository, socialAuditRepository, cognitiveAssessmentRepository, new ObjectMapper(), aiServiceBaseUrl);
+    }
+
+    public AiMlService(
+            RestTemplate restTemplate,
+            String aiServiceBaseUrl
+    ) {
+        this(restTemplate, null, null, null, null, new ObjectMapper(), aiServiceBaseUrl);
     }
 
     public ApiResponse<Map<String, Object>> predictTrajectory(Long residentId) {
@@ -236,6 +256,34 @@ public class AiMlService {
                     h.put("orientation_score", past.getOrientationScore());
                     h.put("recall_score", past.getRecallScore());
                     h.put("reasoning_score", past.getReasoningScore());
+
+                    // Safely forward actual stored historical response times if available
+                    if (past.getResponseTimesJson() != null && !past.getResponseTimesJson().isBlank()) {
+                        try {
+                            Map<String, Object> pastRtMap = objectMapper.readValue(
+                                    past.getResponseTimesJson(),
+                                    new TypeReference<Map<String, Object>>() {}
+                            );
+                            if (pastRtMap != null) {
+                                for (String domain : List.of("memory", "attention", "orientation", "recall", "reasoning")) {
+                                    Object val = pastRtMap.get(domain);
+                                    if (val == null) {
+                                        val = pastRtMap.get(domain + "_response_time");
+                                    }
+                                    if (val instanceof Number num) {
+                                        double dVal = num.doubleValue();
+                                        if (!Double.isNaN(dVal) && !Double.isInfinite(dVal) && dVal > 0.0) {
+                                            h.put(domain + "_response_time", dVal);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception ex) {
+                            log.debug("Safely ignored unparseable historical response_times_json for assessment id={}: {}",
+                                    past.getId(), ex.getMessage());
+                        }
+                    }
+
                     pastHistoryList.add(h);
                 }
             }
