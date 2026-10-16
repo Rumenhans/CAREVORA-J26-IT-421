@@ -267,7 +267,7 @@ class CarePlansService {
   /// Does not double-multiply already percentage-scaled values.
   static String formatDomainScore(double? score) {
     if (score == null) return '--';
-    if (score.isNaN || score.isInfinite) return '--';
+    if (score.isNaN || score.isInfinite || score < 0.0) return '--';
 
     final double percentage;
     if (score > 0.0 && score <= 1.0) {
@@ -276,6 +276,23 @@ class CarePlansService {
       percentage = score;
     }
     return '${percentage.round()}%';
+  }
+
+  /// Formats a task accuracy score into a clean display percentage.
+  /// Handles percentage-scaled values (0–100, e.g. 72.5 -> '72.5%')
+  /// and fractional representation (0.0–1.0, e.g. 0.725 -> '72.5%').
+  /// Does not double-multiply already percentage-scaled values and handles null safely with 'N/A'.
+  static String formatTaskAccuracyScore(double? score) {
+    if (score == null) return 'N/A';
+    if (score.isNaN || score.isInfinite || score < 0.0) return 'N/A';
+
+    final double val;
+    if (score > 0.0 && score <= 1.0) {
+      val = score * 100.0;
+    } else {
+      val = score;
+    }
+    return '${val.toStringAsFixed(1)}%';
   }
 
   /// Fetches residents available for caregiver review.
@@ -346,9 +363,32 @@ class CarePlansService {
         );
       }
 
-      final latest = history.first;
-      final actualRisk = latest.riskLevel ?? latest.mlPrediction;
-      final mlAvail = latest.mlAvailable;
+      // Prioritize the latest completed or evaluated assessment with a task accuracy score.
+      // If none are completed/evaluated yet, fall back to the newest history record.
+      final completed = history.where((a) {
+        final s = a.status.toUpperCase();
+        return s == 'COMPLETED' ||
+            s == 'COMPLETED_PREDICTION_UNAVAILABLE' ||
+            a.acrfScore != null;
+      }).toList();
+
+      final latest = completed.isNotEmpty ? completed.first : history.first;
+      String? actualRisk;
+      if (latest.riskLevel != null &&
+          latest.riskLevel!.isNotEmpty &&
+          latest.riskLevel != 'Not Available' &&
+          latest.riskLevel != 'Risk Level Not Available' &&
+          latest.riskLevel != 'Prediction Unavailable') {
+        actualRisk = latest.riskLevel;
+      } else if (latest.mlPrediction != null &&
+          latest.mlPrediction!.isNotEmpty &&
+          latest.mlPrediction != 'Not Available' &&
+          latest.mlPrediction != 'Risk Level Not Available' &&
+          latest.mlPrediction != 'Prediction Unavailable') {
+        actualRisk = latest.mlPrediction;
+      }
+
+      final bool mlAvail = latest.mlAvailable && actualRisk != null;
       final rec = CognitiveCareRecommendation.forRisk(actualRisk, mlAvailable: mlAvail);
 
       return CarePlanCognitiveData(

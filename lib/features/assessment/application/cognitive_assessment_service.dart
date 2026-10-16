@@ -228,7 +228,6 @@ class CognitiveSubmissionResult {
 
   factory CognitiveSubmissionResult.fromJson(Map<String, dynamic> json) {
     final mlEval = json['mlModelEvaluation'] as Map<String, dynamic>?;
-    final bool isAvailable = mlEval != null && (mlEval['available'] == true);
 
     Map<String, double>? probs;
     if (mlEval != null && mlEval['probabilities'] is Map) {
@@ -236,14 +235,34 @@ class CognitiveSubmissionResult {
       probs = rawProbs.map((k, v) => MapEntry(k, (v as num).toDouble()));
     }
 
+    // 1. Resolve prediction from mlPrediction, prediction, or mlModelEvaluation.prediction
     String? prediction = json['mlPrediction'] as String?;
-    if (prediction == null && isAvailable) {
-      prediction = mlEval['prediction']?.toString();
+    prediction ??= json['prediction'] as String?;
+    if ((prediction == null ||
+            prediction.isEmpty ||
+            prediction == 'Not Available' ||
+            prediction == 'Risk Level Not Available' ||
+            prediction == 'Prediction Unavailable') &&
+        mlEval != null &&
+        mlEval['prediction'] != null) {
+      final p = mlEval['prediction'].toString().trim();
+      if (p.isNotEmpty && p != 'null' && p != 'Not Available') {
+        prediction = p;
+      }
     }
 
+    // 2. Resolve riskLevel from riskLevel, fallback to normalized prediction
     String? riskLevel = json['riskLevel'] as String?;
-    if (riskLevel == null || riskLevel.isEmpty) {
-      if (prediction != null && prediction.isNotEmpty) {
+    if (riskLevel == null ||
+        riskLevel.isEmpty ||
+        riskLevel == 'Not Available' ||
+        riskLevel == 'Risk Level Not Available' ||
+        riskLevel == 'Prediction Unavailable') {
+      if (prediction != null &&
+          prediction.isNotEmpty &&
+          prediction != 'Not Available' &&
+          prediction != 'Risk Level Not Available' &&
+          prediction != 'Prediction Unavailable') {
         final p = prediction.toLowerCase();
         if (p.contains('low')) {
           riskLevel = 'Low Risk';
@@ -258,6 +277,40 @@ class CognitiveSubmissionResult {
         riskLevel = 'Not Available';
       }
     }
+
+    // If prediction is still missing or not available, but riskLevel has a valid risk, derive prediction
+    if ((prediction == null ||
+            prediction.isEmpty ||
+            prediction == 'Not Available' ||
+            prediction == 'Risk Level Not Available' ||
+            prediction == 'Prediction Unavailable') &&
+        riskLevel != 'Not Available' &&
+        riskLevel != 'Risk Level Not Available' &&
+        riskLevel != 'Prediction Unavailable') {
+      final r = riskLevel.toLowerCase();
+      if (r.contains('low')) {
+        prediction = 'Low';
+      } else if (r.contains('mod')) {
+        prediction = 'Moderate';
+      } else if (r.contains('high')) {
+        prediction = 'High';
+      } else {
+        prediction = riskLevel;
+      }
+    }
+
+    final bool hasValidPrediction = (prediction != null &&
+            prediction.isNotEmpty &&
+            prediction != 'Not Available' &&
+            prediction != 'Risk Level Not Available' &&
+            prediction != 'Prediction Unavailable') ||
+        (riskLevel != 'Not Available' &&
+            riskLevel != 'Risk Level Not Available' &&
+            riskLevel != 'Prediction Unavailable');
+
+    final bool isAvailable = (json['mlAvailable'] == true) ||
+        (mlEval != null && mlEval['available'] == true) ||
+        hasValidPrediction;
 
     bool? alert = json['alertTriggered'] as bool?;
     if (alert == null && mlEval != null) {
@@ -295,16 +348,35 @@ class CognitiveSubmissionResult {
       });
     }
 
+    double? memory = (json['memory'] as num?)?.toDouble();
+    double? attention = (json['attention'] as num?)?.toDouble();
+    double? orientation = (json['orientation'] as num?)?.toDouble();
+    double? recall = (json['recall'] as num?)?.toDouble();
+    double? reasoning = (json['reasoning'] as num?)?.toDouble();
+    double? acrfScore = (json['acrfScore'] as num?)?.toDouble();
+
+    if (json['accuracies'] is Map) {
+      final acc = json['accuracies'] as Map;
+      memory ??= (acc['memory'] as num?)?.toDouble();
+      attention ??= (acc['attention'] as num?)?.toDouble();
+      orientation ??= (acc['orientation'] as num?)?.toDouble();
+      recall ??= (acc['recall'] as num?)?.toDouble();
+      reasoning ??= (acc['reasoning'] as num?)?.toDouble();
+    }
+    acrfScore ??= (json['taskAccuracyScore'] as num?)?.toDouble();
+    acrfScore ??= (json['cognitiveScore'] as num?)?.toDouble();
+    acrfScore ??= (json['overallScore'] as num?)?.toDouble();
+
     return CognitiveSubmissionResult(
       id: (json['id'] as num?)?.toInt() ?? 0,
       residentId: (json['residentId'] as num?)?.toInt() ?? 0,
       residentName: json['residentName'] as String? ?? 'Resident',
-      memory: (json['memory'] as num?)?.toDouble(),
-      attention: (json['attention'] as num?)?.toDouble(),
-      orientation: (json['orientation'] as num?)?.toDouble(),
-      recall: (json['recall'] as num?)?.toDouble(),
-      reasoning: (json['reasoning'] as num?)?.toDouble(),
-      acrfScore: (json['acrfScore'] as num?)?.toDouble(),
+      memory: memory,
+      attention: attention,
+      orientation: orientation,
+      recall: recall,
+      reasoning: reasoning,
+      acrfScore: acrfScore,
       mlPrediction: prediction,
       riskLevel: riskLevel,
       alertTriggered: alert,

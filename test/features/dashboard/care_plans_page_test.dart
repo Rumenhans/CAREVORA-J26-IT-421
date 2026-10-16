@@ -78,6 +78,30 @@ void main() {
         'emotionalScore': 38.0,
         'riskLevel': 'HIGH',
       },
+      {
+        'id': 37,
+        'name': 'James Perera',
+        'age': 79,
+        'gender': 'Male',
+        'roomNumber': '204',
+        'elderHomeName': 'Serene Valley Senior Living',
+        'elderHomeId': 1,
+        'cognitiveScore': 72.5,
+        'emotionalScore': 70.0,
+        'riskLevel': 'LOW',
+      },
+      {
+        'id': 5,
+        'name': 'Resident Five',
+        'age': 75,
+        'gender': 'Female',
+        'roomNumber': '301',
+        'elderHomeName': 'Serene Valley Senior Living',
+        'elderHomeId': 1,
+        'cognitiveScore': 80.0,
+        'emotionalScore': 75.0,
+        'riskLevel': 'LOW',
+      },
     ],
   });
 
@@ -165,6 +189,42 @@ void main() {
       expect(CarePlansService.formatDomainScore(null), equals('--'));
       expect(CarePlansService.formatDomainScore(double.nan), equals('--'));
       expect(CarePlansService.formatDomainScore(double.infinity), equals('--'));
+      expect(CarePlansService.formatDomainScore(-10.0), equals('--'));
+    });
+
+    test('11. formatTaskAccuracyScore formats percentage-scaled values without multiplying twice', () {
+      final score72_5 = CarePlansService.formatTaskAccuracyScore(72.5);
+      final score100 = CarePlansService.formatTaskAccuracyScore(100.0);
+      final score0 = CarePlansService.formatTaskAccuracyScore(0.0);
+
+      expect(score72_5, equals('72.5%'));
+      expect(score72_5, isNot(contains('7250')));
+      expect(score100, equals('100.0%'));
+      expect(score100, isNot(contains('10000')));
+      expect(score0, equals('0.0%'));
+    });
+
+    test('12. formatTaskAccuracyScore formats fractional values (0.0–1.0) into percentages', () {
+      expect(CarePlansService.formatTaskAccuracyScore(0.725), equals('72.5%'));
+      expect(CarePlansService.formatTaskAccuracyScore(1.0), equals('100.0%'));
+      expect(CarePlansService.formatTaskAccuracyScore(0.85), equals('85.0%'));
+    });
+
+    test('13. formatTaskAccuracyScore handles null, negative, NaN, and Infinite inputs safely with N/A', () {
+      expect(CarePlansService.formatTaskAccuracyScore(null), equals('N/A'));
+      expect(CarePlansService.formatTaskAccuracyScore(double.nan), equals('N/A'));
+      expect(CarePlansService.formatTaskAccuracyScore(double.infinity), equals('N/A'));
+      expect(CarePlansService.formatTaskAccuracyScore(-5.0), equals('N/A'));
+    });
+
+    test('14. Percentage formatting contains exactly one percent symbol without duplication', () {
+      final formattedAcc = CarePlansService.formatTaskAccuracyScore(72.5);
+      final formattedDomain = CarePlansService.formatDomainScore(50.0);
+
+      expect('%'.allMatches(formattedAcc).length, equals(1));
+      expect('%'.allMatches(formattedDomain).length, equals(1));
+      expect(formattedAcc.endsWith('%%'), isFalse);
+      expect(formattedDomain.endsWith('%%'), isFalse);
     });
   });
 
@@ -179,7 +239,7 @@ void main() {
           return http.Response(mockResidentsJson, 200, headers: {'content-type': 'application/json'});
         }
 
-        if (path.contains('/api/cognitive/assessments/resident/1')) {
+        if (path.endsWith('/resident/1')) {
           // Resident 1: LOW Risk Cognitive Assessment
           final cogHistory = jsonEncode({
             'success': true,
@@ -209,7 +269,7 @@ void main() {
           return http.Response(cogHistory, 200, headers: {'content-type': 'application/json'});
         }
 
-        if (path.contains('/api/cognitive/assessments/resident/2')) {
+        if (path.endsWith('/resident/2')) {
           // Resident 2: MODERATE Risk with 92.5% task accuracy (verifies separation)
           final cogHistory = jsonEncode({
             'success': true,
@@ -239,7 +299,7 @@ void main() {
           return http.Response(cogHistory, 200, headers: {'content-type': 'application/json'});
         }
 
-        if (path.contains('/api/cognitive/assessments/resident/3')) {
+        if (path.endsWith('/resident/3')) {
           // Resident 3: HIGH Risk Cognitive Assessment with history
           final cogHistory = jsonEncode({
             'success': true,
@@ -284,7 +344,7 @@ void main() {
           return http.Response(cogHistory, 200, headers: {'content-type': 'application/json'});
         }
 
-        if (path.contains('/api/cognitive/assessments/resident/4')) {
+        if (path.endsWith('/resident/4')) {
           // Resident 4: Missing / Unavailable ML prediction
           final cogHistory = jsonEncode({
             'success': true,
@@ -303,6 +363,132 @@ void main() {
                 },
                 'createdAt': '2026-10-16T12:00:00Z',
                 'assessedBy': 'Staff',
+              },
+            ],
+          });
+          return http.Response(cogHistory, 200, headers: {'content-type': 'application/json'});
+        }
+
+        if (path.endsWith('/resident/37')) {
+          // Resident 37 (James Perera): Active session first, followed by completed assessment (No ML)
+          final cogHistory = jsonEncode({
+            'success': true,
+            'data': [
+              {
+                'id': null,
+                'residentId': 37,
+                'residentName': 'James Perera',
+                'memory': null,
+                'attention': null,
+                'orientation': null,
+                'recall': null,
+                'reasoning': null,
+                'acrfScore': null,
+                'mlPrediction': null,
+                'riskLevel': 'Not Available',
+                'alertTriggered': false,
+                'mlAvailable': false,
+                'mlModelEvaluation': {
+                  'available': false,
+                  'modelType': 'RandomForestClassifier',
+                  'statusMessage': 'Pending clinical review: AI inference will be evaluated upon caregiver completion.',
+                  'prediction': null,
+                  'alertTriggered': false,
+                },
+                'methodology': 'Pending Caregiver Clinical Review',
+                'clinicalDisclaimer': 'Awaiting caregiver review and clinical grading.',
+                'assessedBy': 'Caregiver Session',
+                'createdAt': '2026-10-16T23:02:37.25452',
+                'sessionId': 'cog-sess-b2b124fe-4561-46f8-8467-47394a4366f2',
+                'status': 'IN_PROGRESS',
+              },
+              {
+                'id': 120,
+                'residentId': 37,
+                'residentName': 'James Perera',
+                'memory': 50.0,
+                'attention': 100.0,
+                'orientation': 50.0,
+                'recall': 75.0,
+                'reasoning': 50.0,
+                'acrfScore': 72.5,
+                'mlPrediction': null,
+                'riskLevel': 'Not Available',
+                'alertTriggered': false,
+                'mlAvailable': false,
+                'mlModelEvaluation': {
+                  'available': false,
+                  'modelType': 'RandomForestClassifier',
+                  'statusMessage': 'Random Forest model inference was unavailable (missing required task metrics at assessment time)',
+                  'prediction': null,
+                  'probabilities': null,
+                  'alertTriggered': false,
+                  'alertThreshold': 0.48,
+                  'experimentalLabel': 'Synthetic Data Experiment (Non-Clinical)',
+                },
+                'methodology': 'ACRF Fixed Base Weights',
+                'clinicalDisclaimer': 'The ACRF score is an arithmetic weighted wellness metric. Non-diagnostic.',
+                'assessedBy': 'James Perera',
+                'createdAt': '2026-10-16T23:02:29.311996',
+                'sessionId': 'cog-sess-d96248e8-574c-4659-a22a-0eaec6e7d750',
+                'status': 'COMPLETED_PREDICTION_UNAVAILABLE',
+              },
+              {
+                'id': 113,
+                'residentId': 37,
+                'residentName': 'James Perera',
+                'memory': 100.0,
+                'attention': 100.0,
+                'orientation': 100.0,
+                'recall': 100.0,
+                'reasoning': 75.0,
+                'acrfScore': 95.0,
+                'mlPrediction': 'Low',
+                'riskLevel': 'Low Risk',
+                'mlAvailable': true,
+                'mlModelEvaluation': {
+                  'available': true,
+                  'modelType': 'RandomForestClassifier',
+                  'statusMessage': 'Experimental prediction generated using artifact trained on synthetic data.',
+                  'prediction': 'Low',
+                  'probabilities': {'Low Risk': 0.85, 'Moderate Risk': 0.10, 'High Risk': 0.05},
+                  'alertTriggered': false,
+                },
+                'createdAt': '2026-10-16T22:18:26.890352',
+                'sessionId': 'cog-sess-a22a5143-2633-4ebc-96cb-cdef0bbfde15',
+                'status': 'COMPLETED',
+                'assessedBy': 'David Silva',
+              },
+            ],
+          });
+          return http.Response(cogHistory, 200, headers: {'content-type': 'application/json'});
+        }
+
+        if (path.endsWith('/resident/5')) {
+          // Resident 5: Valid score with missing/null domain scores
+          final cogHistory = jsonEncode({
+            'success': true,
+            'data': [
+              {
+                'id': 105,
+                'residentId': 5,
+                'residentName': 'Resident Five',
+                'acrfScore': 80.0,
+                'memory': null,
+                'attention': null,
+                'orientation': null,
+                'recall': null,
+                'reasoning': null,
+                'riskLevel': 'Low Risk',
+                'mlPrediction': 'Low',
+                'mlAvailable': true,
+                'mlModelEvaluation': {
+                  'available': true,
+                  'prediction': 'Low',
+                },
+                'createdAt': '2026-10-16T15:00:00Z',
+                'assessedBy': 'Staff',
+                'status': 'COMPLETED',
               },
             ],
           });
@@ -567,6 +753,91 @@ void main() {
       // Confirm hardcoded dummy badges ('3' and '2') are not present in sidebar items
       expect(find.text('3'), findsNothing);
       expect(find.text('2'), findsNothing);
+    });
+
+    testWidgets('12. James Perera (Resident ID #37) displays valid 72.5% task accuracy and domain scores even with active session and unavailable ML prediction', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1600));
+      await tester.pumpWidget(createCaregiverWidget(initialResidentId: 37));
+      await tester.pumpAndSettle();
+
+      // Confirms correct resident is selected
+      expect(find.text('James Perera'), findsOneWidget);
+
+      // Task accuracy score must display 72.5% (from completed assessment #120, not N/A from in-progress session)
+      expect(find.text('72.5%'), findsOneWidget);
+      expect(find.text('N/A'), findsNothing);
+
+      // AI Risk Prediction must show Prediction Unavailable without inventing risk
+      expect(find.text('PREDICTION UNAVAILABLE'), findsAtLeastNWidgets(1));
+      expect(find.text('Prediction Unavailable Protocol'), findsOneWidget);
+
+      // Domain scores from assessment #120 must be displayed accurately (50%, 100%, 75%)
+      expect(find.text('50%', skipOffstage: false), findsAtLeastNWidgets(1));
+      expect(find.text('100%', skipOffstage: false), findsAtLeastNWidgets(1));
+      expect(find.text('75%', skipOffstage: false), findsAtLeastNWidgets(1));
+      // Domain scores must not display '--'
+      expect(find.text('--', skipOffstage: false), findsNothing);
+
+      // History toggle must show prior records count excluding the latest completed assessment
+      expect(find.textContaining('Previous Assessment History (2 prior records)', skipOffstage: false), findsOneWidget);
+    });
+
+    testWidgets('13. Resident with valid score and available AI prediction displays score and ML risk correctly', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1600));
+      await tester.pumpWidget(createCaregiverWidget(initialResidentId: 1));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sarah Jenkins'), findsOneWidget);
+      expect(find.text('90.0%'), findsOneWidget);
+      expect(find.text('LOW RISK'), findsAtLeastNWidgets(1));
+    });
+
+    testWidgets('14. Missing or null domain scores display cleanly as -- without crashing', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1600));
+      await tester.pumpWidget(createCaregiverWidget(initialResidentId: 5));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Resident Five'), findsOneWidget);
+      expect(find.text('80.0%'), findsOneWidget);
+      // Domain scores that are null must display '--'
+      expect(find.text('--', skipOffstage: false), findsAtLeastNWidgets(1));
+      expect(find.text('LOW RISK'), findsAtLeastNWidgets(1));
+    });
+
+    testWidgets('15. Searching and selecting resident loads correct resident and latest completed assessment', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1600));
+      await tester.pumpWidget(createCaregiverWidget());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final searchField = find.byType(TextField);
+      await tester.enterText(searchField, 'James');
+      await tester.pump();
+
+      expect(find.text('James Perera'), findsOneWidget);
+      await tester.tap(find.text('James Perera'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('72.5%'), findsOneWidget);
+      expect(find.text('PREDICTION UNAVAILABLE'), findsAtLeastNWidgets(1));
+    });
+
+    testWidgets('16. History list excludes currently displayed latest assessment and does not duplicate it', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1600));
+      await tester.pumpWidget(createCaregiverWidget(initialResidentId: 37));
+      await tester.pumpAndSettle();
+
+      // Open previous assessment history
+      expect(find.textContaining('Previous Assessment History', skipOffstage: false), findsOneWidget);
+      await tester.tap(find.textContaining('Previous Assessment History', skipOffstage: false));
+      await tester.pumpAndSettle();
+
+      // Older assessment #113 (assessed by David Silva, score 95.0%) is in history
+      expect(find.textContaining('Assessed by David Silva', skipOffstage: false), findsOneWidget);
+      expect(find.text('Accuracy: 95.0%', skipOffstage: false), findsOneWidget);
+
+      // Latest assessment #120 score (72.5%) is in main card only, not duplicated in history
+      expect(find.text('Accuracy: 72.5%', skipOffstage: false), findsNothing);
     });
   });
 }
