@@ -8,6 +8,7 @@ import '../../features/dashboard/presentation/dashboard_shell.dart';
 import '../../features/dashboard/presentation/overview_page.dart';
 import '../../features/dashboard/presentation/resident_directory_page.dart';
 import '../../features/dashboard/presentation/generic_placeholder_tab.dart';
+import '../../features/dashboard/presentation/care_plans_page.dart';
 import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
 import '../../features/doctor/presentation/pages/doctor_dashboard_page.dart';
 import '../../features/medicine/presentation/pages/live_medicine_board_page.dart';
@@ -99,11 +100,11 @@ class AppRouter {
           ),
           GoRoute(
             path: '/dashboard/care-plans',
-            builder: (context, state) => const GenericPlaceholderTab(
-              title: 'Care Plans Management',
-              description: 'Personalized care recommendations and intervention protocols',
-              icon: LucideIcons.clipboardList,
-            ),
+            builder: (context, state) {
+              final idParam = state.uri.queryParameters['residentId'];
+              final id = idParam != null ? int.tryParse(idParam) : null;
+              return CarePlansPage(initialResidentId: id);
+            },
           ),
           GoRoute(
             path: '/dashboard/doctor',
