@@ -67,7 +67,7 @@ public class AssessmentService {
         double emotionalScore = score;
 
         // Preserve independent social score; do not fabricate social measurements from questionnaire
-        Double socialScore = resident.getSocialScore() != null ? resident.getSocialScore() : 80.0;
+        Double socialScore = resident.getSocialScore();
 
         WellnessStatus status = score >= 75.0 ? WellnessStatus.LOOKING_GOOD : (score >= 60.0 ? WellnessStatus.STABLE : WellnessStatus.NEEDS_ATTENTION);
         RiskLevel risk = score >= 75.0 ? RiskLevel.LOW : (score >= 60.0 ? RiskLevel.MODERATE : RiskLevel.HIGH);
@@ -120,9 +120,6 @@ public class AssessmentService {
         resident.setRiskLevel(risk);
         resident.setTrajectory(trajectory);
         resident.setEmotionalScore(emotionalScore);
-        if (resident.getSocialScore() == null) {
-            resident.setSocialScore(socialScore);
-        }
         resident.setLastAssessmentDate(LocalDateTime.now());
         residentRepository.save(resident);
 

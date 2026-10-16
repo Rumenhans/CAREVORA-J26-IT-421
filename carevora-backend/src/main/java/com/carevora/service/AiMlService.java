@@ -58,7 +58,7 @@ public class AiMlService {
 
     public ApiResponse<Map<String, Object>> predictTrajectory(Long residentId) {
         double qScore = 80.0;
-        double sScore = 80.0;
+        Double sScore = null;
         List<Double> historyScores = Collections.emptyList();
 
         if (residentRepository != null) {
@@ -66,7 +66,7 @@ public class AiMlService {
             if (resident != null && resident.getEmotionalScore() != null) {
                 qScore = resident.getEmotionalScore();
             }
-            if (resident != null && resident.getSocialScore() != null) {
+            if (resident != null) {
                 sScore = resident.getSocialScore();
             }
         }

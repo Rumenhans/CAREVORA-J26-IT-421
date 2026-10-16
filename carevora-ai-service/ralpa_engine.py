@@ -316,6 +316,19 @@ class RALPAEngine:
         Colab High-Risk Model -> Colab Trajectory Model -> RALPA Baseline & Projection ->
         Explainable Factor Attribution -> Personalized Caregiver Recommendations.
         """
+        has_questionnaire = (current_scores.get("questionnaire") is not None) if current_scores else False
+        has_facial = (current_scores.get("facial") is not None) if current_scores else False
+        has_vocal = (current_scores.get("vocal") is not None) if current_scores else False
+        has_social = (current_scores.get("social") is not None) if current_scores else False
+
+        modality_availability = {
+            "questionnaire": has_questionnaire,
+            "facial": has_facial,
+            "vocal": has_vocal,
+            "social": has_social,
+        }
+        prediction_mode = "COMPLETE" if all(modality_availability.values()) else "PARTIAL"
+
         q_score = self._safe_float(current_scores.get("questionnaire") if current_scores else None, 85.0)
         facial_score = self._safe_float(current_scores.get("facial") if current_scores else None, 80.0)
         vocal_score = self._safe_float(current_scores.get("vocal") if current_scores else None, 80.0)
@@ -365,6 +378,8 @@ class RALPAEngine:
                 "risk_level": "LOW" if current_risk_score < 40 else ("MODERATE" if current_risk_score < 70 else "HIGH"),
                 "trajectory": "BASELINE_ESTABLISHING",
                 "trajectory_status_label": "Baseline Establishing (Insufficient Longitudinal Data)",
+                "prediction_mode": prediction_mode,
+                "modality_availability": modality_availability,
                 "is_insufficient_history": True,
                 "confidence_score": 0.60,
                 "baseline_score": current_risk_score,
@@ -499,6 +514,8 @@ class RALPAEngine:
             "risk_level": risk_level,
             "trajectory": trajectory,
             "trajectory_status_label": trajectory_label,
+            "prediction_mode": prediction_mode,
+            "modality_availability": modality_availability,
             "is_insufficient_history": False,
             "confidence_score": confidence,
             "baseline_score": round(personal_baseline, 1),

@@ -70,8 +70,7 @@ public class Resident {
     private Double emotionalScore = 85.0;
 
     @Column(name = "social_score")
-    @Builder.Default
-    private Double socialScore = 80.0;
+    private Double socialScore;
 
     @Column(name = "cognitive_score")
     @Builder.Default

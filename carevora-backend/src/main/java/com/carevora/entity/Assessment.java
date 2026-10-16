@@ -34,7 +34,7 @@ public class Assessment {
     @Column(name = "emotional_score", nullable = false)
     private Double emotionalScore;
 
-    @Column(name = "social_score", nullable = false)
+    @Column(name = "social_score")
     private Double socialScore;
 
     @Enumerated(EnumType.STRING)
