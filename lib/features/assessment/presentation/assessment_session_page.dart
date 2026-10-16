@@ -107,7 +107,13 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     try {
       await _flutterTts.setLanguage('en-US');
       await _flutterTts.setSpeechRate(0.48);
+      _flutterTts.setStartHandler(() {
+        if (mounted) setState(() => _isSpeaking = true);
+      });
       _flutterTts.setCompletionHandler(() {
+        if (mounted) setState(() => _isSpeaking = false);
+      });
+      _flutterTts.setCancelHandler(() {
         if (mounted) setState(() => _isSpeaking = false);
       });
       _flutterTts.setErrorHandler((_) {
@@ -1365,7 +1371,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     ),
                     IconButton(
                       icon: Icon(
-                        _isSpeaking ? LucideIcons.volumeX : LucideIcons.volume2,
+                        _isSpeaking ? LucideIcons.volume2 : LucideIcons.volumeX,
                         size: 20,
                         color: _isSpeaking
                             ? AppColors.primaryDeep

@@ -115,7 +115,7 @@ void main() {
         ],
         child: const MaterialApp(
           home: MediaQuery(
-            data: MediaQueryData(size: Size(1200, 800)),
+            data: MediaQueryData(size: Size(1200, 1000)),
             child: ResidentDirectoryPage(),
           ),
         ),
@@ -127,7 +127,7 @@ void main() {
         return http.Response(jsonEncode({'success': true, 'data': []}), 200);
       });
 
-      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
@@ -140,7 +140,7 @@ void main() {
       expect(find.text('Cognitive Wellness'), findsOneWidget);
       expect(find.text('75.0%'), findsNothing);
       expect(find.text('0 assessment(s) completed'), findsOneWidget);
-      expect(find.text('Risk Level:'), findsOneWidget);
+      expect(find.text('AI Risk Prediction:'), findsOneWidget);
       expect(find.text('Not Available'), findsAtLeastNWidgets(1));
       expect(find.text('No cognitive assessments yet'), findsOneWidget);
     });
@@ -150,7 +150,7 @@ void main() {
         return http.Response(jsonEncode({'success': true, 'data': []}), 200);
       });
 
-      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
@@ -161,6 +161,7 @@ void main() {
 
       final historyBtn = find.widgetWithText(OutlinedButton, 'History');
       expect(historyBtn, findsOneWidget);
+      await tester.ensureVisible(historyBtn);
       await tester.tap(historyBtn);
       await tester.pumpAndSettle();
 
@@ -178,7 +179,7 @@ void main() {
         return http.Response(jsonEncode({'success': false, 'message': 'Internal Server Error'}), 500);
       });
 
-      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
@@ -188,6 +189,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final historyBtn = find.widgetWithText(OutlinedButton, 'History');
+      await tester.ensureVisible(historyBtn);
       await tester.tap(historyBtn);
       await tester.pumpAndSettle();
 
@@ -238,7 +240,7 @@ void main() {
         return http.Response(jsonEncode({'success': true, 'data': mockData}), 200);
       });
 
-      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
@@ -255,7 +257,9 @@ void main() {
       expect(find.text('Low Risk'), findsAtLeastNWidgets(1));
 
       // Open history section
-      await tester.tap(find.widgetWithText(OutlinedButton, 'History'));
+      final historyBtn = find.widgetWithText(OutlinedButton, 'History');
+      await tester.ensureVisible(historyBtn);
+      await tester.tap(historyBtn);
       await tester.pumpAndSettle();
 
       // Both records appear in history newest first
@@ -270,7 +274,7 @@ void main() {
         return http.Response(jsonEncode({'success': true, 'data': []}), 200);
       });
 
-      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
@@ -290,7 +294,7 @@ void main() {
         return http.Response(jsonEncode({'success': true, 'data': []}), 200);
       });
 
-      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
@@ -313,6 +317,116 @@ void main() {
 
       expect(find.text('Resident ID: #2'), findsOneWidget);
       expect(find.text('Resident ID: #1'), findsNothing);
+    });
+
+    testWidgets('10. High task accuracy score (100.0%) with Moderate AI risk prediction displays explanatory note and distinct metrics', (tester) async {
+      final mockData = [
+        {
+          'id': 96,
+          'sessionId': 'cog-sess-100-mod',
+          'residentId': 1,
+          'residentName': 'Sarah Jenkins',
+          'status': 'COMPLETED',
+          'createdAt': '2026-10-16T15:00:00Z',
+          'memory': 100.0,
+          'attention': 100.0,
+          'orientation': 100.0,
+          'recall': 100.0,
+          'reasoning': 100.0,
+          'acrfScore': 100.0,
+          'mlPrediction': 'Moderate',
+          'riskLevel': 'Moderate Risk',
+          'responses': {'1': 'Friday'},
+          'grades': {'1': 1.0},
+        },
+      ];
+
+      CognitiveAssessmentService.client = MockClient((request) async {
+        return http.Response(jsonEncode({'success': true, 'data': mockData}), 200);
+      });
+
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
+      await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'Sarah');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sarah Jenkins'));
+      await tester.pumpAndSettle();
+
+      // Card displays separate metrics
+      expect(find.text('Task Accuracy Score'), findsOneWidget);
+      expect(find.text('100.0%'), findsOneWidget);
+      expect(find.text('AI Risk Prediction:'), findsOneWidget);
+      expect(find.text('Moderate Risk'), findsOneWidget);
+
+      // Explanatory note is displayed
+      expect(
+        find.textContaining('AI prediction also considers response latency, longitudinal features'),
+        findsOneWidget,
+      );
+
+      // Open history section
+      final historyBtn = find.widgetWithText(OutlinedButton, 'History');
+      await tester.ensureVisible(historyBtn);
+      await tester.tap(historyBtn);
+      await tester.pumpAndSettle();
+
+      // History item also displays Task Accuracy Score and AI Risk Prediction with explanatory note
+      expect(find.text('Task Accuracy Score'), findsNWidgets(2));
+      expect(find.text('AI Risk Prediction'), findsOneWidget);
+      expect(
+        find.textContaining('AI prediction also considers response latency, longitudinal features'),
+        findsNWidgets(2), // 1 in summary card, 1 in history item
+      );
+    });
+
+    testWidgets('11. High task accuracy score with Low AI risk prediction does NOT display explanatory note', (tester) async {
+      final mockData = [
+        {
+          'id': 92,
+          'sessionId': 'cog-sess-92-low',
+          'residentId': 1,
+          'residentName': 'Sarah Jenkins',
+          'status': 'COMPLETED',
+          'createdAt': '2026-10-16T13:00:00Z',
+          'memory': 100.0,
+          'attention': 100.0,
+          'orientation': 100.0,
+          'recall': 100.0,
+          'reasoning': 50.0,
+          'acrfScore': 92.5,
+          'mlPrediction': 'Low',
+          'riskLevel': 'Low Risk',
+          'responses': {'1': 'Friday'},
+          'grades': {'1': 1.0},
+        },
+      ];
+
+      CognitiveAssessmentService.client = MockClient((request) async {
+        return http.Response(jsonEncode({'success': true, 'data': mockData}), 200);
+      });
+
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
+      await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'Sarah');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sarah Jenkins'));
+      await tester.pumpAndSettle();
+
+      // Card displays separate metrics
+      expect(find.text('Task Accuracy Score'), findsOneWidget);
+      expect(find.text('92.5%'), findsOneWidget);
+      expect(find.text('AI Risk Prediction:'), findsOneWidget);
+      expect(find.text('Low Risk'), findsOneWidget);
+
+      // Explanatory note is NOT displayed when risk is Low
+      expect(
+        find.textContaining('AI prediction also considers response latency, longitudinal features'),
+        findsNothing,
+      );
     });
   });
 }
