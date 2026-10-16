@@ -81,67 +81,115 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   late Resident _currentResident;
   SocialAuditRecord? _latestSocialAudit;
   bool _isLoadingSocialAudit = false;
-
-  final List<Resident> _availableResidents = [
-    MockCarevoraData.defaultResident,
-    const Resident(
-      id: '9002',
-      name: 'Mrs. Sarah Jenkins',
-      age: 78,
-      gender: 'Female',
-      roomNo: '101',
-      lastAssessmentDate: '11 May 2025, 02:30 PM',
-      cognitiveScore: 0.68,
-      cognitiveTrend: 0.04,
-      emotionalScore: 0.74,
-      emotionalTrend: 0.08,
-      metabolicScore: 0.80,
-      metabolicTrend: 0.02,
-      overallIndex: 0.74,
-      overallTrend: 0.05,
-    ),
-    const Resident(
-      id: '9003',
-      name: 'Mr. Arthur Pendelton',
-      age: 82,
-      gender: 'Male',
-      roomNo: '102',
-      lastAssessmentDate: '09 May 2025, 11:15 AM',
-      cognitiveScore: 0.54,
-      cognitiveTrend: -0.05,
-      emotionalScore: 0.62,
-      emotionalTrend: -0.04,
-      metabolicScore: 0.70,
-      metabolicTrend: 0.01,
-      overallIndex: 0.62,
-      overallTrend: -0.03,
-    ),
-    const Resident(
-      id: '9004',
-      name: 'Mrs. Margaret Chen',
-      age: 79,
-      gender: 'Female',
-      roomNo: '103',
-      lastAssessmentDate: '08 May 2025, 04:00 PM',
-      cognitiveScore: 0.72,
-      cognitiveTrend: 0.06,
-      emotionalScore: 0.82,
-      emotionalTrend: 0.10,
-      metabolicScore: 0.65,
-      metabolicTrend: 0.03,
-      overallIndex: 0.73,
-      overallTrend: 0.06,
-    ),
-  ];
+  bool _useSimplifiedElderView = false;
+  late List<Resident> _availableResidents;
 
   late List<PersonalizedActivityItem> _activities;
   late List<EmotionalAssessmentHistoryLog> _historyLogs;
   late Map<String, ResidentProfileDataset> _residentDatasets;
 
+  void _initResidents() {
+    final baseResidents = [
+      MockCarevoraData.defaultResident,
+      const Resident(
+        id: '9002',
+        name: 'Mrs. Sarah Jenkins',
+        age: 78,
+        gender: 'Female',
+        roomNo: '101',
+        lastAssessmentDate: '11 May 2025, 02:30 PM',
+        cognitiveScore: 0.68,
+        cognitiveTrend: 0.04,
+        emotionalScore: 0.74,
+        emotionalTrend: 0.08,
+        metabolicScore: 0.80,
+        metabolicTrend: 0.02,
+        overallIndex: 0.74,
+        overallTrend: 0.05,
+      ),
+      const Resident(
+        id: '9003',
+        name: 'Mr. Arthur Pendelton',
+        age: 82,
+        gender: 'Male',
+        roomNo: '102',
+        lastAssessmentDate: '09 May 2025, 11:15 AM',
+        cognitiveScore: 0.54,
+        cognitiveTrend: -0.05,
+        emotionalScore: 0.62,
+        emotionalTrend: -0.04,
+        metabolicScore: 0.70,
+        metabolicTrend: 0.01,
+        overallIndex: 0.62,
+        overallTrend: -0.03,
+      ),
+      const Resident(
+        id: '9004',
+        name: 'Mrs. Margaret Chen',
+        age: 79,
+        gender: 'Female',
+        roomNo: '103',
+        lastAssessmentDate: '08 May 2025, 04:00 PM',
+        cognitiveScore: 0.72,
+        cognitiveTrend: 0.06,
+        emotionalScore: 0.82,
+        emotionalTrend: 0.10,
+        metabolicScore: 0.65,
+        metabolicTrend: 0.03,
+        overallIndex: 0.73,
+        overallTrend: 0.06,
+      ),
+    ];
+
+    _availableResidents = List<Resident>.from(baseResidents);
+
+    final authState = ref.read(authProvider).state;
+    final userName = authState.userName?.trim();
+
+    if (authState.isElder) {
+      Resident? matchedResident;
+      if (userName != null && userName.isNotEmpty) {
+        final cleanName = userName.toLowerCase();
+        for (final r in _availableResidents) {
+          final rClean = r.name.toLowerCase().replaceAll('mrs. ', '').replaceAll('mr. ', '').replaceAll('dr. ', '');
+          if (rClean.contains(cleanName) || cleanName.contains(rClean)) {
+            matchedResident = r;
+            break;
+          }
+        }
+      }
+
+      if (matchedResident != null) {
+        _currentResident = matchedResident;
+      } else {
+        final newResident = Resident(
+          id: authState.residentId?.toString() ?? '9005',
+          name: (userName != null && userName.isNotEmpty) ? userName : 'Senior Resident',
+          age: 75,
+          gender: 'Senior Resident',
+          roomNo: '101',
+          lastAssessmentDate: 'Today, 10:30 AM',
+          cognitiveScore: 0.72,
+          cognitiveTrend: 0.05,
+          emotionalScore: 0.78,
+          emotionalTrend: 0.08,
+          metabolicScore: 0.68,
+          metabolicTrend: 0.02,
+          overallIndex: 0.73,
+          overallTrend: 0.05,
+        );
+        _availableResidents.insert(0, newResident);
+        _currentResident = newResident;
+      }
+    } else {
+      _currentResident = _availableResidents.first;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _currentResident = _availableResidents.first;
+    _initResidents();
     _initActivitiesAndHistory();
     _loadResidentData(_currentResident.id);
     _initAnimations();
@@ -513,8 +561,62 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     };
   }
 
+  ResidentProfileDataset _createDefaultDataset(String residentName) {
+    return ResidentProfileDataset(
+      baselineLoneliness: 46.0,
+      baselineIsolation: 40.0,
+      baselineEstablishedDate: '12 May 2025',
+      trendSlope: 0.8,
+      activities: [
+        PersonalizedActivityItem(
+          id: 'ACT-1-CUSTOM',
+          title: 'Soothing Classical & Traditional Melody Listening',
+          category: 'Music Therapy',
+          description: 'Acoustic rhythms to stabilize vocal prosody and support positive valence.',
+          icon: LucideIcons.music,
+          priority: 'High Priority',
+          priorityColor: AppColors.primary,
+          isCompleted: false,
+        ),
+        PersonalizedActivityItem(
+          id: 'ACT-2-CUSTOM',
+          title: 'Courtyard Nature Walk & Mindful Breathing',
+          category: 'Physical / Relaxation',
+          description: 'Gentle nature walk in personal quarters or courtyard to elevate mood.',
+          icon: LucideIcons.sparkles,
+          priority: 'Recommended',
+          priorityColor: AppColors.leafGreen,
+          isCompleted: false,
+        ),
+        PersonalizedActivityItem(
+          id: 'ACT-3-CUSTOM',
+          title: 'Social Afternoon Tea & Reminiscence Chat',
+          category: 'Social Interaction',
+          description: 'Peer interaction over afternoon tea to strengthen social connectivity.',
+          icon: LucideIcons.users,
+          priority: 'Essential',
+          priorityColor: Colors.blueAccent,
+          isCompleted: false,
+        ),
+      ],
+      logs: [
+        EmotionalAssessmentHistoryLog(
+          id: 'EAL-001',
+          date: '12 May 2025, 10:30 AM',
+          primaryEmotion: 'Calm / Neutral',
+          lonelinessScore: 38,
+          isolationScore: 32,
+          deviation: 0.0,
+          trajectory: 'Stable Wellness Profile',
+          interventionStatus: 'Regular Monitoring Active',
+          assessedBy: 'Self-Report & Specialist',
+        ),
+      ],
+    );
+  }
+
   void _loadResidentData(String id) {
-    final dataset = _residentDatasets[id] ?? _residentDatasets['9001']!;
+    final dataset = _residentDatasets[id] ?? _createDefaultDataset(_currentResident.name);
     _historyLogs = List.from(dataset.logs);
     _activities = List.from(dataset.activities);
     _capturedImageBytes = null;
@@ -1662,11 +1764,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     final completedCount = _currentIndex;
     final remainingCount = _questions.length - (_currentIndex + 1);
 
-    // Section 6.6 User Privacy & Distress Prevention:
-    // When logged in as an Elder resident, do NOT expose distressing clinical risk scores,
-    // loneliness numerical scales, or deterioration trajectories. Provide an accessible,
-    // comforting conversation check-in and personal activity checklist.
-    if (authState.state.isElder) {
+    // When logged in as an Elder resident, display the full emotional wellness dashboard
+    // matching the caregiver experience, with an option to toggle the accessible conversation view.
+    if (_useSimplifiedElderView && authState.state.isElder) {
       return _buildElderResidentView(currentQ);
     }
 
@@ -1823,6 +1923,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   // --- TOP HEADER BAR ---
   Widget _buildTopHeaderBar() {
+    final isElder = ref.watch(authProvider).state.isElder;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1832,12 +1933,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
             child: Row(
-              children: const [
-                Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
-                SizedBox(width: 6),
+              children: [
+                const Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
+                const SizedBox(width: 6),
                 Text(
-                  'Back to Residents',
-                  style: TextStyle(
+                  isElder ? 'Back to My Health Record' : 'Back to Residents',
+                  style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: AppColors.primary,
@@ -1849,6 +1950,30 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         ),
         Row(
           children: [
+            if (isElder) ...[
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _useSimplifiedElderView = !_useSimplifiedElderView;
+                  });
+                },
+                icon: Icon(
+                  _useSimplifiedElderView ? LucideIcons.layoutDashboard : LucideIcons.smile,
+                  size: 15,
+                  color: AppColors.primary,
+                ),
+                label: Text(
+                  _useSimplifiedElderView ? 'Full Dashboard' : 'Simplified Check-In',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppColors.primary),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
             Stack(
               clipBehavior: Clip.none,
               children: [
@@ -5232,6 +5357,18 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       'Let\'s take a gentle moment together today. How are you feeling?',
                       style: TextStyle(fontSize: 15, color: Colors.white70),
                       textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    ElevatedButton.icon(
+                      onPressed: () => setState(() => _useSimplifiedElderView = false),
+                      icon: const Icon(LucideIcons.layoutDashboard, size: 16),
+                      label: const Text('View Full Emotional Wellness Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      ),
                     ),
                   ],
                 ),

@@ -41,7 +41,7 @@ class RecentAssessmentsTable extends StatelessWidget {
                   children: [
                     Text('Recent Assessments', style: AppTextStyles.h4),
                     const SizedBox(height: 2),
-                    Text('Historical multimodal risk scores for Mr. James Perera',
+                    Text('Historical multimodal wellness & risk scores',
                         style: AppTextStyles.caption),
                   ],
                 ),
