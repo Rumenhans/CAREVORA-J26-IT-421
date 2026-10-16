@@ -6,10 +6,12 @@ import com.carevora.dto.cognitive.CognitiveAssessmentResponse;
 import com.carevora.entity.Assessment;
 import com.carevora.entity.CognitiveAssessment;
 import com.carevora.entity.Resident;
+import com.carevora.entity.SocialAudit;
 import com.carevora.exception.AiServiceException;
 import com.carevora.repository.AssessmentRepository;
 import com.carevora.repository.CognitiveAssessmentRepository;
 import com.carevora.repository.ResidentRepository;
+import com.carevora.repository.SocialAuditRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +36,7 @@ public class AiMlService {
     private final RestTemplate restTemplate;
     private final AssessmentRepository assessmentRepository;
     private final ResidentRepository residentRepository;
+    private final SocialAuditRepository socialAuditRepository;
     private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
     private final String aiServiceBaseUrl;
 
@@ -42,12 +45,14 @@ public class AiMlService {
             RestTemplate restTemplate,
             AssessmentRepository assessmentRepository,
             ResidentRepository residentRepository,
+            SocialAuditRepository socialAuditRepository,
             @Autowired(required = false) CognitiveAssessmentRepository cognitiveAssessmentRepository,
             @Value("${application.ai-service.base-url:http://127.0.0.1:8000}") String aiServiceBaseUrl
     ) {
         this.restTemplate = restTemplate;
         this.assessmentRepository = assessmentRepository;
         this.residentRepository = residentRepository;
+        this.socialAuditRepository = socialAuditRepository;
         this.cognitiveAssessmentRepository = cognitiveAssessmentRepository;
         this.aiServiceBaseUrl = (aiServiceBaseUrl != null && aiServiceBaseUrl.endsWith("/"))
                 ? aiServiceBaseUrl.substring(0, aiServiceBaseUrl.length() - 1)
@@ -58,21 +63,51 @@ public class AiMlService {
             RestTemplate restTemplate,
             String aiServiceBaseUrl
     ) {
-        this(restTemplate, null, null, null, aiServiceBaseUrl);
+        this(restTemplate, null, null, null, null, aiServiceBaseUrl);
     }
 
     public ApiResponse<Map<String, Object>> predictTrajectory(Long residentId) {
         double qScore = 80.0;
-        double sScore = 80.0;
+        Double sScore = null;
         List<Double> historyScores = Collections.emptyList();
+        Map<String, Object> rawFeatures = new HashMap<>();
 
         if (residentRepository != null) {
             Resident resident = residentRepository.findById(residentId).orElse(null);
             if (resident != null && resident.getEmotionalScore() != null) {
                 qScore = resident.getEmotionalScore();
             }
-            if (resident != null && resident.getSocialScore() != null) {
+            if (resident != null) {
                 sScore = resident.getSocialScore();
+            }
+        }
+
+        if (socialAuditRepository != null) {
+            SocialAudit latestAudit = socialAuditRepository.findFirstByResidentIdOrderByAuditDateDesc(residentId).orElse(null);
+            if (latestAudit != null) {
+                if (latestAudit.getSocialScore() != null) {
+                    sScore = latestAudit.getSocialScore();
+                }
+                if (!Boolean.TRUE.equals(latestAudit.getExternalContactUnknown())) {
+                    int visits = latestAudit.getFamilyInPersonVisits() != null ? latestAudit.getFamilyInPersonVisits() : 0;
+                    int calls = latestAudit.getFamilyPhoneVideoContacts() != null ? latestAudit.getFamilyPhoneVideoContacts() : 0;
+                    if (latestAudit.getFamilyInPersonVisits() != null || latestAudit.getFamilyPhoneVideoContacts() != null) {
+                        rawFeatures.put("family_contacts_per_week", (double) (visits + calls));
+                    }
+                }
+                if (latestAudit.getPeerInteractionLevel() != null) {
+                    switch (latestAudit.getPeerInteractionLevel()) {
+                        case RARELY: rawFeatures.put("social_interactions_per_week", 1.0); break;
+                        case SOMETIMES: rawFeatures.put("social_interactions_per_week", 3.0); break;
+                        case OFTEN: rawFeatures.put("social_interactions_per_week", 6.0); break;
+                        case VERY_OFTEN: rawFeatures.put("social_interactions_per_week", 10.0); break;
+                        default: break;
+                    }
+                }
+                if (latestAudit.getActivitiesAvailable() != null && latestAudit.getActivitiesAvailable() > 0 && latestAudit.getActivitiesAttended() != null) {
+                    double actRatio = ((double) latestAudit.getActivitiesAttended() / latestAudit.getActivitiesAvailable()) * 10.0;
+                    rawFeatures.put("activity_participation_score_0_10", Math.min(10.0, Math.max(0.0, actRatio)));
+                }
             }
         }
 
@@ -93,6 +128,9 @@ public class AiMlService {
             req.put("social_score", sScore);
             req.put("history_scores", historyScores);
             req.put("score_domain", "wellness");
+            if (!rawFeatures.isEmpty()) {
+                req.put("raw_features", rawFeatures);
+            }
 
             String ralpaUrl = aiServiceBaseUrl + "/api/ml/predict-ralpa";
             @SuppressWarnings("unchecked")

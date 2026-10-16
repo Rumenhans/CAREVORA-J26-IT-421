@@ -140,7 +140,6 @@ public class AuthService {
                     .riskLevel(RiskLevel.LOW)
                     .trajectory(TrajectoryStatus.STABLE)
                     .emotionalScore(80.0)
-                    .socialScore(80.0)
                     .lastAssessmentDate(LocalDateTime.now())
                     .build();
             residentRepository.save(resident);
