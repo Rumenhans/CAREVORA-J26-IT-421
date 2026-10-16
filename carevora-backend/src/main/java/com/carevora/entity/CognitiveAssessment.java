@@ -61,6 +61,25 @@ public class CognitiveAssessment {
     @Column(name = "class_probabilities", length = 255)
     private String classProbabilities;
 
+    @Column(name = "session_id", length = 100)
+    private String sessionId;
+
+    @Column(name = "status", length = 50)
+    @Builder.Default
+    private String status = "COMPLETED";
+
+    @Column(name = "responses_json", length = 4000)
+    private String responsesJson;
+
+    @Column(name = "grades_json", length = 1000)
+    private String gradesJson;
+
+    @Column(name = "accuracies_json", length = 1000)
+    private String accuraciesJson;
+
+    @Column(name = "response_times_json", length = 1000)
+    private String responseTimesJson;
+
     public boolean isMlPredictionAvailable() {
         return Boolean.TRUE.equals(this.mlAvailable);
     }

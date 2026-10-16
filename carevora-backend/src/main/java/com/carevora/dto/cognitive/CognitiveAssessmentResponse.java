@@ -24,6 +24,7 @@ public class CognitiveAssessmentResponse {
     private Double reasoning;
     private Double acrfScore;
     private String mlPrediction;
+    private String riskLevel;
     private Boolean alertTriggered;
     private List<CategoryContributionDto> categoryContributions;
     private Map<String, Double> weightsApplied;
@@ -32,6 +33,12 @@ public class CognitiveAssessmentResponse {
     private String clinicalDisclaimer;
     private String assessedBy;
     private LocalDateTime createdAt;
+    private String sessionId;
+    private String status;
+    private Map<Integer, String> responses;
+    private Map<Integer, Double> grades;
+    private Map<String, Double> accuracies;
+    private Map<String, Double> responseTimes;
 
     @Data
     @Builder

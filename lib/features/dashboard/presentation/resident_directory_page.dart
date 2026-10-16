@@ -7,6 +7,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../assessment/application/cognitive_assessment_service.dart';
+import '../../assessment/domain/cognitive_scoring.dart';
 
 class ResidentItem {
   final int id;
@@ -16,11 +18,14 @@ class ResidentItem {
   final String roomNo;
   final String elderHomeName;
   final int elderHomeId;
-  final double cognitiveScore;
-  final double emotionalScore;
-  final double metabolicScore;
+  final double? cognitiveScore;
+  final double? emotionalScore;
+  final double? metabolicScore;
   final double riskScore;
   final String caregiverName;
+  final String? lastAssessmentDate;
+  final String? currentStatus;
+  final String? riskLevel;
 
   const ResidentItem({
     required this.id,
@@ -30,11 +35,14 @@ class ResidentItem {
     required this.roomNo,
     required this.elderHomeName,
     required this.elderHomeId,
-    required this.cognitiveScore,
-    required this.emotionalScore,
-    required this.metabolicScore,
+    this.cognitiveScore,
+    this.emotionalScore,
+    this.metabolicScore,
     required this.riskScore,
     required this.caregiverName,
+    this.lastAssessmentDate,
+    this.currentStatus,
+    this.riskLevel,
   });
 }
 
@@ -62,9 +70,19 @@ class ResidentDirectoryPage extends ConsumerStatefulWidget {
 }
 
 class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
-  int _selectedFilterHomeId = 0; // 0: All homes
+  int _selectedFilterHomeId = 0; // 0: All homes (Doctor view)
   int _doctorTabIndex = 0; // 0: Elders, 1: All System Users
   bool _isLoading = false;
+
+  // Search-First State for Caregiver View
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  ResidentItem? _selectedResident;
+  List<CognitiveSubmissionResult> _residentCognitiveHistory = [];
+  bool _isLoadingHistory = false;
+  String? _historyError;
+  bool _showHistoryView = false;
+  int? _expandedHistoryIndex;
 
   final List<ResidentItem> _allEldersFallback = [
     const ResidentItem(
@@ -75,11 +93,13 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       roomNo: '101',
       elderHomeName: 'Serene Valley Senior Living',
       elderHomeId: 1,
-      cognitiveScore: 0.68,
-      emotionalScore: 0.74,
-      metabolicScore: 0.80,
-      riskScore: 0.28,
+      cognitiveScore: 85.0,
+      emotionalScore: 88.0,
+      metabolicScore: null,
+      riskScore: 0.20,
       caregiverName: 'Eleanor Vance',
+      currentStatus: 'LOOKING_GOOD',
+      riskLevel: 'LOW',
     ),
     const ResidentItem(
       id: 2,
@@ -89,11 +109,13 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       roomNo: '102',
       elderHomeName: 'Serene Valley Senior Living',
       elderHomeId: 1,
-      cognitiveScore: 0.54,
-      emotionalScore: 0.62,
-      metabolicScore: 0.70,
-      riskScore: 0.42,
+      cognitiveScore: 62.0,
+      emotionalScore: 54.0,
+      metabolicScore: null,
+      riskScore: 0.45,
       caregiverName: 'Eleanor Vance',
+      currentStatus: 'NEEDS_ATTENTION',
+      riskLevel: 'MODERATE',
     ),
     const ResidentItem(
       id: 3,
@@ -103,11 +125,13 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       roomNo: '201',
       elderHomeName: 'Golden Sunset Eldercare',
       elderHomeId: 2,
-      cognitiveScore: 0.82,
-      emotionalScore: 0.85,
-      metabolicScore: 0.78,
+      cognitiveScore: 80.0,
+      emotionalScore: 76.0,
+      metabolicScore: null,
       riskScore: 0.18,
       caregiverName: 'David Silva',
+      currentStatus: 'STABLE',
+      riskLevel: 'LOW',
     ),
     const ResidentItem(
       id: 4,
@@ -117,11 +141,13 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       roomNo: '202',
       elderHomeName: 'Golden Sunset Eldercare',
       elderHomeId: 2,
-      cognitiveScore: 0.48,
-      emotionalScore: 0.55,
-      metabolicScore: 0.60,
-      riskScore: 0.52,
+      cognitiveScore: 48.0,
+      emotionalScore: 38.0,
+      metabolicScore: null,
+      riskScore: 0.75,
       caregiverName: 'David Silva',
+      currentStatus: 'CHECK_IN_NEEDED',
+      riskLevel: 'HIGH',
     ),
     const ResidentItem(
       id: 5,
@@ -131,11 +157,13 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       roomNo: '301',
       elderHomeName: 'Lotus Care Senior Home',
       elderHomeId: 3,
-      cognitiveScore: 0.60,
-      emotionalScore: 0.65,
-      metabolicScore: 0.72,
+      cognitiveScore: 60.0,
+      emotionalScore: 65.0,
+      metabolicScore: null,
       riskScore: 0.35,
       caregiverName: 'Staff On Duty',
+      currentStatus: 'STABLE',
+      riskLevel: 'LOW',
     ),
   ];
 
@@ -175,27 +203,6 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       role: 'ELDER',
       elderHomeName: 'Serene Valley Senior Living',
     ),
-    const UserDirectoryItem(
-      id: 6,
-      name: 'Margaret Chen',
-      email: 'margaret.c@carevora.com',
-      role: 'ELDER',
-      elderHomeName: 'Golden Sunset Eldercare',
-    ),
-    const UserDirectoryItem(
-      id: 7,
-      name: 'Robert Hastings',
-      email: 'robert.h@carevora.com',
-      role: 'ELDER',
-      elderHomeName: 'Golden Sunset Eldercare',
-    ),
-    const UserDirectoryItem(
-      id: 8,
-      name: 'Simon Perera',
-      email: 'simon.p@carevora.com',
-      role: 'ELDER',
-      elderHomeName: 'Lotus Care Senior Home',
-    ),
   ];
 
   List<ResidentItem> _liveResidents = [];
@@ -204,7 +211,18 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
     _fetchData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchData() async {
@@ -230,6 +248,11 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
         final list = decoded['data'] as List?;
         if (list != null && list.isNotEmpty) {
           _liveResidents = list.map((e) {
+            final cogVal = (e['cognitiveScore'] as num?)?.toDouble();
+            final emoVal = (e['emotionalScore'] as num?)?.toDouble();
+            final riskStr = e['riskLevel'] as String?;
+            final double riskScore = riskStr == 'HIGH' ? 0.75 : (riskStr == 'MODERATE' ? 0.45 : 0.20);
+
             return ResidentItem(
               id: (e['id'] as num).toInt(),
               name: e['name'] as String? ?? 'Resident',
@@ -238,11 +261,14 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
               roomNo: e['roomNumber'] as String? ?? 'Room',
               elderHomeName: e['elderHomeName'] as String? ?? 'Care Facility',
               elderHomeId: (e['elderHomeId'] as num?)?.toInt() ?? 1,
-              cognitiveScore: 0.65,
-              emotionalScore: 0.72,
-              metabolicScore: 0.75,
-              riskScore: 0.30,
+              cognitiveScore: cogVal,
+              emotionalScore: emoVal,
+              metabolicScore: null, // Metabolic data not exposed on backend
+              riskScore: riskScore,
               caregiverName: 'Assigned Care Team',
+              lastAssessmentDate: e['lastAssessmentDate'] as String?,
+              currentStatus: e['currentStatus'] as String?,
+              riskLevel: riskStr,
             );
           }).toList();
         }
@@ -281,6 +307,72 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
   void _applyFallback() {
     _liveResidents = _allEldersFallback;
     _liveUsers = _allUsersFallback;
+  }
+
+  Future<void> _selectResident(ResidentItem resident) async {
+    setState(() {
+      _selectedResident = resident;
+      _isLoadingHistory = true;
+      _historyError = null;
+      _residentCognitiveHistory = [];
+      _showHistoryView = false;
+      _expandedHistoryIndex = null;
+    });
+
+    await _loadResidentHistory(resident.id);
+  }
+
+  Future<void> _loadResidentHistory(int residentId) async {
+    final token = ref.read(authProvider).state.token;
+    setState(() {
+      _isLoadingHistory = true;
+      _historyError = null;
+    });
+
+    try {
+      final history = await CognitiveAssessmentService.fetchHistory(
+        residentId: residentId,
+        token: token,
+      );
+      if (mounted && _selectedResident?.id == residentId) {
+        setState(() {
+          _residentCognitiveHistory = history;
+          _isLoadingHistory = false;
+          _historyError = null;
+        });
+      }
+    } catch (err) {
+      if (mounted && _selectedResident?.id == residentId) {
+        setState(() {
+          _isLoadingHistory = false;
+          _historyError = err.toString();
+        });
+      }
+    }
+  }
+
+  void _clearSelectedResident() {
+    setState(() {
+      _selectedResident = null;
+      _residentCognitiveHistory = [];
+      _isLoadingHistory = false;
+      _historyError = null;
+      _showHistoryView = false;
+      _expandedHistoryIndex = null;
+    });
+  }
+
+  Future<void> _startNewAssessmentForResident(ResidentItem resident) async {
+    final token = ref.read(authProvider).state.token;
+    try {
+      await CognitiveAssessmentService.startSession(
+        residentId: resident.id,
+        token: token,
+      );
+    } catch (_) {}
+    if (mounted) {
+      context.go('/dashboard/cognitive/session');
+    }
   }
 
   @override
@@ -352,43 +444,49 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(badgeIcon, size: 14, color: badgeColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      badgeText,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: badgeColor,
-                        letterSpacing: 0.3,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: badgeBg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(badgeIcon, size: 14, color: badgeColor),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          badgeText,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: badgeColor,
+                            letterSpacing: 0.3,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              const Spacer(),
-              if (_isLoading)
+              if (_isLoading) ...[
+                const SizedBox(width: 8),
                 const SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
           Text(
             auth.isElder
                 ? 'My Confidential Health Record'
-                : 'Resident Directory & Community Registry',
+                : 'Resident Directory',
             style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w800,
@@ -401,7 +499,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             auth.isDoctor
                 ? 'Logged in as ${auth.userName}. You have clinical clearance to review all residents and registered staff across all elder homes.'
                 : auth.isCaregiver
-                    ? 'Logged in as ${auth.userName}. You are actively assigned to ${auth.elderHomeName ?? 'your facility'}. You can only access residents residing in your facility.'
+                    ? 'Search residents assigned to your care home to view longitudinal wellness metrics, review cognitive assessments, or initiate new evaluation sessions.'
                     : 'Logged in as ${auth.userName}. Under HIPAA and resident privacy standards, you cannot view other elders\' records.',
             style: const TextStyle(
               fontSize: 13,
@@ -412,6 +510,1424 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
         ],
       ),
     );
+  }
+
+  // ----------------------------------------------------
+  // CAREGIVER VIEW: Search-First Interface
+  // ----------------------------------------------------
+  Widget _buildCaregiverView(AuthState auth) {
+    final allResidents = _liveResidents.isNotEmpty ? _liveResidents : _allEldersFallback;
+    final assignedHomeId = auth.elderHomeId ?? 1;
+
+    // Filter STRICTLY by caregiver's elder home
+    final scopedResidents = allResidents.where((r) => r.elderHomeId == assignedHomeId).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Prominent Search Bar with Clear-Search Control
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const Icon(LucideIcons.search, color: AppColors.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  style: const TextStyle(fontSize: 14, color: AppColors.navy),
+                  decoration: const InputDecoration(
+                    hintText: 'Search residents by name or resident ID',
+                    hintStyle: TextStyle(fontSize: 14, color: AppColors.muted),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              if (_searchQuery.isNotEmpty)
+                IconButton(
+                  icon: const Icon(LucideIcons.x, size: 18, color: AppColors.muted),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                  tooltip: 'Clear search',
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Display states: If a resident is selected, show their 3 wellness cards.
+        // Otherwise, show search results or empty state.
+        if (_selectedResident != null) ...[
+          _buildSelectedResidentOverview(auth),
+        ] else if (_searchQuery.trim().isEmpty) ...[
+          _buildEmptySearchState(scopedResidents.length, auth.elderHomeName ?? 'Your Facility'),
+        ] else ...[
+          _buildSearchResultsList(scopedResidents),
+        ],
+      ],
+    );
+  }
+
+  /// Empty state displayed before any search query is entered or resident is selected
+  Widget _buildEmptySearchState(int residentCount, String facilityName) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(LucideIcons.search, size: 28, color: AppColors.primary),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Search to Select a Resident',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navy,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Text(
+              'Type a resident name or resident ID in the search bar above to view their cognitive, emotional, and metabolic wellness cards.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.body,
+                height: 1.4,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.lavenderBg,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.building2, size: 14, color: AppColors.primaryDeep),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '$facilityName ($residentCount residents assigned)',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryDeep,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Search results list matching the caregiver's input
+  Widget _buildSearchResultsList(List<ResidentItem> scopedResidents) {
+    final q = _searchQuery.trim().toLowerCase();
+    final matches = scopedResidents.where((r) {
+      final nameMatch = r.name.toLowerCase().contains(q);
+      final idMatch = r.id.toString() == q;
+      final roomMatch = r.roomNo.toLowerCase().contains(q);
+      return nameMatch || idMatch || roomMatch;
+    }).toList();
+
+    if (matches.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          children: [
+            const Icon(LucideIcons.userX, size: 36, color: AppColors.muted),
+            const SizedBox(height: 14),
+            const Text(
+              'No residents found',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'No resident matches "$_searchQuery" in your assigned facility. Please check the spelling or ID.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: AppColors.muted),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+            child: Text(
+              'Matching Residents (${matches.length})',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.muted),
+            ),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: matches.length,
+            separatorBuilder: (context, index) => const Divider(height: 1, color: AppColors.border),
+            itemBuilder: (context, index) {
+              final r = matches[index];
+              return InkWell(
+                onTap: () => _selectResident(r),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: AppColors.primarySoft,
+                        child: Text(
+                          r.name.isNotEmpty ? r.name.substring(0, 1) : 'R',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              r.name,
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.navy),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Room ${r.roomNo} • Age ${r.age} • ${r.gender}',
+                              style: const TextStyle(fontSize: 12, color: AppColors.body),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.lavenderBg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'ID: #${r.id}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryDeep),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(LucideIcons.chevronRight, size: 18, color: AppColors.muted),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Selected resident overview containing identification details and three individual wellness cards
+  Widget _buildSelectedResidentOverview(AuthState auth) {
+    final r = _selectedResident!;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Selected Resident Banner with Back to Search / Clear Control
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: LayoutBuilder(
+            builder: (context, bannerBox) {
+              final isNarrow = bannerBox.maxWidth < 520;
+              if (isNarrow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: AppColors.primarySoft,
+                          child: Text(
+                            r.name.isNotEmpty ? r.name.substring(0, 1) : 'R',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                r.name,
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navy,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Resident ID: #${r.id}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Room ${r.roomNo} • Age ${r.age} (${r.gender}) • Facility: ${r.elderHomeName}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.body),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _clearSelectedResident,
+                      icon: const Icon(LucideIcons.arrowLeft, size: 14),
+                      label: const Text('Back to Search'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: AppColors.primarySoft,
+                    child: Text(
+                      r.name.isNotEmpty ? r.name.substring(0, 1) : 'R',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                r.name,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navy,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: AppColors.primarySoft,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Resident ID: #${r.id}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Room ${r.roomNo} • Age ${r.age} (${r.gender}) • Facility: ${r.elderHomeName}',
+                          style: const TextStyle(fontSize: 13, color: AppColors.body),
+                        ),
+                      ],
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _clearSelectedResident,
+                    icon: const Icon(LucideIcons.arrowLeft, size: 14),
+                    label: const Text('Back to Search'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: const BorderSide(color: AppColors.primary),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Three Individual Wellness Cards in Responsive Wrap to prevent RenderFlex overflow
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final double cardWidth = constraints.maxWidth < 360
+                ? constraints.maxWidth
+                : constraints.maxWidth < 720
+                    ? constraints.maxWidth
+                    : (constraints.maxWidth < 1100 ? (constraints.maxWidth - 16) / 2 : 340.0);
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                _buildCognitiveWellnessCard(r, cardWidth),
+                _buildEmotionalWellnessCard(r, cardWidth),
+                _buildMetabolicWellnessCard(r, cardWidth),
+              ],
+            );
+          },
+        ),
+
+        // Optional History View / Modal
+        if (_showHistoryView) ...[
+          const SizedBox(height: 24),
+          _buildCognitiveHistorySection(r),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildRiskBadge(String riskLevel) {
+    Color bg;
+    Color text;
+    IconData icon;
+
+    final r = riskLevel.toLowerCase();
+    if (r.contains('low')) {
+      bg = const Color(0xFFDCFCE7);
+      text = const Color(0xFF15803D);
+      icon = LucideIcons.shieldCheck;
+    } else if (r.contains('mod')) {
+      bg = const Color(0xFFFEF3C7);
+      text = const Color(0xFFB45309);
+      icon = LucideIcons.alertTriangle;
+    } else if (r.contains('high')) {
+      bg = const Color(0xFFFEE2E2);
+      text = const Color(0xFFB91C1C);
+      icon = LucideIcons.alertCircle;
+    } else {
+      bg = const Color(0xFFF1F5F9);
+      text = const Color(0xFF64748B);
+      icon = LucideIcons.helpCircle;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: text),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              riskLevel,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: text,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Card 1 — Cognitive Wellness
+  Widget _buildCognitiveWellnessCard(ResidentItem r, [double? cardWidth]) {
+    final completedAssessments = _residentCognitiveHistory
+        .where((a) => a.status.toUpperCase() == 'COMPLETED')
+        .toList();
+    final int completedCount = completedAssessments.length;
+
+    final pendingAssessments = _residentCognitiveHistory
+        .where((a) =>
+            a.status.toUpperCase() == 'PENDING_CAREGIVER_REVIEW' ||
+            a.status.toUpperCase() == 'PENDING_REVIEW')
+        .toList();
+
+    String scoreDisplay;
+    String riskLevelDisplay;
+    String statusDisplay;
+    String dateDisplay;
+    Color statusBg;
+    Color statusColor;
+    bool hasCompletedScore = false;
+
+    if (_isLoadingHistory && _residentCognitiveHistory.isEmpty) {
+      scoreDisplay = 'Loading...';
+      riskLevelDisplay = 'Not Available';
+      statusDisplay = 'Checking...';
+      dateDisplay = 'Loading...';
+      statusBg = AppColors.surfaceSecondary;
+      statusColor = AppColors.muted;
+    } else if (completedAssessments.isNotEmpty) {
+      final latestRecord = completedAssessments.first;
+      if (latestRecord.acrfScore != null) {
+        scoreDisplay = '${latestRecord.acrfScore!.toStringAsFixed(1)}%';
+        hasCompletedScore = true;
+      } else {
+        scoreDisplay = 'Not available';
+      }
+      riskLevelDisplay = (latestRecord.riskLevel != null && latestRecord.riskLevel!.isNotEmpty)
+          ? latestRecord.riskLevel!
+          : (latestRecord.mlPrediction != null && latestRecord.mlPrediction!.isNotEmpty
+              ? latestRecord.mlPrediction!
+              : 'Not Available');
+      statusDisplay = 'Completed';
+      dateDisplay = latestRecord.createdAt != null
+          ? _formatDate(latestRecord.createdAt!)
+          : 'None recorded';
+      statusBg = const Color(0xFFDCFCE7);
+      statusColor = const Color(0xFF15803D);
+    } else if (pendingAssessments.isNotEmpty) {
+      final latestPending = pendingAssessments.first;
+      scoreDisplay = 'Pending Review';
+      riskLevelDisplay = 'Not Available';
+      statusDisplay = 'Pending Review';
+      dateDisplay = latestPending.createdAt != null
+          ? _formatDate(latestPending.createdAt!)
+          : 'None recorded';
+      statusBg = const Color(0xFFFEF3C7);
+      statusColor = const Color(0xFFB45309);
+    } else {
+      scoreDisplay = 'No cognitive assessments yet';
+      riskLevelDisplay = 'Not Available';
+      statusDisplay = 'Not Assessed';
+      dateDisplay = 'None recorded';
+      statusBg = AppColors.surfaceSecondary;
+      statusColor = AppColors.muted;
+    }
+
+    return Container(
+      width: cardWidth ?? 340,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(LucideIcons.brain, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Cognitive Wellness',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  statusDisplay,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('Latest Score (ACRF)', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(height: 2),
+          Text(
+            scoreDisplay,
+            style: TextStyle(
+              fontSize: hasCompletedScore ? 24 : 15,
+              fontWeight: FontWeight.w800,
+              color: hasCompletedScore ? AppColors.navy : AppColors.muted,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              const Text(
+                'Risk Level:',
+                style: TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+              _buildRiskBadge(riskLevelDisplay),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(LucideIcons.calendar, size: 13, color: AppColors.muted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Date: $dateDisplay',
+                  style: const TextStyle(fontSize: 12, color: AppColors.body),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(LucideIcons.history, size: 13, color: AppColors.muted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  _isLoadingHistory
+                      ? 'Loading history count...'
+                      : '$completedCount assessment(s) completed',
+                  style: const TextStyle(fontSize: 12, color: AppColors.body),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'ACRF is a weighted wellness metric. Model trained on synthetic data. Non-diagnostic.',
+            style: TextStyle(fontSize: 9, color: AppColors.muted, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _startNewAssessmentForResident(r),
+                  icon: const Icon(LucideIcons.plus, size: 14),
+                  label: const Text('New Assessment'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: () {
+                  setState(() => _showHistoryView = !_showHistoryView);
+                  if (_showHistoryView && _residentCognitiveHistory.isEmpty && !_isLoadingHistory) {
+                    _loadResidentHistory(r.id);
+                  }
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(_showHistoryView ? LucideIcons.eyeOff : LucideIcons.history, size: 14),
+                    const SizedBox(width: 4),
+                    Text(_showHistoryView ? 'Hide' : 'History'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Card 2 — Emotional Wellness (Display-only integration)
+  Widget _buildEmotionalWellnessCard(ResidentItem r, [double? cardWidth]) {
+    final double? emoScore = r.emotionalScore;
+    final String dateDisplay = r.lastAssessmentDate != null
+        ? _formatDate(r.lastAssessmentDate!)
+        : 'Latest Available';
+
+    return Container(
+      width: cardWidth ?? 340,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFCE7F3),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(LucideIcons.heartHandshake, color: Color(0xFFDB2777), size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Emotional Wellness',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  r.currentStatus ?? 'Stable',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('Latest Score', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(height: 2),
+          Text(
+            emoScore != null
+                ? '${emoScore.toStringAsFixed(1)}%'
+                : 'No emotional wellness data available',
+            style: TextStyle(
+              fontSize: emoScore != null ? 24 : 15,
+              fontWeight: FontWeight.w800,
+              color: emoScore != null ? AppColors.navy : AppColors.muted,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(LucideIcons.calendar, size: 13, color: AppColors.muted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Date: $dateDisplay',
+                  style: const TextStyle(fontSize: 12, color: AppColors.body),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(LucideIcons.shieldAlert, size: 13, color: AppColors.muted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Risk Level: ${r.riskLevel ?? "Low"}',
+                  style: const TextStyle(fontSize: 12, color: AppColors.body),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceSecondary,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: const [
+                Icon(LucideIcons.info, size: 14, color: AppColors.muted),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Multimodal affective monitoring & sentiment telemetry.',
+                    style: TextStyle(fontSize: 11, color: AppColors.muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Card 3 — Metabolic Wellness (Display-only integration; clear empty state when unexposed)
+  Widget _buildMetabolicWellnessCard(ResidentItem r, [double? cardWidth]) {
+    // Metabolic data is not exposed in the existing backend
+    final double? metabolicScore = r.metabolicScore;
+
+    return Container(
+      width: cardWidth ?? 340,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD1FAE5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(LucideIcons.activity, color: Color(0xFF059669), size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Metabolic Wellness',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSecondary,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'Pending Integration',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.muted),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('Latest Score', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(height: 2),
+          Text(
+            metabolicScore != null
+                ? '${metabolicScore.toStringAsFixed(1)}%'
+                : 'No metabolic wellness data available',
+            style: TextStyle(
+              fontSize: metabolicScore != null ? 24 : 15,
+              fontWeight: FontWeight.w800,
+              color: metabolicScore != null ? AppColors.navy : AppColors.muted,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: const [
+              Icon(LucideIcons.calendar, size: 13, color: AppColors.muted),
+              SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Date: None recorded',
+                  style: TextStyle(fontSize: 12, color: AppColors.body),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: const [
+              Icon(LucideIcons.activity, size: 13, color: AppColors.muted),
+              SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Telemetry: Vitals & Glycemic stability',
+                  style: TextStyle(fontSize: 12, color: AppColors.body),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceSecondary,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: const [
+                Icon(LucideIcons.info, size: 14, color: AppColors.muted),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Metabolic health monitoring stream is not yet active on backend.',
+                    style: TextStyle(fontSize: 11, color: AppColors.muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Cognitive Assessment History Section: chronologically ordered newest first
+  Widget _buildCognitiveHistorySection(ResidentItem r) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.history, color: AppColors.primary, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Cognitive Assessment History — ${r.name}',
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.navy),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(LucideIcons.refreshCw, size: 14, color: AppColors.muted),
+                tooltip: 'Refresh history',
+                onPressed: () => _loadResidentHistory(r.id),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${_residentCognitiveHistory.length} record(s)',
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 12),
+
+          if (_isLoadingHistory) ...[
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 12),
+                    Text(
+                      'Loading cognitive assessment history...',
+                      style: TextStyle(fontSize: 13, color: AppColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ] else if (_historyError != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFCA5A5)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.alertCircle, color: Color(0xFFDC2626), size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Error loading cognitive history: $_historyError',
+                          style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () => _loadResidentHistory(r.id),
+                    icon: const Icon(LucideIcons.rotateCcw, size: 14),
+                    label: const Text('Retry'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else if (_residentCognitiveHistory.isEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 36),
+              alignment: Alignment.center,
+              child: Column(
+                children: const [
+                  Icon(LucideIcons.fileQuestion, size: 36, color: AppColors.muted),
+                  SizedBox(height: 10),
+                  Text(
+                    'No cognitive assessments recorded yet.',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Start a new assessment to establish the resident\'s cognitive wellness baseline.',
+                    style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _residentCognitiveHistory.length,
+              separatorBuilder: (context, index) => const Divider(height: 16, color: AppColors.border),
+              itemBuilder: (context, index) {
+                final item = _residentCognitiveHistory[index];
+                final dateStr = item.createdAt != null ? _formatDate(item.createdAt!) : 'Date N/A';
+                final isCompleted = item.status.toUpperCase() == 'COMPLETED';
+                final isPending = item.status.toUpperCase().contains('PENDING');
+
+                final String statusLabel = isCompleted
+                    ? 'Completed'
+                    : (isPending ? 'Pending Caregiver Review' : item.status);
+
+                final Color statusBg = isCompleted
+                    ? const Color(0xFFDCFCE7)
+                    : (isPending ? const Color(0xFFFEF3C7) : AppColors.surfaceSecondary);
+
+                final Color statusColor = isCompleted
+                    ? const Color(0xFF15803D)
+                    : (isPending ? const Color(0xFFB45309) : AppColors.body);
+
+                final String sessionLabel = item.sessionId != null && item.sessionId!.isNotEmpty
+                    ? item.sessionId!
+                    : (item.id > 0 ? 'Assessment #${item.id}' : 'Assessment #${_residentCognitiveHistory.length - index}');
+
+                final String scoreText = item.acrfScore != null
+                    ? '${item.acrfScore!.toStringAsFixed(1)}%'
+                    : (isPending ? 'Pending Review' : 'Not Available');
+
+                final String riskLabel = item.riskLevel ??
+                    (item.mlPrediction != null && item.mlPrediction!.isNotEmpty
+                        ? item.mlPrediction!
+                        : 'Not Available');
+
+                final bool isExpanded = _expandedHistoryIndex == index;
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSecondary,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.primarySoft,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              sessionLabel,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              dateStr,
+                              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: statusBg,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              statusLabel,
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Overall ACRF Score', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const SizedBox(height: 2),
+                              Text(
+                                scoreText,
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.navy),
+                              ),
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Cognitive Risk', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const SizedBox(height: 2),
+                              _buildRiskBadge(riskLabel),
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Assessed By', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                              const SizedBox(height: 2),
+                              Text(
+                                item.assessedBy ?? 'Care Specialist',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.body),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          _buildDomainChip('Memory', item.memory),
+                          _buildDomainChip('Attention', item.attention),
+                          _buildDomainChip('Orientation', item.orientation),
+                          _buildDomainChip('Recall', item.recall),
+                          _buildDomainChip('Reasoning', item.reasoning),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          const Icon(LucideIcons.sparkles, size: 12, color: AppColors.muted),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              isPending
+                                  ? 'AI Inference: Pending caregiver clinical grading'
+                                  : (item.mlAvailable
+                                      ? 'AI Prediction: ${item.mlModelType} (${item.mlStatusMessage})'
+                                      : 'AI Inference: ${item.mlStatusMessage}'),
+                              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Optional expandable section for question-by-question responses and clinical grades
+                      if ((item.responses != null && item.responses!.isNotEmpty) ||
+                          (item.grades != null && item.grades!.isNotEmpty)) ...[
+                        const SizedBox(height: 12),
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _expandedHistoryIndex = isExpanded ? null : index;
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                                  size: 14,
+                                  color: AppColors.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  isExpanded
+                                      ? 'Hide Question Responses & Grades'
+                                      : 'Inspect Responses & Clinical Grades (10 Questions)',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        if (isExpanded) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (int qId = 1; qId <= 10; qId++) ...[
+                                  Builder(
+                                    builder: (context) {
+                                      final question = CognitiveScoring.questions.firstWhere(
+                                        (q) => q.id == qId,
+                                        orElse: () => CognitiveQuestionItem(
+                                          id: qId,
+                                          category: 'General',
+                                          domain: 'general',
+                                          prompt: 'Question $qId',
+                                          aiTip: '',
+                                          recommendedAnswerGuide: '',
+                                        ),
+                                      );
+                                      final resp = item.responses?[qId] ?? 'No recorded response';
+                                      final grade = item.grades?[qId];
+                                      final gradeText = grade != null
+                                          ? '${grade.toStringAsFixed(1)} / 1.0'
+                                          : (isPending ? 'Pending review' : 'Ungraded');
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 4),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primarySoft,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                'Q$qId',
+                                                style: const TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: AppColors.primary,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    question.prompt,
+                                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.navy),
+                                                  ),
+                                                  Text(
+                                                    'Response: "$resp"',
+                                                    style: const TextStyle(fontSize: 11, color: AppColors.body),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              gradeText,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: grade != null && grade > 0 ? const Color(0xFF15803D) : AppColors.muted,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  if (qId < 10) const Divider(height: 8, color: AppColors.border),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDomainChip(String domain, double? score) {
+    final String scoreStr = score != null ? '${score.toStringAsFixed(0)}%' : 'N/A';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Text(
+        '$domain: $scoreStr',
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.navy),
+      ),
+    );
+  }
+
+  String _formatDate(String isoString) {
+    try {
+      final dt = DateTime.parse(isoString).toLocal();
+      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final month = months[dt.month - 1];
+      final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+      final minute = dt.minute.toString().padLeft(2, '0');
+      return '$month ${dt.day}, ${dt.year} • $hour:$minute $ampm';
+    } catch (_) {
+      return isoString;
+    }
   }
 
   // ----------------------------------------------------
@@ -428,7 +1944,6 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Tabs: Elders vs All Users
         Row(
           children: [
             _buildTabButton('All Elders (${allResidents.length})', 0, LucideIcons.users),
@@ -439,7 +1954,6 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
         const SizedBox(height: 16),
 
         if (_doctorTabIndex == 0) ...[
-          // Facility Filter Chips
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -451,14 +1965,12 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             ],
           ),
           const SizedBox(height: 16),
-          // Elders Grid
           Wrap(
             spacing: 16,
             runSpacing: 16,
             children: filteredResidents.map((r) => _buildResidentCard(r, isDoctor: true)).toList(),
           ),
         ] else ...[
-          // All Users Directory Table / Cards
           _buildAllUsersDirectory(allUsers),
         ],
       ],
@@ -520,71 +2032,11 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
   }
 
   // ----------------------------------------------------
-  // CAREGIVER VIEW: Scoped ONLY to Caregiver's Elder Home
-  // ----------------------------------------------------
-  Widget _buildCaregiverView(AuthState auth) {
-    final allResidents = _liveResidents.isNotEmpty ? _liveResidents : _allEldersFallback;
-    final assignedHomeId = auth.elderHomeId ?? 1;
-
-    // Filter STRICTLY by caregiver's elder home
-    final scopedResidents = allResidents.where((r) => r.elderHomeId == assignedHomeId).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Notice Container
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFFEFF6FF),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFBFDBFE)),
-          ),
-          child: Row(
-            children: [
-              const Icon(LucideIcons.shieldCheck, color: Color(0xFF1D4ED8), size: 22),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Facility-Scoped Care Access: ${auth.elderHomeName ?? "Assigned Facility"}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E40AF),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Displaying ${scopedResidents.length} resident(s) enrolled in your assigned care community. Residents belonging to other care facilities are shielded for data governance compliance.',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF1E3A8A)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: scopedResidents.map((r) => _buildResidentCard(r, isDoctor: false)).toList(),
-        ),
-      ],
-    );
-  }
-
-  // ----------------------------------------------------
   // ELDER VIEW: Confidential individual record ONLY
   // ----------------------------------------------------
   Widget _buildElderView(AuthState auth) {
     final allResidents = _liveResidents.isNotEmpty ? _liveResidents : _allEldersFallback;
 
-    // Find this elder's record, or fallback to first
     final myRecord = allResidents.firstWhere(
       (r) => auth.userName != null && r.name.toLowerCase().contains(auth.userName!.toLowerCase().split(' ')[0]),
       orElse: () => allResidents.first,
@@ -593,7 +2045,6 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Privacy Banner
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -700,11 +2151,11 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
                 ),
                 const SizedBox(height: 12),
-                _buildScoreBar('Cognitive Clarity', myRecord.cognitiveScore, const Color(0xFF6366F1)),
+                _buildScoreBar('Cognitive Clarity', myRecord.cognitiveScore != null ? myRecord.cognitiveScore! / 100.0 : 0.0, const Color(0xFF6366F1)),
                 const SizedBox(height: 10),
-                _buildScoreBar('Emotional Wellness', myRecord.emotionalScore, const Color(0xFFEC4899)),
+                _buildScoreBar('Emotional Wellness', myRecord.emotionalScore != null ? myRecord.emotionalScore! / 100.0 : 0.0, const Color(0xFFEC4899)),
                 const SizedBox(height: 10),
-                _buildScoreBar('Metabolic Stability', myRecord.metabolicScore, const Color(0xFF10B981)),
+                _buildScoreBar('Metabolic Stability', 0.70, const Color(0xFF10B981)),
                 const SizedBox(height: 20),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -756,7 +2207,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                 radius: 22,
                 backgroundColor: AppColors.primarySoft,
                 child: Text(
-                  r.name.substring(0, 1),
+                  r.name.isNotEmpty ? r.name.substring(0, 1) : 'R',
                   style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary),
                 ),
               ),
@@ -796,7 +2247,6 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             ],
           ),
           const SizedBox(height: 12),
-          // Elder Home Badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
@@ -823,9 +2273,9 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildMiniMetric('Cognitive', '${(r.cognitiveScore * 100).toInt()}%'),
-              _buildMiniMetric('Emotional', '${(r.emotionalScore * 100).toInt()}%'),
-              _buildMiniMetric('Metabolic', '${(r.metabolicScore * 100).toInt()}%'),
+              _buildMiniMetric('Cognitive', r.cognitiveScore != null ? '${r.cognitiveScore!.toStringAsFixed(0)}%' : 'N/A'),
+              _buildMiniMetric('Emotional', r.emotionalScore != null ? '${r.emotionalScore!.toStringAsFixed(0)}%' : 'N/A'),
+              _buildMiniMetric('Metabolic', 'N/A'),
             ],
           ),
           const SizedBox(height: 12),
@@ -911,7 +2361,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
             leading: CircleAvatar(
               backgroundColor: roleColor.withValues(alpha: 0.15),
               child: Text(
-                u.name.substring(0, 1),
+                u.name.isNotEmpty ? u.name.substring(0, 1) : 'U',
                 style: TextStyle(fontWeight: FontWeight.bold, color: roleColor),
               ),
             ),

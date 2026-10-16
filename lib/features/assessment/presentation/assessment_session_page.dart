@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../../core/responsive/responsive_builder.dart';
 import '../../../core/theme/app_colors.dart';
@@ -23,12 +26,16 @@ class AssessmentSessionPage extends ConsumerStatefulWidget {
 
 class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     with SingleTickerProviderStateMixin {
-  // Navigation & session index
+  // Navigation & session index (10 questions battery)
   int _currentIndex = 0;
   final List<CognitiveQuestionItem> _questions = CognitiveScoring.questions;
 
-  // Question grades (id -> 1.0, 0.5, 0.0, or null if unanswered)
+  // Single Source of Truth: Question grades (id -> 1.0, 0.5, 0.0, or null if ungraded)
   final Map<int, double?> _grades = {};
+
+  // Single Source of Truth: Per-question response text (manual keyboard or voice transcribed)
+  final Map<int, String> _responses = {};
+  late TextEditingController _responseController;
 
   // Timing: active question viewing duration
   final Map<int, double> _questionTimes = {};
@@ -38,17 +45,26 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
   // Speech & TTS
   late FlutterTts _flutterTts;
+  late stt.SpeechToText _speech;
   bool _isSpeaking = false;
   bool _isListening = false;
-  String _transcript = '';
+  bool _speechInitialized = false;
+  bool _speechAvailable = false;
+  String? _speechStatusMessage;
 
   // Resident Context
   CognitiveResidentProfile? _resident;
   List<CognitiveResidentProfile> _availableResidents = [];
+  bool _isLoadingResidents = false;
+  String? _residentLoadError;
 
   // Submission state
   bool _isSubmitting = false;
   String? _submitError;
+
+  // Session lifecycle & persistence
+  String? _sessionId;
+  String _sessionStatus = 'IN_PROGRESS'; // 'IN_PROGRESS', 'PENDING_CAREGIVER_REVIEW', 'COMPLETED'
 
   // Animated waveform controller
   late AnimationController _waveformController;
@@ -57,7 +73,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   void initState() {
     super.initState();
     _questionStartTime = DateTime.now();
+    _responseController = TextEditingController();
     _initTts();
+    _initSpeech();
     _initWaveformAnimation();
     _startSessionTimer();
     _loadResidentContext();
@@ -68,6 +86,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _sessionTimer?.cancel();
     _waveformController.dispose();
     _flutterTts.stop();
+    _speech.stop();
+    _responseController.dispose();
     super.dispose();
   }
 
@@ -92,6 +112,50 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     } catch (_) {}
   }
 
+  Future<void> _initSpeech() async {
+    _speech = stt.SpeechToText();
+    try {
+      final available = await _speech.initialize(
+        onStatus: (status) {
+          if (mounted) {
+            setState(() {
+              if (status == 'notListening' || status == 'done') {
+                _isListening = false;
+              }
+            });
+          }
+        },
+        onError: (val) {
+          if (mounted) {
+            setState(() {
+              _isListening = false;
+              _speechStatusMessage = 'Audio note: ${val.errorMsg}';
+            });
+          }
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _speechInitialized = true;
+          _speechAvailable = available;
+          if (!available) {
+            _speechStatusMessage =
+                'Microphone/speech recognition unavailable. Please use manual entry or scoring.';
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _speechInitialized = true;
+          _speechAvailable = false;
+          _speechStatusMessage =
+              'Audio capture unavailable. Manual entry is supported.';
+        });
+      }
+    }
+  }
+
   void _startSessionTimer() {
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
@@ -104,35 +168,216 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     final authState = ref.read(authProvider).state;
     final token = authState.token;
 
+    // 1. ELDER Role: The elder user is strictly taking the assessment for themselves
+    if (authState.isElder) {
+      final profile = CognitiveResidentProfile(
+        id: authState.residentId ?? 1,
+        name: authState.userName ?? 'Sarah Jenkins',
+        roomNumber: 'Room 204',
+      );
+      if (mounted) {
+        setState(() {
+          _isLoadingResidents = false;
+          _residentLoadError = null;
+          _resident = profile;
+          _availableResidents = [profile];
+        });
+        await _loadSavedResidentResponses(profile.id);
+      }
+      return;
+    }
+
+    // 2. CAREGIVER / DOCTOR Role: Load residents from assigned elder home
+    if (mounted) {
+      setState(() {
+        _isLoadingResidents = true;
+        _residentLoadError = null;
+      });
+    }
+
     try {
       final list = await CognitiveAssessmentService.fetchResidents(
         token: token,
       );
       if (mounted) {
         setState(() {
+          _isLoadingResidents = false;
           _availableResidents = list;
           if (list.isNotEmpty) {
-            _resident = list.first;
-          } else if (authState.residentId != null) {
-            _resident = CognitiveResidentProfile(
-              id: authState.residentId!,
-              name: authState.userName ?? 'Resident',
-              roomNumber: 'Assigned Room',
-            );
+            // Keep selected resident if still in the list, else select first item safely
+            final currentId = _resident?.id;
+            if (currentId != null && list.any((r) => r.id == currentId)) {
+              _resident = list.firstWhere((r) => r.id == currentId);
+            } else {
+              _resident = list.first;
+            }
+          } else {
+            _resident = null;
           }
         });
+        if (_resident != null) {
+          await _loadSavedResidentResponses(_resident!.id);
+        }
       }
-    } catch (_) {
-      if (mounted && authState.residentId != null) {
+    } catch (err) {
+      if (mounted) {
         setState(() {
-          _resident = CognitiveResidentProfile(
-            id: authState.residentId!,
-            name: authState.userName ?? 'Resident',
-            roomNumber: 'Assigned Room',
-          );
+          _isLoadingResidents = false;
+          _residentLoadError = 'Unable to connect to resident directory: $err';
+          _availableResidents = [];
+          _resident = null;
         });
       }
     }
+  }
+
+  void _selectResident(int residentId) {
+    if (_resident?.id == residentId) return;
+    _saveCurrentQuestionState();
+    final found = _availableResidents.firstWhere(
+      (r) => r.id == residentId,
+      orElse: () => _availableResidents.first,
+    );
+    setState(() {
+      _resident = found;
+      _responses.clear();
+      _grades.clear();
+      _questionTimes.clear();
+      _currentIndex = 0;
+      _responseController.clear();
+      _isListening = false;
+      _isSpeaking = false;
+      _speechStatusMessage = null;
+      _sessionId = null;
+      _sessionStatus = 'IN_PROGRESS';
+    });
+    _loadSavedResidentResponses(residentId);
+  }
+
+  Future<void> _startNewAssessmentSession() async {
+    final residentId = _resident?.id ?? ref.read(authProvider).state.residentId;
+    if (residentId == null) return;
+    final token = ref.read(authProvider).state.token;
+
+    _saveCurrentQuestionState();
+    setState(() {
+      _grades.clear();
+      _responses.clear();
+      _questionTimes.clear();
+      _currentIndex = 0;
+      _responseController.clear();
+      _sessionElapsedSeconds = 0;
+      _sessionId = null;
+      _sessionStatus = 'IN_PROGRESS';
+    });
+
+    try {
+      final session = await CognitiveAssessmentService.startSession(
+        residentId: residentId,
+        token: token,
+      );
+      if (mounted) {
+        setState(() {
+          _sessionId = session.sessionId;
+          _sessionStatus = 'IN_PROGRESS';
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadSavedResidentResponses(int residentId) async {
+    final token = ref.read(authProvider).state.token;
+
+    // 1. First retrieve active/pending session from the existing backend
+    try {
+      final pendingSession = await CognitiveAssessmentService.getPendingSession(
+        residentId: residentId,
+        token: token,
+      );
+      if (pendingSession != null && mounted) {
+        setState(() {
+          _sessionId = pendingSession.sessionId;
+          _sessionStatus = pendingSession.status;
+          if (pendingSession.responses.isNotEmpty) {
+            _responses.addAll(pendingSession.responses);
+          }
+          if (pendingSession.grades.isNotEmpty) {
+            _grades.addAll(pendingSession.grades);
+          }
+          if (pendingSession.questionTimes.isNotEmpty) {
+            _questionTimes.addAll(pendingSession.questionTimes);
+          }
+          _responseController.text =
+              _responses[_questions[_currentIndex].id] ?? '';
+        });
+        return;
+      }
+    } catch (_) {}
+
+    // 2. If no pending session, start a new session on backend
+    if (_sessionId == null) {
+      try {
+        final newSession = await CognitiveAssessmentService.startSession(
+          residentId: residentId,
+          token: token,
+        );
+        if (mounted) {
+          setState(() {
+            _sessionId = newSession.sessionId;
+            _sessionStatus = 'IN_PROGRESS';
+          });
+        }
+      } catch (_) {}
+    }
+
+    // 3. SharedPreferences offline fallback
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedJson = prefs.getString('cognitive_responses_$residentId');
+      if (savedJson != null && savedJson.isNotEmpty) {
+        final decoded = json.decode(savedJson) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            decoded.forEach((key, val) {
+              final qId = int.tryParse(key);
+              if (qId != null && val is String && val.trim().isNotEmpty) {
+                _responses[qId] ??= val;
+              }
+            });
+            _responseController.text =
+                _responses[_questions[_currentIndex].id] ?? '';
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistResponses() async {
+    final rId = _resident?.id ?? ref.read(authProvider).state.residentId;
+    if (rId == null) return;
+
+    final token = ref.read(authProvider).state.token;
+
+    // Save to existing backend H2 database
+    if (_sessionId != null) {
+      try {
+        await CognitiveAssessmentService.saveResponses(
+          sessionId: _sessionId!,
+          responses: _responses,
+          questionTimes: _questionTimes,
+          token: token,
+        );
+      } catch (_) {}
+    }
+
+    // Local SharedPreferences fallback
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final map = {
+        for (final e in _responses.entries) e.key.toString(): e.value,
+      };
+      await prefs.setString('cognitive_responses_$rId', json.encode(map));
+    } catch (_) {}
   }
 
   void _recordCurrentQuestionDuration() {
@@ -145,6 +390,15 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _questionStartTime = DateTime.now();
   }
 
+  void _saveCurrentQuestionState() {
+    _recordCurrentQuestionDuration();
+    if (_isSpeaking) _flutterTts.stop();
+    if (_isListening) _speech.stop();
+    final qId = _questions[_currentIndex].id;
+    _responses[qId] = _responseController.text;
+    _persistResponses();
+  }
+
   Future<void> _toggleTts(String text) async {
     if (_isSpeaking) {
       await _flutterTts.stop();
@@ -155,22 +409,68 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     }
   }
 
-  void _toggleListening() {
-    setState(() {
-      _isListening = !_isListening;
-      if (_isListening && _transcript.isEmpty) {
-        // Simulated speech capture
-        Future.delayed(const Duration(milliseconds: 1800), () {
-          if (mounted && _isListening) {
-            setState(() {
-              _transcript = 'Patient verbal response recorded successfully.';
-            });
-          }
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      await _speech.stop();
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          final qId = _questions[_currentIndex].id;
+          _responses[qId] = _responseController.text;
         });
+        _persistResponses();
       }
-    });
+    } else {
+      if (!_speechInitialized) {
+        await _initSpeech();
+      }
+      if (!_speechAvailable) {
+        setState(() {
+          _speechStatusMessage =
+              'Microphone not available. Please enter the answer manually below or apply caregiver clinical scoring.';
+        });
+        return;
+      }
+
+      setState(() {
+        _isListening = true;
+        _speechStatusMessage = 'Listening... Speak now.';
+      });
+
+      try {
+        await _speech.listen(
+          onResult: (result) {
+            if (mounted) {
+              setState(() {
+                _responseController.text = result.recognizedWords;
+                final qId = _questions[_currentIndex].id;
+                _responses[qId] = result.recognizedWords;
+                if (result.finalResult) {
+                  _isListening = false;
+                  _speechStatusMessage = 'Voice response captured.';
+                }
+              });
+              _persistResponses();
+            }
+          },
+          listenOptions: stt.SpeechListenOptions(
+            listenMode: stt.ListenMode.confirmation,
+            cancelOnError: true,
+            partialResults: true,
+          ),
+        );
+      } catch (err) {
+        if (mounted) {
+          setState(() {
+            _isListening = false;
+            _speechStatusMessage = 'Recording note: $err';
+          });
+        }
+      }
+    }
   }
 
+  // Caregiver Clinical Scoring: Updates immediately without double-counting
   void _setGrade(double score) {
     final qId = _questions[_currentIndex].id;
     setState(() {
@@ -180,41 +480,43 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
   void _goToQuestion(int index) {
     if (index == _currentIndex) return;
-    _recordCurrentQuestionDuration();
-    if (_isSpeaking) _flutterTts.stop();
+    _saveCurrentQuestionState();
     setState(() {
       _currentIndex = index;
-      _transcript = '';
+      _responseController.text = _responses[_questions[index].id] ?? '';
       _isListening = false;
       _isSpeaking = false;
+      _speechStatusMessage = null;
     });
   }
 
-  void _nextQuestion() {
-    _recordCurrentQuestionDuration();
-    if (_isSpeaking) _flutterTts.stop();
+  void _nextQuestion(bool isElder) {
+    _saveCurrentQuestionState();
 
     if (_currentIndex < _questions.length - 1) {
       setState(() {
         _currentIndex++;
-        _transcript = '';
+        _responseController.text =
+            _responses[_questions[_currentIndex].id] ?? '';
         _isListening = false;
         _isSpeaking = false;
+        _speechStatusMessage = null;
       });
     } else {
-      _showFinishConfirmationDialog();
+      _showFinishConfirmationDialog(isElder);
     }
   }
 
   void _prevQuestion() {
     if (_currentIndex > 0) {
-      _recordCurrentQuestionDuration();
-      if (_isSpeaking) _flutterTts.stop();
+      _saveCurrentQuestionState();
       setState(() {
         _currentIndex--;
-        _transcript = '';
+        _responseController.text =
+            _responses[_questions[_currentIndex].id] ?? '';
         _isListening = false;
         _isSpeaking = false;
+        _speechStatusMessage = null;
       });
     }
   }
@@ -225,10 +527,47 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     return '${m}m ${s < 10 ? '0' : ''}${s}s';
   }
 
-  int get _answeredCount => _grades.values.where((v) => v != null).length;
+  // --- Strict Session Metrics & Role-Specific Calculations ---
+  bool _isAnswered(int qId) => _responses[qId]?.trim().isNotEmpty == true;
+  bool _isGraded(int qId) => _grades[qId] != null;
+  bool _isFullyCompleted(int qId) => _isAnswered(qId) && _isGraded(qId);
 
-  Future<void> _submitAssessment() async {
-    _recordCurrentQuestionDuration();
+  int get _totalCount => _questions.length; // 10
+  int get _answeredCount => _questions.where((q) => _isAnswered(q.id)).length;
+  int get _gradedCount => _questions.where((q) => _isGraded(q.id)).length;
+  int get _fullyCompletedCount =>
+      _questions.where((q) => _isFullyCompleted(q.id)).length;
+  int get _remainingToCompleteCount => _totalCount - _fullyCompletedCount;
+  int get _remainingToAnswerCount => _totalCount - _answeredCount;
+
+  /// Role-appropriate progress percentage:
+  /// - ELDER: progress measures questions answered by resident: (answered / 10) * 100
+  /// - CAREGIVER: progress measures questions fully clinically assessed: (fully completed / 10) * 100
+  int _getProgressPct(bool isElder) {
+    if (_totalCount == 0) return 0;
+    final count = isElder ? _answeredCount : _fullyCompletedCount;
+    final pct = (count / _totalCount) * 100.0;
+    return pct.clamp(0.0, 100.0).round();
+  }
+
+  Future<void> _submitCaregiverAssessment() async {
+    if (_isSubmitting) return;
+
+    _saveCurrentQuestionState();
+
+    // Strict validation for Caregivers: Prevent final submission when any question is unanswered or ungraded
+    if (!CognitiveScoring.isBatteryComplete(
+      responses: _responses,
+      grades: _grades,
+    )) {
+      setState(() {
+        _isSubmitting = false;
+        _submitError =
+            'Cannot submit: All 10 questions must have both a saved response and a clinical grade.';
+      });
+      return;
+    }
+
     final authState = ref.read(authProvider).state;
     final token = authState.token;
 
@@ -238,14 +577,20 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     });
 
     try {
-      // Calculate domain accuracies, scores, and response times
       final accuracies = CognitiveScoring.calculateDomainAccuracies(_grades);
       final taskScores = CognitiveScoring.calculateDomainScores(accuracies);
       final responseTimes = CognitiveScoring.aggregateDomainResponseTimes(
         _questionTimes,
       );
 
-      final residentId = _resident?.id ?? (authState.residentId ?? 1);
+      final residentId = _resident?.id;
+      if (residentId == null) {
+        setState(() {
+          _isSubmitting = false;
+          _submitError = 'No eligible resident selected for assessment.';
+        });
+        return;
+      }
 
       final payload = CognitiveSubmissionPayload(
         residentId: residentId,
@@ -254,11 +599,16 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         orientation: taskScores['orientation'] ?? 0.0,
         recall: taskScores['recall'] ?? 0.0,
         reasoning: taskScores['reasoning'] ?? 0.0,
-        age: _resident?.age, // Genuine demographics only
-        educationYears:
-            _resident?.educationYears, // Never fabricated if missing
+        age: _resident?.age,
+        educationYears: _resident?.educationYears,
         accuracies: accuracies,
         responseTimes: responseTimes,
+        sessionId: _sessionId,
+        responses: _responses,
+        grades: {
+          for (final e in _grades.entries)
+            if (e.value != null) e.key: e.value!,
+        },
       );
 
       final result = await CognitiveAssessmentService.submitAssessment(
@@ -269,11 +619,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       if (mounted) {
         setState(() {
           _isSubmitting = false;
+          _sessionStatus = 'COMPLETED';
         });
-        Navigator.of(
-          context,
-          rootNavigator: true,
-        ).pop(); // Dismiss confirmation dialog
+        Navigator.of(context, rootNavigator: true).pop(); // Dismiss confirm
         _showResultDialog(result);
       }
     } catch (err) {
@@ -286,11 +634,52 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     }
   }
 
+  Future<void> _submitElderResponses() async {
+    _saveCurrentQuestionState();
+    if (_answeredCount < _totalCount) return;
+
+    final token = ref.read(authProvider).state.token;
+    final rId = _resident?.id ?? ref.read(authProvider).state.residentId;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      if (_sessionId == null && rId != null) {
+        final session = await CognitiveAssessmentService.startSession(
+          residentId: rId,
+          token: token,
+        );
+        _sessionId = session.sessionId;
+      }
+
+      if (_sessionId != null) {
+        await CognitiveAssessmentService.saveResponses(
+          sessionId: _sessionId!,
+          responses: _responses,
+          questionTimes: _questionTimes,
+          token: token,
+        );
+        _sessionStatus = 'PENDING_CAREGIVER_REVIEW';
+      }
+    } catch (_) {}
+
+    await _persistResponses();
+
+    if (mounted) {
+      setState(() => _isSubmitting = false);
+      Navigator.of(context, rootNavigator: true).pop(); // Dismiss confirm
+      _showElderSubmissionSuccessDialog();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider).state;
+    final bool isElder = authState.isElder;
+
     final currentQ = _questions[_currentIndex];
-    final progressPct = ((_answeredCount / _questions.length) * 100).toInt();
     final currentGrade = _grades[currentQ.id];
+    final progressPct = _getProgressPct(isElder);
 
     return Scaffold(
       backgroundColor: AppColors.dashboardBg,
@@ -299,43 +688,56 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top Navigation Bar & Timer
+            // Top Navigation Bar & Timer (Responsive Wrap)
             _buildTopNavBar(),
             const SizedBox(height: 16),
 
-            // Resident Context Banner
-            _buildResidentBanner(),
-            const SizedBox(height: 20),
+            if (!isElder && _isLoadingResidents) ...[
+              _buildLoadingResidentsState(),
+            ] else if (!isElder && _residentLoadError != null) ...[
+              _buildResidentErrorState(_residentLoadError!),
+            ] else if (!isElder && _availableResidents.isEmpty) ...[
+              _buildEmptyResidentsState(),
+            ] else ...[
+              // Resident Context Banner
+              _buildResidentBanner(isElder),
+              const SizedBox(height: 20),
 
-            // Main 2-Column Responsive Assessment Workspace
-            ResponsiveBuilder(
-              mobile: (context) => Column(
-                children: [
-                  _buildMainQuestionWorkspace(
-                    currentQ,
-                    progressPct,
-                    currentGrade,
-                  ),
-                  const SizedBox(height: 20),
-                  _buildRightPanel(progressPct),
-                ],
-              ),
-              desktop: (context) => Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 7,
-                    child: _buildMainQuestionWorkspace(
+              // Main 2-Column Responsive Assessment Workspace
+              ResponsiveBuilder(
+                mobile: (context) => Column(
+                  children: [
+                    _buildMainQuestionWorkspace(
                       currentQ,
                       progressPct,
                       currentGrade,
+                      isElder,
                     ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(flex: 3, child: _buildRightPanel(progressPct)),
-                ],
+                    const SizedBox(height: 20),
+                    _buildRightPanel(progressPct, isElder),
+                  ],
+                ),
+                desktop: (context) => Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 7,
+                      child: _buildMainQuestionWorkspace(
+                        currentQ,
+                        progressPct,
+                        currentGrade,
+                        isElder,
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      flex: 3,
+                      child: _buildRightPanel(progressPct, isElder),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -343,70 +745,344 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Widget _buildTopNavBar() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    Color statusBg;
+    Color statusColor;
+    String statusLabel;
+    IconData statusIcon;
+
+    if (_sessionStatus == 'COMPLETED') {
+      statusBg = const Color(0xFFDCFCE7);
+      statusColor = const Color(0xFF15803D);
+      statusLabel = 'Completed';
+      statusIcon = LucideIcons.circleCheckBig;
+    } else if (_sessionStatus == 'PENDING_CAREGIVER_REVIEW') {
+      statusBg = const Color(0xFFFEF3C7);
+      statusColor = const Color(0xFFB45309);
+      statusLabel = 'Pending Caregiver Review';
+      statusIcon = LucideIcons.alertCircle;
+    } else {
+      statusBg = const Color(0xFFEFF6FF);
+      statusColor = const Color(0xFF1D4ED8);
+      statusLabel = 'In Progress';
+      statusIcon = LucideIcons.clock;
+    }
+
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 8,
       children: [
-        InkWell(
-          onTap: () => context.go('/dashboard'),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            child: Row(
-              children: const [
-                Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
-                SizedBox(width: 6),
-                Text(
-                  'Back to Overview',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(LucideIcons.clock, size: 13, color: AppColors.primary),
-              const SizedBox(width: 6),
-              const Text(
-                'Session Elapsed: ',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.body,
-                  fontWeight: FontWeight.w500,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: () => context.go('/dashboard/residents'),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(LucideIcons.arrowLeft, size: 16, color: AppColors.primary),
+                    SizedBox(width: 6),
+                    Text(
+                      'Resident Directory',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                _formatElapsed(_sessionElapsedSeconds),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.navy,
+            ),
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: statusBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(statusIcon, size: 13, color: statusColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    statusLabel,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_sessionId != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  '#${_sessionId!.length > 18 ? _sessionId!.substring(0, 18) : _sessionId}',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
+                  ),
                 ),
               ),
             ],
-          ),
+          ],
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: _startNewAssessmentSession,
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(LucideIcons.plus, size: 13, color: AppColors.primary),
+                    SizedBox(width: 4),
+                    Text(
+                      'New Assessment',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.clock, size: 13, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Session Elapsed: ',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.body,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    _formatElapsed(_sessionElapsedSeconds),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navy,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildResidentBanner() {
+  String _getInitials(String name) {
+    final clean = name.trim();
+    if (clean.isEmpty) return 'R';
+    final parts = clean
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return 'R';
+    if (parts.length == 1) {
+      return parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+
+  Widget _buildLoadingResidentsState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 60),
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          CircularProgressIndicator(color: AppColors.primary),
+          SizedBox(height: 16),
+          Text(
+            'Loading resident profiles...',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.navy,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Retrieving residents assigned to your care community.',
+            style: TextStyle(fontSize: 12, color: AppColors.muted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResidentErrorState(String errorMessage) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.riskHighBg),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: AppColors.riskHighBg,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(LucideIcons.alertTriangle, color: AppColors.riskHigh, size: 32),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Unable to Load Residents',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navy,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            errorMessage,
+            style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _loadResidentContext,
+            icon: const Icon(LucideIcons.refreshCw, size: 14),
+            label: const Text('Retry Loading Directory'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyResidentsState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              color: AppColors.lavenderBg,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(LucideIcons.users, color: AppColors.primary, size: 36),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'No Eligible Residents Available',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navy,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'There are currently no residents registered or assigned to your care facility for cognitive assessment.\nCaregivers can only assess residents enrolled in their assigned Elder Home.',
+            style: TextStyle(fontSize: 12, color: AppColors.muted, height: 1.4),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            alignment: WrapAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () => context.go('/dashboard/residents'),
+                icon: const Icon(LucideIcons.userPlus, size: 15),
+                label: const Text('Go to Resident Directory'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _loadResidentContext,
+                icon: const Icon(LucideIcons.refreshCw, size: 15),
+                label: const Text('Refresh Directory'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.navy,
+                  side: const BorderSide(color: AppColors.border),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResidentBanner(bool isElder) {
     final res = _resident;
-    final initials = res != null && res.name.isNotEmpty
-        ? res.name.split(' ').map((n) => n[0]).take(2).join()
-        : 'SJ';
+    final initials = res != null ? _getInitials(res.name) : 'R';
+    final displayName = (res != null && res.name.trim().isNotEmpty)
+        ? res.name.trim()
+        : (isElder ? 'Sarah Jenkins' : 'Resident #${res?.id ?? 1}');
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -450,7 +1126,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   Row(
                     children: [
                       Text(
-                        res?.name ?? 'Sarah Jenkins',
+                        displayName,
                         style: AppTextStyles.h4,
                       ),
                       const SizedBox(width: 8),
@@ -465,7 +1141,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           border: Border.all(color: AppColors.lilac),
                         ),
                         child: Text(
-                          'ID: ${res?.id ?? 1}',
+                          isElder ? 'ELDER / RESIDENT' : 'ID: ${res?.id ?? 1}',
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
@@ -488,9 +1164,15 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             spacing: 12,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (_availableResidents.length > 1)
+              // Caregivers can select from assigned residents; Elders are locked to themselves
+              if (!isElder && _availableResidents.length > 1)
                 DropdownButton<int>(
-                  value: _resident?.id,
+                  value: (_resident != null &&
+                          _availableResidents.any((r) => r.id == _resident!.id))
+                      ? _resident!.id
+                      : (_availableResidents.isNotEmpty
+                          ? _availableResidents.first.id
+                          : null),
                   underline: const SizedBox(),
                   style: const TextStyle(
                     fontSize: 12,
@@ -498,18 +1180,17 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     fontWeight: FontWeight.w600,
                   ),
                   items: _availableResidents.map((r) {
+                    final clean = r.name.trim().isNotEmpty
+                        ? r.name.trim()
+                        : 'Resident #${r.id}';
                     return DropdownMenuItem<int>(
                       value: r.id,
-                      child: Text('${r.name} (ID: ${r.id})'),
+                      child: Text('$clean (ID: ${r.id})'),
                     );
                   }).toList(),
                   onChanged: (id) {
                     if (id != null) {
-                      setState(() {
-                        _resident = _availableResidents.firstWhere(
-                          (r) => r.id == id,
-                        );
-                      });
+                      _selectResident(id);
                     }
                   },
                 ),
@@ -523,9 +1204,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: AppColors.lilac),
                 ),
-                child: const Text(
-                  'Standard Cognitive Battery (20 Items)',
-                  style: TextStyle(
+                child: Text(
+                  isElder
+                      ? 'Self-Response Session ($_totalCount Items)'
+                      : 'Standard Cognitive Battery ($_totalCount Items)',
+                  style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: AppColors.primary,
@@ -543,6 +1226,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     CognitiveQuestionItem currentQ,
     int progressPct,
     double? currentGrade,
+    bool isElder,
   ) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -554,18 +1238,23 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header: Question counter & Linear Progress Bar
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Responsive Header
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 6,
             children: [
               Text(
-                'Clinical Cognitive Assessment',
+                'Question ${_currentIndex + 1} of $_totalCount',
                 style: AppTextStyles.bodyMedium.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
               Text(
-                'Question ${_currentIndex + 1} of ${_questions.length} ($progressPct%)',
+                isElder
+                    ? 'Questions Answered: $_answeredCount/$_totalCount ($progressPct%) • Status: Self-Response'
+                    : 'Completed: $_fullyCompletedCount/$_totalCount ($progressPct%) • Answered: $_answeredCount • Graded: $_gradedCount',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
@@ -578,7 +1267,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-              value: (_currentIndex + 1) / _questions.length,
+              value: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
               minHeight: 6,
               backgroundColor: AppColors.lavenderBg,
               valueColor: const AlwaysStoppedAnimation<Color>(
@@ -642,7 +1331,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             ? AppColors.primaryDeep
                             : AppColors.primary,
                       ),
-                      tooltip: 'Read question aloud',
+                      tooltip:
+                          _isSpeaking ? 'Stop audio' : 'Read question aloud',
                       onPressed: () => _toggleTts(currentQ.prompt),
                     ),
                   ],
@@ -673,7 +1363,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'AI Guidance: ${currentQ.aiTip}',
+                          isElder
+                              ? 'Tip: Take your time. Speak clearly into the microphone or type your answer.'
+                              : 'AI Guidance: ${currentQ.aiTip}',
                           style: const TextStyle(
                             fontSize: 11,
                             color: AppColors.body,
@@ -689,7 +1381,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           ),
           const SizedBox(height: 20),
 
-          // Response Panel: Animated Waveform & Speech Transcript
+          // Response Panel: Animated Waveform, Voice Transcript & Manual Entry
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
@@ -705,16 +1397,47 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     Text(
                       _isListening
                           ? 'Listening to speech...'
-                          : 'Response Capture',
+                          : (isElder
+                              ? 'Your Response'
+                              : 'Response Capture'),
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         color: AppColors.navy,
                       ),
                     ),
-                    const Text(
-                      'Voice & Clinical Grading',
-                      style: TextStyle(fontSize: 11, color: AppColors.muted),
+                    Row(
+                      children: [
+                        if (_isAnswered(currentQ.id))
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.riskLowBg,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text(
+                              'Answer Saved',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.riskLow,
+                              ),
+                            ),
+                          ),
+                        Text(
+                          isElder
+                              ? 'Voice or Keyboard'
+                              : 'Voice & Clinical Grading',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -724,104 +1447,191 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 _buildAnimatedWaveform(),
                 const SizedBox(height: 12),
 
-                // Transcript box
-                Container(
-                  width: double.infinity,
-                  constraints: const BoxConstraints(minHeight: 52),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Text(
-                    _transcript.isNotEmpty ? '"$_transcript"' : 'Tap the microphone to record verbal responses, or select clinical scoring below.',
-                    style: TextStyle(
+                // Editable Response Text Field (Real-time sync to single source of truth)
+                TextField(
+                  controller: _responseController,
+                  onChanged: (val) {
+                    final qId = currentQ.id;
+                    setState(() {
+                      _responses[qId] = val;
+                    });
+                    _persistResponses();
+                  },
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: isElder
+                        ? 'Type your answer here, or tap the microphone to speak...'
+                        : 'Type resident answer here, or tap the microphone to dictate...',
+                    hintStyle: const TextStyle(
                       fontSize: 12,
-                      fontStyle: _transcript.isEmpty
-                          ? FontStyle.italic
-                          : FontStyle.normal,
-                      color: _transcript.isNotEmpty
-                          ? AppColors.navy
-                          : AppColors.muted,
+                      color: AppColors.muted,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppColors.primary),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
                     ),
                   ),
+                  style: const TextStyle(fontSize: 12, color: AppColors.navy),
                 ),
-                const SizedBox(height: 16),
-
-                // Clinical Grading Buttons (Requirement 5)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text(
-                          'Caregiver Clinical Scoring:',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.navy,
-                          ),
-                        ),
-                        Text(
-                          'Rubric: Correct = 1.0 • Partial = 0.5 • Incorrect = 0.0',
-                          style: TextStyle(
+                if (_speechStatusMessage != null) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.info, size: 12, color: AppColors.muted),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _speechStatusMessage!,
+                          style: const TextStyle(
                             fontSize: 10,
                             color: AppColors.muted,
                           ),
                         ),
-                      ],
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                // Role-Specific Section:
+                // - CAREGIVER sees clinical scoring controls
+                // - ELDER sees confirmation that answers will be reviewed by a care specialist
+                if (!isElder) ...[
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: const [
+                          Text(
+                            'Caregiver Clinical Scoring:',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.navy,
+                            ),
+                          ),
+                          Text(
+                            'Rubric: Correct = 1.0 • Partial = 0.5 • Incorrect = 0.0',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppColors.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildGradeButton(
+                              label: 'Correct (1.0)',
+                              icon: LucideIcons.checkCircle,
+                              scoreValue: 1.0,
+                              selectedColor: AppColors.riskLow,
+                              selectedBg: AppColors.riskLowBg,
+                              isSelected: currentGrade == 1.0,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildGradeButton(
+                              label: 'Partial (0.5)',
+                              icon: LucideIcons.minusCircle,
+                              scoreValue: 0.5,
+                              selectedColor: AppColors.riskModerate,
+                              selectedBg: AppColors.riskModerateBg,
+                              isSelected: currentGrade == 0.5,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildGradeButton(
+                              label: 'Incorrect (0.0)',
+                              icon: LucideIcons.xCircle,
+                              scoreValue: 0.0,
+                              selectedColor: AppColors.riskHigh,
+                              selectedBg: AppColors.riskHighBg,
+                              isSelected: currentGrade == 0.0,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
                     ),
-                    const SizedBox(height: 10),
-                    Row(
+                    decoration: BoxDecoration(
+                      color: AppColors.lavenderBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.lilac),
+                    ),
+                    child: Row(
                       children: [
-                        Expanded(
-                          child: _buildGradeButton(
-                            label: 'Correct (1.0)',
-                            icon: LucideIcons.checkCircle,
-                            scoreValue: 1.0,
-                            selectedColor: AppColors.riskLow,
-                            selectedBg: AppColors.riskLowBg,
-                            isSelected: currentGrade == 1.0,
-                          ),
+                        Icon(
+                          _isAnswered(currentQ.id)
+                              ? LucideIcons.checkCircle2
+                              : LucideIcons.userCheck,
+                          size: 16,
+                          color: _isAnswered(currentQ.id)
+                              ? AppColors.riskLow
+                              : AppColors.primary,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 10),
                         Expanded(
-                          child: _buildGradeButton(
-                            label: 'Partial (0.5)',
-                            icon: LucideIcons.minusCircle,
-                            scoreValue: 0.5,
-                            selectedColor: AppColors.riskModerate,
-                            selectedBg: AppColors.riskModerateBg,
-                            isSelected: currentGrade == 0.5,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _buildGradeButton(
-                            label: 'Incorrect (0.0)',
-                            icon: LucideIcons.xCircle,
-                            scoreValue: 0.0,
-                            selectedColor: AppColors.riskHigh,
-                            selectedBg: AppColors.riskHighBg,
-                            isSelected: currentGrade == 0.0,
+                          child: Text(
+                            _isAnswered(currentQ.id)
+                                ? 'Answer saved. Your care specialist will review your responses during clinical evaluation.'
+                                : 'Type or speak your answer above. Your care specialist will review and clinically score your response.',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.navy,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ],
             ),
           ),
           const SizedBox(height: 20),
 
-          // Bottom Action Buttons: Repeat, Mic Toggle, Next/Finish
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Bottom Action Buttons: Repeat, Mic Toggle, Next/Finish (Responsive Wrap)
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 12,
             children: [
-              Row(
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 10,
+                runSpacing: 6,
                 children: [
                   OutlinedButton.icon(
                     onPressed: () => _toggleTts(currentQ.prompt),
@@ -842,7 +1652,6 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
-                  const SizedBox(width: 10),
                   Text(
                     'Time: ${(_questionTimes[currentQ.id] ?? 0.0).toStringAsFixed(0)}s',
                     style: const TextStyle(
@@ -852,9 +1661,12 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   ),
                 ],
               ),
-              Row(
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 10,
+                runSpacing: 6,
                 children: [
-                  if (_currentIndex > 0) ...[
+                  if (_currentIndex > 0)
                     OutlinedButton(
                       onPressed: _prevQuestion,
                       style: OutlinedButton.styleFrom(
@@ -871,8 +1683,6 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         style: TextStyle(fontSize: 12),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                  ],
                   // Round Mic Button
                   GestureDetector(
                     onTap: _toggleListening,
@@ -886,11 +1696,10 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color:
-                                (_isListening
-                                        ? AppColors.riskHigh
-                                        : AppColors.primary)
-                                    .withValues(alpha: 0.3),
+                            color: (_isListening
+                                    ? AppColors.riskHigh
+                                    : AppColors.primary)
+                                .withValues(alpha: 0.3),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
@@ -903,9 +1712,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: _nextQuestion,
+                    onPressed: () => _nextQuestion(isElder),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
@@ -921,7 +1729,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     child: Text(
                       _currentIndex < _questions.length - 1
                           ? 'Next Question →'
-                          : 'Finish Assessment',
+                          : (isElder
+                              ? 'Finish & Submit'
+                              : 'Finish Assessment'),
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
@@ -1012,7 +1822,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     );
   }
 
-  Widget _buildRightPanel(int progressPct) {
+  Widget _buildRightPanel(int progressPct, bool isElder) {
     return Column(
       children: [
         // 1. Circular Progress Card
@@ -1025,9 +1835,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           ),
           child: Column(
             children: [
-              const Text(
-                'Assessment Progress',
-                style: TextStyle(
+              Text(
+                isElder ? 'Your Answer Progress' : 'Assessment Progress',
+                style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                   color: AppColors.navy,
@@ -1041,7 +1851,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     width: 90,
                     height: 90,
                     child: CircularProgressIndicator(
-                      value: _answeredCount / _questions.length,
+                      value: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
                       strokeWidth: 8,
                       backgroundColor: AppColors.lavenderBg,
                       valueColor: const AlwaysStoppedAnimation<Color>(
@@ -1060,35 +1870,155 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           color: AppColors.navy,
                         ),
                       ),
-                      const Text(
-                        'Completed',
-                        style: TextStyle(fontSize: 10, color: AppColors.muted),
+                      Text(
+                        isElder ? 'Answered' : 'Completed',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppColors.muted,
+                        ),
                       ),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildStatItem(
-                    'Graded',
-                    '$_answeredCount',
-                    AppColors.riskLow,
+              // Responsive Stat Row
+              if (isElder) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatItem(
+                        'Answered',
+                        '$_answeredCount/$_totalCount',
+                        AppColors.primary,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildStatItem(
+                        'Remaining',
+                        '$_remainingToAnswerCount',
+                        AppColors.muted,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildStatItem(
+                        'Status',
+                        _answeredCount == _totalCount
+                            ? 'Ready'
+                            : 'In Progress',
+                        _answeredCount == _totalCount
+                            ? AppColors.riskLow
+                            : const Color(0xFFB45309),
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildStatItem(
+                        'Reviewer',
+                        'Care Specialist',
+                        AppColors.navy,
+                      ),
+                    ),
+                  ],
+                ),
+                if (_remainingToAnswerCount > 0) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.riskModerateBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.riskModerate),
+                    ),
+                    child: Text(
+                      '$_remainingToAnswerCount question(s) pending your answer',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFB45309),
+                      ),
+                    ),
                   ),
-                  _buildStatItem(
-                    'Current',
-                    '${_currentIndex + 1}',
-                    AppColors.primary,
-                  ),
-                  _buildStatItem(
-                    'Remaining',
-                    '${_questions.length - _answeredCount}',
-                    AppColors.muted,
+                ] else ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.riskLowBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.riskLow),
+                    ),
+                    child: const Text(
+                      'All 10 questions answered — Ready for review!',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.riskLow,
+                      ),
+                    ),
                   ),
                 ],
-              ),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatItem(
+                        'Completed',
+                        '$_fullyCompletedCount/$_totalCount',
+                        AppColors.primary,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildStatItem(
+                        'Answered',
+                        '$_answeredCount/$_totalCount',
+                        const Color(0xFFB45309),
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildStatItem(
+                        'Graded',
+                        '$_gradedCount/$_totalCount',
+                        AppColors.riskLow,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildStatItem(
+                        'Remaining',
+                        '$_remainingToCompleteCount',
+                        AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+                if (_remainingToCompleteCount > 0) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.riskModerateBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.riskModerate),
+                    ),
+                    child: Text(
+                      '$_remainingToCompleteCount item(s) pending response or score',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFB45309),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ],
           ),
         ),
@@ -1117,7 +2047,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     ),
                   ),
                   Text(
-                    '$_answeredCount / ${_questions.length}',
+                    isElder
+                        ? '$_answeredCount / $_totalCount Answered'
+                        : '$_fullyCompletedCount / $_totalCount Completed',
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -1128,14 +2060,18 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               ),
               const SizedBox(height: 10),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 250),
+                constraints: const BoxConstraints(maxHeight: 280),
                 child: ListView.builder(
                   shrinkWrap: true,
                   itemCount: _questions.length,
                   itemBuilder: (context, idx) {
                     final q = _questions[idx];
                     final isCurrent = idx == _currentIndex;
-                    final isGraded = _grades[q.id] != null;
+                    final isGraded = _isGraded(q.id);
+                    final isAnswered = _isAnswered(q.id);
+                    final isComplete = _isFullyCompleted(q.id);
+                    final gradeValue = _grades[q.id];
+
                     return InkWell(
                       onTap: () => _goToQuestion(idx),
                       borderRadius: BorderRadius.circular(8),
@@ -1148,8 +2084,10 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         decoration: BoxDecoration(
                           color: isCurrent
                               ? AppColors.primarySoft
-                              : isGraded
+                              : (isElder ? isAnswered : isComplete)
                               ? AppColors.lavenderBg
+                              : (isAnswered || isGraded)
+                              ? const Color(0xFFFEF3C7)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
@@ -1162,33 +2100,121 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              '${q.id}. ${q.category}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: isCurrent
-                                    ? FontWeight.bold
-                                    : FontWeight.w500,
-                                color: isCurrent
-                                    ? AppColors.primary
-                                    : isGraded
-                                    ? AppColors.navy
-                                    : AppColors.muted,
+                            Expanded(
+                              child: Text(
+                                '${q.id}. ${q.category}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: isCurrent
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
+                                  color: isCurrent
+                                      ? AppColors.primary
+                                      : (isElder ? isAnswered : isComplete)
+                                      ? AppColors.navy
+                                      : (isAnswered || isGraded)
+                                      ? const Color(0xFF92400E)
+                                      : AppColors.muted,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            Icon(
-                              isGraded
-                                  ? LucideIcons.checkCircle
-                                  : isCurrent
-                                  ? LucideIcons.circleDot
-                                  : LucideIcons.circle,
-                              size: 13,
-                              color: isGraded
-                                  ? AppColors.riskLow
-                                  : isCurrent
-                                  ? AppColors.primary
-                                  : AppColors.lilac,
-                            ),
+                            if (isElder) ...[
+                              if (isAnswered) ...[
+                                const Text(
+                                  'Answer Saved',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.riskLow,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  LucideIcons.checkCircle2,
+                                  size: 14,
+                                  color: AppColors.riskLow,
+                                ),
+                              ] else ...[
+                                Icon(
+                                  isCurrent
+                                      ? LucideIcons.circleDot
+                                      : LucideIcons.circle,
+                                  size: 13,
+                                  color: isCurrent
+                                      ? AppColors.primary
+                                      : AppColors.lilac,
+                                ),
+                              ],
+                            ] else ...[
+                              if (isComplete) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: AppColors.lilac),
+                                  ),
+                                  child: Text(
+                                    gradeValue!.toStringAsFixed(1),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.riskLow,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  LucideIcons.checkCircle2,
+                                  size: 14,
+                                  color: AppColors.riskLow,
+                                ),
+                              ] else if (isGraded && !isAnswered) ...[
+                                const Text(
+                                  'Missing answer',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  LucideIcons.alertCircle,
+                                  size: 13,
+                                  color: Color(0xFFB45309),
+                                ),
+                              ] else if (isAnswered && !isGraded) ...[
+                                const Text(
+                                  'Awaiting score',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  LucideIcons.clock,
+                                  size: 13,
+                                  color: Color(0xFFB45309),
+                                ),
+                              ] else ...[
+                                Icon(
+                                  isCurrent
+                                      ? LucideIcons.circleDot
+                                      : LucideIcons.circle,
+                                  size: 13,
+                                  color: isCurrent
+                                      ? AppColors.primary
+                                      : AppColors.lilac,
+                                ),
+                              ],
+                            ],
                           ],
                         ),
                       ),
@@ -1201,7 +2227,54 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         ),
         const SizedBox(height: 16),
 
-        // 3. Clinical Scoring Rubric Button
+        // 3. Clinical Scoring Rubric Guidance (or Elder Session Tips)
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isElder ? LucideIcons.info : LucideIcons.helpCircle,
+                    size: 16,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    isElder
+                        ? 'Elder Assessment Guidance'
+                        : 'Clinical Evaluation Tips',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navy,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                isElder
+                    ? 'Take as much time as you need for each question. You can answer using the microphone or keyboard. Your care team will review your responses.'
+                    : 'Guidance: ${_questions[_currentIndex].recommendedAnswerGuide}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.body,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // AI Methodology & Synthetic Model Metrics Card
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -1215,13 +2288,13 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               Row(
                 children: const [
                   Icon(
-                    LucideIcons.helpCircle,
+                    LucideIcons.cpu,
                     size: 16,
                     color: AppColors.primary,
                   ),
                   SizedBox(width: 6),
                   Text(
-                    'Clinical Evaluation Tips',
+                    'AI Methodology & Model Metrics',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -1231,12 +2304,49 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 ],
               ),
               const SizedBox(height: 8),
-              Text(
-                'Guidance: ${_questions[_currentIndex].recommendedAnswerGuide}',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.body,
-                  height: 1.4,
+              const Text(
+                'ACRF Base Weights: Mem 25% • Attn 20% • Orient 20% • Recall 20% • Reas 15%',
+                style: TextStyle(fontSize: 10, color: AppColors.muted, height: 1.3),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.lavenderBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Trained Random Forest (Synthetic Benchmark):',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '• Synthetic Accuracy: 96.80% (95% CI: [95.85%, 97.70%])\n'
+                      '• Macro F1: 96.76% | Macro Recall: 96.87%\n'
+                      '• High-Risk Recall: 96.88% (Alert Threshold: P ≥ 0.48)',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.navy,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Notice: Verified on synthetic test residents. Non-clinical research metric; not a medical diagnosis.',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: AppColors.muted,
+                  fontStyle: FontStyle.italic,
                 ),
               ),
             ],
@@ -1244,24 +2354,35 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         ),
         const SizedBox(height: 16),
 
-        // 4. End Assessment Button
+        // 4. End / Finish Assessment Button
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
-            onPressed: _showFinishConfirmationDialog,
+            onPressed: () => _showFinishConfirmationDialog(isElder),
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.riskHigh,
-              side: const BorderSide(color: AppColors.riskHighBg),
-              backgroundColor: AppColors.riskHighBg.withValues(alpha: 0.5),
+              foregroundColor: isElder ? AppColors.primary : AppColors.riskHigh,
+              side: BorderSide(
+                color: isElder ? AppColors.lilac : AppColors.riskHighBg,
+              ),
+              backgroundColor: isElder
+                  ? AppColors.primarySoft
+                  : AppColors.riskHighBg.withValues(alpha: 0.5),
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            icon: const Icon(LucideIcons.alertOctagon, size: 16),
-            label: const Text(
-              'End Assessment',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            icon: Icon(
+              isElder ? LucideIcons.send : LucideIcons.alertOctagon,
+              size: 16,
+            ),
+            label: Text(
+              isElder
+                  ? (_answeredCount == _totalCount
+                      ? 'Submit for Caregiver Review'
+                      : 'End & Save Session')
+                  : 'End Assessment',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
             ),
           ),
         ),
@@ -1275,114 +2396,456 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         Text(
           value,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: 12,
             fontWeight: FontWeight.bold,
             color: color,
           ),
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(fontSize: 10, color: AppColors.muted),
+          style: const TextStyle(fontSize: 9, color: AppColors.muted),
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
   }
 
-  void _showFinishConfirmationDialog() {
+  void _showFinishConfirmationDialog(bool isElder) {
+    _saveCurrentQuestionState();
     showDialog(
       context: context,
       barrierDismissible: !_isSubmitting,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final uncompletedCount = _questions.length - _answeredCount;
+            final unansweredIds = _questions
+                .where((q) => !_isAnswered(q.id))
+                .map((q) => q.id)
+                .toList();
+
+            if (isElder) {
+              final bool isAllAnswered = unansweredIds.isEmpty;
+              return AlertDialog(
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                title: Row(
+                  children: [
+                    Icon(
+                      isAllAnswered
+                          ? LucideIcons.checkCircle2
+                          : LucideIcons.alertTriangle,
+                      color: isAllAnswered
+                          ? AppColors.riskLow
+                          : const Color(0xFFB45309),
+                      size: 22,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      isAllAnswered
+                          ? 'Submit for Review'
+                          : 'Questions Pending Answer',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Session Summary: $_answeredCount of $_totalCount questions answered for ${_resident?.name ?? 'Resident'}.',
+                        style: const TextStyle(fontSize: 12, color: AppColors.body),
+                      ),
+                      if (!isAllAnswered) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.riskModerateBg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.riskModerate),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    LucideIcons.alertCircle,
+                                    size: 16,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${unansweredIds.length} Question(s) Require Your Response',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFB45309),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '• Unanswered: Question(s) ${unansweredIds.join(', ')}.',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF92400E),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Please answer all 10 questions before submitting for caregiver clinical evaluation.',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF92400E),
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: unansweredIds.map((id) {
+                                  return ActionChip(
+                                    label: Text(
+                                      'Go to Q$id',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.primary,
+                                      ),
+                                    ),
+                                    backgroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                      _goToQuestion(id - 1);
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.riskLowBg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.riskLow),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Row(
+                                children: [
+                                  Icon(
+                                    LucideIcons.checkCircle2,
+                                    size: 16,
+                                    color: AppColors.riskLow,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'All 10 questions have saved responses.',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.riskLow,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 6),
+                              Text(
+                                'Your responses will be securely submitted for caregiver clinical scoring. A licensed care specialist will review your answers and compute your ACRF Cognitive Wellness Score.',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: AppColors.navy,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(
+                      isAllAnswered ? 'Review Answers' : 'Return to Assessment',
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: isAllAnswered
+                        ? () async {
+                            setDialogState(() => _isSubmitting = true);
+                            await _submitElderResponses();
+                            if (mounted) setDialogState(() {});
+                          }
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      disabledForegroundColor: Colors.grey.shade600,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            isAllAnswered
+                                ? 'Submit for Caregiver Review'
+                                : 'Answer All 10 Questions to Submit',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                ],
+              );
+            }
+
+            // CAREGIVER Flow: Requires both saved answers and clinical grades
+            final uncompletedIds = _questions
+                .where((q) => !_isFullyCompleted(q.id))
+                .map((q) => q.id)
+                .toList();
+            final ungradedIds = _questions
+                .where((q) => !_isGraded(q.id))
+                .map((q) => q.id)
+                .toList();
+
+            final bool isAllCompleted = uncompletedIds.isEmpty;
+            final bool canSubmit = !_isSubmitting && isAllCompleted;
+
             return AlertDialog(
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
               title: Row(
-                children: const [
+                children: [
                   Icon(
-                    LucideIcons.checkCircle2,
-                    color: AppColors.primary,
+                    isAllCompleted
+                        ? LucideIcons.checkCircle2
+                        : LucideIcons.alertTriangle,
+                    color: isAllCompleted
+                        ? AppColors.riskLow
+                        : const Color(0xFFB45309),
                     size: 22,
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
-                    'Finalize Assessment?',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                    isAllCompleted
+                        ? 'Finalize Assessment'
+                        : 'Assessment Incomplete',
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'You have answered and graded $_answeredCount of ${_questions.length} questions for ${_resident?.name ?? 'Resident'}.',
-                    style: const TextStyle(fontSize: 12, color: AppColors.body),
-                  ),
-                  if (uncompletedCount > 0) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.riskModerateBg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.riskModerate),
-                      ),
-                      child: Text(
-                        'Note: $uncompletedCount questions remain ungraded. Unanswered items are scored as 0.0.',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFFB45309),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Session Summary: $_fullyCompletedCount of $_totalCount questions fully assessed (Answered: $_answeredCount, Graded: $_gradedCount) for ${_resident?.name ?? 'Resident'}.',
+                      style: const TextStyle(fontSize: 12, color: AppColors.body),
+                    ),
+                    if (!isAllCompleted) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.riskModerateBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.riskModerate),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(
+                                  LucideIcons.alertCircle,
+                                  size: 16,
+                                  color: Color(0xFFB45309),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${uncompletedIds.length} Question(s) Require Attention',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            if (unansweredIds.isNotEmpty) ...[
+                              Text(
+                                '• Unanswered: Question(s) ${unansweredIds.join(', ')}.',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF92400E),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                            if (ungradedIds.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '• Ungraded: Question(s) ${ungradedIds.join(', ')}.',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF92400E),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Every question must have both a recorded response and a clinical grade (1.0, 0.5, or 0.0) before finalizing. Incomplete assessments cannot be submitted.',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFF92400E),
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: uncompletedIds.map((id) {
+                                return ActionChip(
+                                  label: Text(
+                                    'Go to Q$id',
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                  backgroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    _goToQuestion(id - 1);
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
-                  if (_submitError != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.riskHighBg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.riskHigh),
-                      ),
-                      child: Text(
-                        _submitError!,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.riskHigh,
+                    ] else ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.riskLowBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.riskLow),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(
+                              LucideIcons.checkCircle2,
+                              size: 16,
+                              color: AppColors.riskLow,
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'All 10 questions have valid saved responses and clinical grades. Ready for evaluation.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.riskLow,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
+                    ],
+                    if (_submitError != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.riskHighBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.riskHigh),
+                        ),
+                        child: Text(
+                          _submitError!,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.riskHigh,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
               actions: [
                 TextButton(
                   onPressed: _isSubmitting
                       ? null
                       : () => Navigator.of(context).pop(),
-                  child: const Text(
-                    'Continue Testing',
-                    style: TextStyle(color: AppColors.muted),
+                  child: Text(
+                    isAllCompleted ? 'Review Answers' : 'Return to Assessment',
+                    style: const TextStyle(color: AppColors.muted),
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: _isSubmitting
-                      ? null
-                      : () async {
+                  onPressed: canSubmit
+                      ? () async {
                           setDialogState(() => _isSubmitting = true);
-                          await _submitAssessment();
+                          await _submitCaregiverAssessment();
                           if (mounted) setDialogState(() {});
-                        },
+                        }
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    disabledForegroundColor: Colors.grey.shade600,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -1396,14 +2859,125 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             color: Colors.white,
                           ),
                         )
-                      : const Text(
-                          'Finalize & Submit',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                      : Text(
+                          isAllCompleted
+                              ? 'Finalize & Submit'
+                              : 'Complete All 10 Items to Submit',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                 ),
               ],
             );
           },
+        );
+      },
+    );
+  }
+
+  void _showElderSubmissionSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: Center(
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(
+                    color: AppColors.riskLowBg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    LucideIcons.checkCircle2,
+                    color: AppColors.riskLow,
+                    size: 36,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Responses Submitted',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_resident?.name ?? 'Resident'} • Self-Response Session',
+                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.lavenderBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.lilac),
+                ),
+                child: Column(
+                  children: const [
+                    Text(
+                      'STATUS: PENDING CAREGIVER CLINICAL REVIEW',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'All 10 responses have been securely saved and queued for clinical review.',
+                      style: TextStyle(fontSize: 12, color: AppColors.navy),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'Your care team will review your answers and compute your ACRF Cognitive Wellness Score.',
+                      style: TextStyle(fontSize: 11, color: AppColors.muted),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context, rootNavigator: true).pop();
+                  context.go('/dashboard');
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text(
+                  'Return to Dashboard',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -1476,7 +3050,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '${result.acrfScore.toStringAsFixed(1)} / 100',
+                        '${result.acrfScore != null ? result.acrfScore!.toStringAsFixed(1) : 'N/A'} / 100',
                         style: const TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.w800,
@@ -1485,7 +3059,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        result.methodology ?? 'ACRF Fixed Base Weights (Non-Diagnostic Wellness Metric)',
+                        result.methodology ??
+                            'ACRF Fixed Base Weights (Non-Diagnostic Wellness Metric)',
                         style: const TextStyle(
                           fontSize: 10,
                           color: AppColors.muted,
@@ -1501,20 +3076,20 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildCategoryBadge('Memory', result.memory, '25%'),
-                    _buildCategoryBadge('Attention', result.attention, '20%'),
+                    _buildCategoryBadge('Memory', result.memory ?? 0.0, '25%'),
+                    _buildCategoryBadge('Attention', result.attention ?? 0.0, '20%'),
                     _buildCategoryBadge(
                       'Orientation',
-                      result.orientation,
+                      result.orientation ?? 0.0,
                       '20%',
                     ),
-                    _buildCategoryBadge('Recall', result.recall, '20%'),
-                    _buildCategoryBadge('Reasoning', result.reasoning, '15%'),
+                    _buildCategoryBadge('Recall', result.recall ?? 0.0, '20%'),
+                    _buildCategoryBadge('Reasoning', result.reasoning ?? 0.0, '15%'),
                   ],
                 ),
                 const SizedBox(height: 16),
 
-                // Random Forest ML Model Evaluation (Requirement 10)
+                // Random Forest ML Model Evaluation
                 if (result.mlAvailable) ...[
                   Container(
                     width: double.infinity,
@@ -1645,7 +3220,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
                 // Clinical Disclaimer
                 Text(
-                  result.clinicalDisclaimer ?? 'The ACRF score is an arithmetic weighted wellness metric. Non-diagnostic.',
+                  result.clinicalDisclaimer ??
+                      'The ACRF score is an arithmetic weighted wellness metric. Non-diagnostic.',
                   style: const TextStyle(
                     fontSize: 9,
                     color: AppColors.muted,

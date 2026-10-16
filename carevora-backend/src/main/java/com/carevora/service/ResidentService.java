@@ -29,16 +29,20 @@ public class ResidentService {
     private final AlertRepository alertRepository;
     private final UserRepository userRepository;
     private final CaregiverRepository caregiverRepository;
+    private final com.carevora.repository.CognitiveAssessmentRepository cognitiveAssessmentRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ResidentService(
             ResidentRepository residentRepository,
             AlertRepository alertRepository,
             UserRepository userRepository,
-            CaregiverRepository caregiverRepository) {
+            CaregiverRepository caregiverRepository,
+            com.carevora.repository.CognitiveAssessmentRepository cognitiveAssessmentRepository) {
         this.residentRepository = residentRepository;
         this.alertRepository = alertRepository;
         this.userRepository = userRepository;
         this.caregiverRepository = caregiverRepository;
+        this.cognitiveAssessmentRepository = cognitiveAssessmentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -129,6 +133,22 @@ public class ResidentService {
         Long homeId = r.getElderHome() != null ? r.getElderHome().getId() : null;
         String homeName = r.getElderHome() != null ? r.getElderHome().getName() : null;
 
+        Double realCognitiveScore = null;
+        java.time.LocalDateTime latestAssessmentDateTime = r.getLastAssessmentDate();
+
+        if (cognitiveAssessmentRepository != null) {
+            List<com.carevora.entity.CognitiveAssessment> cogList =
+                    cognitiveAssessmentRepository.findByResidentIdOrderByCreatedAtDesc(r.getId());
+            if (!cogList.isEmpty()) {
+                realCognitiveScore = cogList.get(0).getAcrfScore();
+                if (cogList.get(0).getCreatedAt() != null) {
+                    if (latestAssessmentDateTime == null || cogList.get(0).getCreatedAt().isAfter(latestAssessmentDateTime)) {
+                        latestAssessmentDateTime = cogList.get(0).getCreatedAt();
+                    }
+                }
+            }
+        }
+
         return ResidentResponse.builder()
                 .id(r.getId())
                 .userId(r.getUser().getId())
@@ -142,8 +162,8 @@ public class ResidentService {
                 .trajectory(r.getTrajectory())
                 .emotionalScore(r.getEmotionalScore())
                 .socialScore(r.getSocialScore())
-                .cognitiveScore(r.getCognitiveScore())
-                .lastAssessmentDate(r.getLastAssessmentDate())
+                .cognitiveScore(realCognitiveScore)
+                .lastAssessmentDate(latestAssessmentDateTime)
                 .unreadAlertsCount(unreadAlerts)
                 .elderHomeId(homeId)
                 .elderHomeName(homeName)
