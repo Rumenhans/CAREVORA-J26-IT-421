@@ -58,6 +58,10 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   bool _isLoadingResidents = false;
   String? _residentLoadError;
 
+  // Demographic inputs if missing in resident profile
+  int? _customEducationYears;
+  int? _customAge;
+
   // Submission state
   bool _isSubmitting = false;
   String? _submitError;
@@ -170,11 +174,26 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
     // 1. ELDER Role: The elder user is strictly taking the assessment for themselves
     if (authState.isElder) {
-      final profile = CognitiveResidentProfile(
-        id: authState.residentId ?? 1,
-        name: authState.userName ?? 'Sarah Jenkins',
-        roomNumber: 'Room 204',
-      );
+      CognitiveResidentProfile profile;
+      try {
+        final residentId = authState.residentId ?? 1;
+        final fetched = await CognitiveAssessmentService.fetchResident(
+          residentId: residentId,
+          token: token,
+        );
+        profile = fetched ??
+            CognitiveResidentProfile(
+              id: residentId,
+              name: authState.userName ?? 'Sarah Jenkins',
+              roomNumber: 'Room 204',
+            );
+      } catch (_) {
+        profile = CognitiveResidentProfile(
+          id: authState.residentId ?? 1,
+          name: authState.userName ?? 'Sarah Jenkins',
+          roomNumber: 'Room 204',
+        );
+      }
       if (mounted) {
         setState(() {
           _isLoadingResidents = false;
@@ -240,6 +259,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     );
     setState(() {
       _resident = found;
+      _customEducationYears = null;
+      _customAge = null;
       _responses.clear();
       _grades.clear();
       _questionTimes.clear();
@@ -395,7 +416,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     if (_isSpeaking) _flutterTts.stop();
     if (_isListening) _speech.stop();
     final qId = _questions[_currentIndex].id;
-    _responses[qId] = _responseController.text;
+    final text = _responseController.text;
+    _responses[qId] = text;
+    if (_grades[qId] == null && text.trim().isNotEmpty) {
+      _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
+    }
     _persistResponses();
   }
 
@@ -529,8 +554,10 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
   // --- Strict Session Metrics & Role-Specific Calculations ---
   bool _isAnswered(int qId) => _responses[qId]?.trim().isNotEmpty == true;
-  bool _isGraded(int qId) => _grades[qId] != null;
-  bool _isFullyCompleted(int qId) => _isAnswered(qId) && _isGraded(qId);
+  bool _isGraded(int qId) =>
+      _grades[qId] != null ||
+      (_isAnswered(qId) && CognitiveScoring.scoreQuestion(qId, _responses[qId]) != null);
+  bool _isFullyCompleted(int qId) => _isAnswered(qId);
 
   int get _totalCount => _questions.length; // 10
   int get _answeredCount => _questions.where((q) => _isAnswered(q.id)).length;
@@ -542,7 +569,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
   /// Role-appropriate progress percentage:
   /// - ELDER: progress measures questions answered by resident: (answered / 10) * 100
-  /// - CAREGIVER: progress measures questions fully clinically assessed: (fully completed / 10) * 100
+  /// - CAREGIVER: progress measures questions fully assessed: (fully completed / 10) * 100
   int _getProgressPct(bool isElder) {
     if (_totalCount == 0) return 0;
     final count = isElder ? _answeredCount : _fullyCompletedCount;
@@ -551,19 +578,22 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Future<void> _submitCaregiverAssessment() async {
-    if (_isSubmitting) return;
-
     _saveCurrentQuestionState();
 
-    // Strict validation for Caregivers: Prevent final submission when any question is unanswered or ungraded
-    if (!CognitiveScoring.isBatteryComplete(
-      responses: _responses,
-      grades: _grades,
-    )) {
+    // Auto-grade all answered questions using question-specific deterministic rubric
+    final autoGrades = CognitiveScoring.autoScoreBattery(_responses);
+    for (final e in autoGrades.entries) {
+      if (_grades[e.key] == null && e.value != null) {
+        _grades[e.key] = e.value;
+      }
+    }
+
+    final unanswered = CognitiveScoring.getUnansweredQuestionIds(_responses);
+    if (unanswered.isNotEmpty) {
       setState(() {
         _isSubmitting = false;
         _submitError =
-            'Cannot submit: All 10 questions must have both a saved response and a clinical grade.';
+            'Cannot submit: Question(s) ${unanswered.join(', ')} are unanswered. All 10 questions must have responses before automatic evaluation.';
       });
       return;
     }
@@ -583,7 +613,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         _questionTimes,
       );
 
-      final residentId = _resident?.id;
+      final residentId = _resident?.id ??
+          authState.residentId ??
+          (_availableResidents.isNotEmpty ? _availableResidents.first.id : null);
       if (residentId == null) {
         setState(() {
           _isSubmitting = false;
@@ -592,6 +624,30 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         return;
       }
 
+      if (_sessionId == null) {
+        final session = await CognitiveAssessmentService.startSession(
+          residentId: residentId,
+          token: token,
+        );
+        _sessionId = session.sessionId;
+      }
+
+      if (_sessionId != null) {
+        try {
+          await CognitiveAssessmentService.saveResponses(
+            sessionId: _sessionId!,
+            responses: _responses,
+            questionTimes: _questionTimes,
+            status: 'IN_PROGRESS',
+            token: token,
+          );
+        } catch (_) {}
+      }
+
+      final effectiveAge = _customAge ?? _resident?.age;
+      final effectiveEducationYears =
+          _customEducationYears ?? _resident?.educationYears;
+
       final payload = CognitiveSubmissionPayload(
         residentId: residentId,
         memory: taskScores['memory'] ?? 0.0,
@@ -599,8 +655,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         orientation: taskScores['orientation'] ?? 0.0,
         recall: taskScores['recall'] ?? 0.0,
         reasoning: taskScores['reasoning'] ?? 0.0,
-        age: _resident?.age,
-        educationYears: _resident?.educationYears,
+        age: effectiveAge,
+        educationYears: effectiveEducationYears,
         accuracies: accuracies,
         responseTimes: responseTimes,
         sessionId: _sessionId,
@@ -616,10 +672,30 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         token: token,
       );
 
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('cognitive_responses_$residentId');
+      } catch (_) {}
+
       if (mounted) {
         setState(() {
           _isSubmitting = false;
-          _sessionStatus = 'COMPLETED';
+          _sessionStatus = result.status;
+          _sessionId = null;
+          if (_resident != null &&
+              (effectiveEducationYears != _resident!.educationYears ||
+                  effectiveAge != _resident!.age)) {
+            _resident = CognitiveResidentProfile(
+              id: _resident!.id,
+              name: _resident!.name,
+              age: effectiveAge,
+              educationYears: effectiveEducationYears,
+              roomNumber: _resident!.roomNumber,
+              gender: _resident!.gender,
+              currentStatus: _resident!.currentStatus,
+              riskLevel: _resident!.riskLevel,
+            );
+          }
         });
         Navigator.of(context, rootNavigator: true).pop(); // Dismiss confirm
         _showResultDialog(result);
@@ -634,43 +710,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     }
   }
 
-  Future<void> _submitElderResponses() async {
-    _saveCurrentQuestionState();
-    if (_answeredCount < _totalCount) return;
-
-    final token = ref.read(authProvider).state.token;
-    final rId = _resident?.id ?? ref.read(authProvider).state.residentId;
-
-    setState(() => _isSubmitting = true);
-
-    try {
-      if (_sessionId == null && rId != null) {
-        final session = await CognitiveAssessmentService.startSession(
-          residentId: rId,
-          token: token,
-        );
-        _sessionId = session.sessionId;
-      }
-
-      if (_sessionId != null) {
-        await CognitiveAssessmentService.saveResponses(
-          sessionId: _sessionId!,
-          responses: _responses,
-          questionTimes: _questionTimes,
-          token: token,
-        );
-        _sessionStatus = 'PENDING_CAREGIVER_REVIEW';
-      }
-    } catch (_) {}
-
-    await _persistResponses();
-
-    if (mounted) {
-      setState(() => _isSubmitting = false);
-      Navigator.of(context, rootNavigator: true).pop(); // Dismiss confirm
-      _showElderSubmissionSuccessDialog();
-    }
-  }
+  Future<void> _submitElderResponses() => _submitCaregiverAssessment();
 
   @override
   Widget build(BuildContext context) {
@@ -1454,6 +1494,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     final qId = currentQ.id;
                     setState(() {
                       _responses[qId] = val;
+                      _grades[qId] = CognitiveScoring.scoreQuestion(qId, val);
                     });
                     _persistResponses();
                   },
@@ -1509,8 +1550,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 const SizedBox(height: 16),
 
                 // Role-Specific Section:
-                // - CAREGIVER sees clinical scoring controls
-                // - ELDER sees confirmation that answers will be reviewed by a care specialist
+                // - CAREGIVER sees automatic scoring indicator and optional override buttons
+                // - ELDER sees confirmation that answers are auto-evaluated upon submission
                 if (!isElder) ...[
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1522,7 +1563,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         runSpacing: 4,
                         children: const [
                           Text(
-                            'Caregiver Clinical Scoring:',
+                            'Automatic Scoring (Deterministic Rubric):',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -1530,7 +1571,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             ),
                           ),
                           Text(
-                            'Rubric: Correct = 1.0 • Partial = 0.5 • Incorrect = 0.0',
+                            'System auto-grades answers • Optional override',
                             style: TextStyle(
                               fontSize: 10,
                               color: AppColors.muted,
@@ -1603,8 +1644,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         Expanded(
                           child: Text(
                             _isAnswered(currentQ.id)
-                                ? 'Answer saved. Your care specialist will review your responses during clinical evaluation.'
-                                : 'Type or speak your answer above. Your care specialist will review and clinically score your response.',
+                                ? 'Answer saved. The system will automatically evaluate and score your response upon submission.'
+                                : 'Type or speak your answer above. The system will evaluate your response.',
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppColors.navy,
@@ -2446,7 +2487,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     const SizedBox(width: 8),
                     Text(
                       isAllAnswered
-                          ? 'Submit for Review'
+                          ? 'Submit & Auto-Score Assessment'
                           : 'Questions Pending Answer',
                       style: const TextStyle(
                         fontSize: 17,
@@ -2505,7 +2546,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                               ),
                               const SizedBox(height: 8),
                               const Text(
-                                'Please answer all 10 questions before submitting for caregiver clinical evaluation.',
+                                'Please answer all 10 questions before submitting. Missing answers remain incomplete.',
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: Color(0xFF92400E),
@@ -2574,7 +2615,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                               ),
                               SizedBox(height: 6),
                               Text(
-                                'Your responses will be securely submitted for caregiver clinical scoring. A licensed care specialist will review your answers and compute your ACRF Cognitive Wellness Score.',
+                                'Your responses will be evaluated deterministically using question-specific scoring rules, ACRF cognitive domain scores calculated, and AI risk prediction generated.',
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: AppColors.navy,
@@ -2583,20 +2624,133 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             ],
                           ),
                         ),
+                        if ((_customEducationYears ?? _resident?.educationYears) == null ||
+                            (_customAge ?? _resident?.age) == null) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF93C5FD)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: const [
+                                    Icon(
+                                      LucideIcons.sparkles,
+                                      size: 16,
+                                      color: Color(0xFF1D4ED8),
+                                    ),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Demographic Details for AI Prediction',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1D4ED8),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'The 31-feature Random Forest model requires Education Years (and Age) for risk classification. If left blank, ACRF domain scores will still be calculated and saved without ML prediction.',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFF1E40AF),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                if ((_customAge ?? _resident?.age) == null) ...[
+                                  TextFormField(
+                                    initialValue: _customAge?.toString() ?? '',
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Resident Age (1-130)',
+                                      isDense: true,
+                                      filled: true,
+                                      fillColor: Colors.white,
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(color: Color(0xFF93C5FD)),
+                                      ),
+                                    ),
+                                    onChanged: (val) {
+                                      final n = int.tryParse(val.trim());
+                                      if (n != null && n > 0 && n <= 130) {
+                                        _customAge = n;
+                                      } else if (val.trim().isEmpty) {
+                                        _customAge = null;
+                                      }
+                                    },
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                                if ((_customEducationYears ?? _resident?.educationYears) == null) ...[
+                                  TextFormField(
+                                    initialValue: _customEducationYears?.toString() ?? '',
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Education Years (0-40)',
+                                      isDense: true,
+                                      filled: true,
+                                      fillColor: Colors.white,
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(color: Color(0xFF93C5FD)),
+                                      ),
+                                    ),
+                                    onChanged: (val) {
+                                      final n = int.tryParse(val.trim());
+                                      if (n != null && n >= 0 && n <= 40) {
+                                        _customEducationYears = n;
+                                      } else if (val.trim().isEmpty) {
+                                        _customEducationYears = null;
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                      if (_submitError != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.riskHighBg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.riskHigh),
+                          ),
+                          child: Text(
+                            _submitError!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.riskHigh,
+                            ),
+                          ),
+                        ),
                       ],
                     ],
                   ),
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     child: Text(
                       isAllAnswered ? 'Review Answers' : 'Return to Assessment',
                       style: const TextStyle(color: AppColors.muted),
                     ),
                   ),
                   ElevatedButton(
-                    onPressed: isAllAnswered
+                    onPressed: (isAllAnswered && !_isSubmitting)
                         ? () async {
                             setDialogState(() => _isSubmitting = true);
                             await _submitElderResponses();
@@ -2623,7 +2777,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           )
                         : Text(
                             isAllAnswered
-                                ? 'Submit for Caregiver Review'
+                                ? 'Submit & Calculate Score'
                                 : 'Answer All 10 Questions to Submit',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
@@ -2632,16 +2786,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               );
             }
 
-            // CAREGIVER Flow: Requires both saved answers and clinical grades
-            final uncompletedIds = _questions
-                .where((q) => !_isFullyCompleted(q.id))
-                .map((q) => q.id)
-                .toList();
-            final ungradedIds = _questions
-                .where((q) => !_isGraded(q.id))
-                .map((q) => q.id)
-                .toList();
-
+            // CAREGIVER Flow: Requires all 10 responses, then automatically evaluates and finalizes
+            final uncompletedIds = unansweredIds;
             final bool isAllCompleted = uncompletedIds.isEmpty;
             final bool canSubmit = !_isSubmitting && isAllCompleted;
 
@@ -2664,7 +2810,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   const SizedBox(width: 8),
                   Text(
                     isAllCompleted
-                        ? 'Finalize Assessment'
+                        ? 'Submit & Auto-Score Assessment'
                         : 'Assessment Incomplete',
                     style: const TextStyle(
                       fontSize: 17,
@@ -2679,7 +2825,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Session Summary: $_fullyCompletedCount of $_totalCount questions fully assessed (Answered: $_answeredCount, Graded: $_gradedCount) for ${_resident?.name ?? 'Resident'}.',
+                      'Session Summary: $_answeredCount of $_totalCount questions answered for ${_resident?.name ?? 'Resident'}.',
                       style: const TextStyle(fontSize: 12, color: AppColors.body),
                     ),
                     if (!isAllCompleted) ...[
@@ -2703,7 +2849,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  '${uncompletedIds.length} Question(s) Require Attention',
+                                  '${uncompletedIds.length} Question(s) Require Resident Response',
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
@@ -2723,20 +2869,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                                 ),
                               ),
                             ],
-                            if (ungradedIds.isNotEmpty) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                '• Ungraded: Question(s) ${ungradedIds.join(', ')}.',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFF92400E),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
                             const SizedBox(height: 8),
                             const Text(
-                              'Every question must have both a recorded response and a clinical grade (1.0, 0.5, or 0.0) before finalizing. Incomplete assessments cannot be submitted.',
+                              'Every question must have a recorded response before finalizing. Missing responses remain incomplete and cannot be graded as incorrect.',
                               style: TextStyle(
                                 fontSize: 10,
                                 color: Color(0xFF92400E),
@@ -2790,7 +2925,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'All 10 questions have valid saved responses and clinical grades. Ready for evaluation.',
+                                'All 10 questions have valid saved responses. Ready for automatic scoring and AI evaluation.',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
@@ -2801,6 +2936,99 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           ],
                         ),
                       ),
+                      if ((_customEducationYears ?? _resident?.educationYears) == null ||
+                          (_customAge ?? _resident?.age) == null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF93C5FD)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: const [
+                                  Icon(
+                                    LucideIcons.sparkles,
+                                    size: 16,
+                                    color: Color(0xFF1D4ED8),
+                                  ),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'Demographic Details for AI Prediction',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1D4ED8),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'The 31-feature Random Forest model requires Education Years (and Age) for risk classification. If left blank, ACRF domain scores will still be calculated and saved without ML prediction.',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF1E40AF),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              if ((_customAge ?? _resident?.age) == null) ...[
+                                TextFormField(
+                                  initialValue: _customAge?.toString() ?? '',
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Resident Age (1-130)',
+                                    isDense: true,
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: const BorderSide(color: Color(0xFF93C5FD)),
+                                    ),
+                                  ),
+                                  onChanged: (val) {
+                                    final n = int.tryParse(val.trim());
+                                    if (n != null && n > 0 && n <= 130) {
+                                      _customAge = n;
+                                    } else if (val.trim().isEmpty) {
+                                      _customAge = null;
+                                    }
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                              if ((_customEducationYears ?? _resident?.educationYears) == null) ...[
+                                TextFormField(
+                                  initialValue: _customEducationYears?.toString() ?? '',
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Education Years (0-40)',
+                                    isDense: true,
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: const BorderSide(color: Color(0xFF93C5FD)),
+                                    ),
+                                  ),
+                                  onChanged: (val) {
+                                    final n = int.tryParse(val.trim());
+                                    if (n != null && n >= 0 && n <= 40) {
+                                      _customEducationYears = n;
+                                    } else if (val.trim().isEmpty) {
+                                      _customEducationYears = null;
+                                    }
+                                  },
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                     if (_submitError != null) ...[
                       const SizedBox(height: 12),
@@ -2861,7 +3089,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         )
                       : Text(
                           isAllCompleted
-                              ? 'Finalize & Submit'
+                              ? 'Submit & Calculate Score'
                               : 'Complete All 10 Items to Submit',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
@@ -2869,115 +3097,6 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               ],
             );
           },
-        );
-      },
-    );
-  }
-
-  void _showElderSubmissionSuccessDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Center(
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: const BoxDecoration(
-                    color: AppColors.riskLowBg,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    LucideIcons.checkCircle2,
-                    color: AppColors.riskLow,
-                    size: 36,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Responses Submitted',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.navy,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${_resident?.name ?? 'Resident'} • Self-Response Session',
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
-              ],
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.lavenderBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.lilac),
-                ),
-                child: Column(
-                  children: const [
-                    Text(
-                      'STATUS: PENDING CAREGIVER CLINICAL REVIEW',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primary,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'All 10 responses have been securely saved and queued for clinical review.',
-                      style: TextStyle(fontSize: 12, color: AppColors.navy),
-                      textAlign: TextAlign.center,
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Your care team will review your answers and compute your ACRF Cognitive Wellness Score.',
-                      style: TextStyle(fontSize: 11, color: AppColors.muted),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.of(context, rootNavigator: true).pop();
-                  context.go('/dashboard');
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: const Text(
-                  'Return to Dashboard',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-              ),
-            ),
-          ],
         );
       },
     );

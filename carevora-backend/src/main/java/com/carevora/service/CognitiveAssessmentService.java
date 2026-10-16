@@ -28,6 +28,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,8 +41,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 @Service
 public class CognitiveAssessmentService {
+
+    private static final Logger log = LoggerFactory.getLogger(CognitiveAssessmentService.class);
 
     private final CognitiveAssessmentRepository cognitiveAssessmentRepository;
     private final ResidentRepository residentRepository;
@@ -127,13 +133,17 @@ public class CognitiveAssessmentService {
 
         enforceResidentAccess(session.getResident());
 
-        if ("COMPLETED".equalsIgnoreCase(session.getStatus())) {
+        if ("COMPLETED".equalsIgnoreCase(session.getStatus()) || "COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(session.getStatus())) {
             throw new BadRequestException("Assessment session " + sessionId + " has already been completed and cannot be modified.");
         }
 
         if (request.getResponses() != null && !request.getResponses().isEmpty()) {
             try {
                 session.setResponsesJson(objectMapper.writeValueAsString(request.getResponses()));
+                Map<Integer, Double> autoGrades = CognitiveScoringService.scoreBattery(request.getResponses(), LocalDate.now());
+                if (!autoGrades.isEmpty()) {
+                    session.setGradesJson(objectMapper.writeValueAsString(autoGrades));
+                }
             } catch (Exception e) {
                 throw new BadRequestException("Failed to serialize resident responses");
             }
@@ -147,10 +157,14 @@ public class CognitiveAssessmentService {
             }
         }
 
-        session.setStatus("PENDING_CAREGIVER_REVIEW");
+        if (request.getStatus() != null && !request.getStatus().isBlank()) {
+            session.setStatus(request.getStatus());
+        } else {
+            session.setStatus("PENDING_CAREGIVER_REVIEW");
+        }
         CognitiveAssessmentSession updated = cognitiveAssessmentSessionRepository.save(session);
 
-        return ApiResponse.ok(mapToSessionResponse(updated), "Resident responses saved successfully and marked Pending Caregiver Review");
+        return ApiResponse.ok(mapToSessionResponse(updated), "Resident responses saved successfully");
     }
 
     @Transactional(readOnly = true)
@@ -181,6 +195,31 @@ public class CognitiveAssessmentService {
 
     @Transactional
     public ApiResponse<CognitiveAssessmentResponse> submitAssessment(CognitiveAssessmentSubmissionRequest request) {
+        // Automatic grading and domain calculation when responses are provided
+        if (request.getResponses() != null && !request.getResponses().isEmpty()) {
+            List<Integer> unanswered = CognitiveScoringService.getUnansweredQuestionIds(request.getResponses());
+            if (!unanswered.isEmpty()) {
+                throw new BadRequestException("Cannot finalize assessment: Question(s) " + unanswered + " must be answered before finalization. Missing responses cannot be evaluated.");
+            }
+
+            Map<Integer, Double> autoGrades = CognitiveScoringService.scoreBattery(request.getResponses(), LocalDate.now());
+            if (request.getGrades() == null || request.getGrades().isEmpty()) {
+                request.setGrades(autoGrades);
+            }
+
+            Map<String, Double> accs = CognitiveScoringService.calculateDomainAccuracies(request.getGrades());
+            Map<String, Double> taskScores = CognitiveScoringService.calculateDomainScores(accs);
+
+            if (request.getMemory() == null) request.setMemory(taskScores.get("memory"));
+            if (request.getAttention() == null) request.setAttention(taskScores.get("attention"));
+            if (request.getOrientation() == null) request.setOrientation(taskScores.get("orientation"));
+            if (request.getRecall() == null) request.setRecall(taskScores.get("recall"));
+            if (request.getReasoning() == null) request.setReasoning(taskScores.get("reasoning"));
+            if (request.getAccuracies() == null || request.getAccuracies().isEmpty()) {
+                request.setAccuracies(accs);
+            }
+        }
+
         validateCategoryScores(request);
         validateOptionalMlFeatures(request);
 
@@ -190,17 +229,37 @@ public class CognitiveAssessmentService {
         enforceResidentAccess(resident);
 
         CognitiveAssessmentSession session = null;
-        if (request.getSessionId() != null && !request.getSessionId().isBlank() && cognitiveAssessmentSessionRepository != null) {
-            session = cognitiveAssessmentSessionRepository.findBySessionId(request.getSessionId()).orElse(null);
-            if (session != null) {
-                if ("COMPLETED".equalsIgnoreCase(session.getStatus())) {
-                    throw new BadRequestException("Duplicate submission detected: Assessment session " + request.getSessionId() + " has already been completed.");
-                }
-                if (!session.getResident().getId().equals(resident.getId())) {
-                    throw new BadRequestException("Session " + request.getSessionId() + " does not belong to resident " + resident.getId());
+        if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
+            if (cognitiveAssessmentRepository != null && cognitiveAssessmentRepository.existsBySessionId(request.getSessionId())) {
+                throw new BadRequestException("Duplicate submission detected: Assessment session " + request.getSessionId() + " has already been finalized.");
+            }
+            if (cognitiveAssessmentSessionRepository != null) {
+                session = cognitiveAssessmentSessionRepository.findBySessionId(request.getSessionId()).orElse(null);
+                if (session != null) {
+                    if ("COMPLETED".equalsIgnoreCase(session.getStatus()) || "COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(session.getStatus())) {
+                        throw new BadRequestException("Duplicate submission detected: Assessment session " + request.getSessionId() + " has already been completed.");
+                    }
+                    if (!session.getResident().getId().equals(resident.getId())) {
+                        throw new BadRequestException("Session " + request.getSessionId() + " does not belong to resident " + resident.getId());
+                    }
+                    if ((request.getResponses() == null || request.getResponses().isEmpty()) && session.getResponsesJson() != null && !session.getResponsesJson().isBlank()) {
+                        try {
+                            Map<Integer, String> parsed = objectMapper.readValue(session.getResponsesJson(), new TypeReference<Map<Integer, String>>() {});
+                            request.setResponses(parsed);
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
         }
+
+        if ((request.getResponseTimes() == null || request.getResponseTimes().isEmpty()) && session != null && session.getQuestionTimesJson() != null) {
+            try {
+                Map<Integer, Double> parsedTimes = objectMapper.readValue(session.getQuestionTimesJson(), new TypeReference<Map<Integer, Double>>() {});
+                Map<String, Double> aggTimes = CognitiveScoringService.aggregateDomainResponseTimes(parsedTimes);
+                request.setResponseTimes(aggTimes);
+            } catch (Exception ignored) {}
+        }
+
 
         // Determine effective demographics without inventing or synthesizing missing values
         Integer effectiveAge = request.getAge() != null ? request.getAge() : resident.getAge();
@@ -209,20 +268,36 @@ public class CognitiveAssessmentService {
         if (request.getEducationYears() != null && resident.getEducationYears() == null) {
             resident.setEducationYears(request.getEducationYears());
         }
+        if (request.getAge() != null && resident.getAge() == null) {
+            resident.setAge(request.getAge());
+        }
 
         // Call FastAPI AI Microservice for ACRF scoring and ML model inference
-        CognitiveAiResult aiResult = aiMlService.predictCognitive(
-                resident.getId(),
-                request.getMemory(),
-                request.getAttention(),
-                request.getOrientation(),
-                request.getRecall(),
-                request.getReasoning(),
-                effectiveAge,
-                effectiveEducationYears,
-                request.getAccuracies(),
-                request.getResponseTimes()
-        );
+        CognitiveAiResult aiResult;
+        try {
+            aiResult = aiMlService.predictCognitive(
+                    resident.getId(),
+                    request.getMemory(),
+                    request.getAttention(),
+                    request.getOrientation(),
+                    request.getRecall(),
+                    request.getReasoning(),
+                    effectiveAge,
+                    effectiveEducationYears,
+                    request.getAccuracies(),
+                    request.getResponseTimes()
+            );
+        } catch (Exception ex) {
+            log.warn("AI microservice call failed during cognitive assessment submission: {}. Falling back to authoritative local scoring without ML risk prediction.", ex.getMessage());
+            aiResult = buildFallbackAiResult(
+                    request.getMemory(),
+                    request.getAttention(),
+                    request.getOrientation(),
+                    request.getRecall(),
+                    request.getReasoning(),
+                    "AI microservice unavailable: " + ex.getMessage()
+            );
+        }
 
         String currentUserName = SecurityUtils.getCurrentUser(userRepository)
                 .map(User::getFullName)
@@ -234,6 +309,7 @@ public class CognitiveAssessmentService {
                 ? String.valueOf(mlEval.getPrediction())
                 : null;
         Boolean alertTriggered = mlAvailable && Boolean.TRUE.equals(mlEval.getAlertTriggered());
+        String finalStatus = mlAvailable ? "COMPLETED" : "COMPLETED_PREDICTION_UNAVAILABLE";
 
         Double highRiskProb = null;
         String classProbsJson = null;
@@ -281,7 +357,7 @@ public class CognitiveAssessmentService {
         CognitiveAssessment entity = CognitiveAssessment.builder()
                 .resident(resident)
                 .sessionId(effectiveSessionId)
-                .status("COMPLETED")
+                .status(finalStatus)
                 .responsesJson(responsesJson)
                 .gradesJson(gradesJson)
                 .accuraciesJson(accuraciesJson)
@@ -303,7 +379,7 @@ public class CognitiveAssessmentService {
         CognitiveAssessment saved = cognitiveAssessmentRepository.save(entity);
 
         if (session != null && cognitiveAssessmentSessionRepository != null) {
-            session.setStatus("COMPLETED");
+            session.setStatus(finalStatus);
             if (gradesJson != null) {
                 session.setGradesJson(gradesJson);
             }
@@ -319,6 +395,7 @@ public class CognitiveAssessmentService {
         CognitiveAssessmentResponse response = mapToResponse(saved, aiResult, request.getResponses(), request.getGrades(), request.getAccuracies(), request.getResponseTimes());
         return ApiResponse.ok(response, "Cognitive assessment evaluated and saved successfully");
     }
+
 
     @Transactional(readOnly = true)
     public ApiResponse<List<CognitiveAssessmentResponse>> getResidentCognitiveAssessments(Long residentId) {
@@ -344,7 +421,8 @@ public class CognitiveAssessmentService {
             for (CognitiveAssessmentSession sess : sessions) {
                 if (sess.getSessionId() != null &&
                         !completedSessionIds.contains(sess.getSessionId()) &&
-                        !"COMPLETED".equalsIgnoreCase(sess.getStatus())) {
+                        !"COMPLETED".equalsIgnoreCase(sess.getStatus()) &&
+                        !"COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(sess.getStatus())) {
                     responses.add(mapSessionToAssessmentResponse(sess));
                 }
             }
@@ -612,10 +690,22 @@ public class CognitiveAssessmentService {
                     .experimentalLabel("Synthetic Data Experiment (Non-Clinical)")
                     .build();
         } else {
+            String missingMsg;
+            if (c.getResident() != null && c.getResident().getEducationYears() == null) {
+                missingMsg = "Random Forest model inference was unavailable (missing resident education years at assessment time)";
+            } else if (c.getResident() != null && c.getResident().getAge() == null) {
+                missingMsg = "Random Forest model inference was unavailable (missing resident age at assessment time)";
+            } else if (c.getAccuraciesJson() == null || c.getAccuraciesJson().isBlank()) {
+                missingMsg = "Random Forest model inference was unavailable (missing domain accuracy metrics at assessment time)";
+            } else if (c.getResponseTimesJson() == null || c.getResponseTimesJson().isBlank()) {
+                missingMsg = "Random Forest model inference was unavailable (missing domain response times at assessment time)";
+            } else {
+                missingMsg = "Random Forest model inference was unavailable (missing required task metrics at assessment time)";
+            }
             mlStatus = CognitiveAssessmentResponse.MlModelStatusDto.builder()
                     .available(false)
                     .modelType("RandomForestClassifier")
-                    .statusMessage("Random Forest model inference was unavailable (missing required task metrics at assessment time)")
+                    .statusMessage(missingMsg)
                     .prediction(null)
                     .probabilities(null)
                     .alertTriggered(false)
@@ -645,7 +735,7 @@ public class CognitiveAssessmentService {
                 .assessedBy(c.getAssessedBy())
                 .createdAt(c.getCreatedAt())
                 .sessionId(c.getSessionId())
-                .status(c.getStatus() != null ? c.getStatus() : "COMPLETED")
+                .status(c.getStatus() != null ? c.getStatus() : (Boolean.TRUE.equals(c.getMlAvailable()) ? "COMPLETED" : "COMPLETED_PREDICTION_UNAVAILABLE"))
                 .responses(parsedResponses)
                 .grades(parsedGrades)
                 .accuracies(parsedAccuracies)
@@ -736,6 +826,64 @@ public class CognitiveAssessmentService {
                 .weight(weight)
                 .contribution(contribution)
                 .weightPercentage((int) (weight * 100) + "%")
+                .build();
+    }
+
+    private CognitiveAiResult buildFallbackAiResult(
+            Double memory,
+            Double attention,
+            Double orientation,
+            Double recall,
+            Double reasoning,
+            String reason
+    ) {
+        Double acrfScore = CognitiveScoringService.calculateAcrfScore(memory, attention, orientation, recall, reasoning);
+        Map<String, Double> weightsApplied = new HashMap<>();
+        weightsApplied.put("memory", 0.25);
+        weightsApplied.put("attention", 0.20);
+        weightsApplied.put("orientation", 0.20);
+        weightsApplied.put("recall", 0.20);
+        weightsApplied.put("reasoning", 0.15);
+
+        Map<String, Double> categoryScores = new HashMap<>();
+        categoryScores.put("memory", memory != null ? memory : 0.0);
+        categoryScores.put("attention", attention != null ? attention : 0.0);
+        categoryScores.put("orientation", orientation != null ? orientation : 0.0);
+        categoryScores.put("recall", recall != null ? recall : 0.0);
+        categoryScores.put("reasoning", reasoning != null ? reasoning : 0.0);
+
+        List<CognitiveAssessmentResponse.CategoryContributionDto> contributions = new ArrayList<>();
+        contributions.add(createContrib("memory", categoryScores.get("memory"), 0.25));
+        contributions.add(createContrib("attention", categoryScores.get("attention"), 0.20));
+        contributions.add(createContrib("orientation", categoryScores.get("orientation"), 0.20));
+        contributions.add(createContrib("recall", categoryScores.get("recall"), 0.20));
+        contributions.add(createContrib("reasoning", categoryScores.get("reasoning"), 0.15));
+
+        CognitiveAssessmentResponse.MlModelStatusDto mlStatus = CognitiveAssessmentResponse.MlModelStatusDto.builder()
+                .available(false)
+                .modelType("RandomForestClassifier")
+                .statusMessage(reason != null && !reason.isBlank()
+                        ? "AI microservice is unavailable (" + reason + "). ACRF cognitive score calculated authoritatively by backend scoring engine."
+                        : "AI microservice is unavailable. ACRF cognitive score calculated authoritatively by backend scoring engine.")
+                .prediction(null)
+                .probabilities(null)
+                .alertTriggered(false)
+                .alertThreshold(0.48)
+                .experimentalLabel("Synthetic Benchmark")
+                .missingFeatures(List.of("AI Microservice Connection"))
+                .build();
+
+        return CognitiveAiResult.builder()
+                .acrfScore(acrfScore)
+                .rawWeightedScore(acrfScore)
+                .scale("0-100")
+                .scoringDirection("Higher is better")
+                .weightsApplied(weightsApplied)
+                .categoryScores(categoryScores)
+                .categoryContributions(contributions)
+                .mlModelEvaluation(mlStatus)
+                .methodology("ACRF Fixed Base Weights")
+                .clinicalDisclaimer("Non-diagnostic wellness metric. Assessment evaluated by backend scoring engine.")
                 .build();
     }
 }

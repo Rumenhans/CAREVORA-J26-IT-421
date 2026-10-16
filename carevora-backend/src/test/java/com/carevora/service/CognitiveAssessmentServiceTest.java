@@ -175,15 +175,37 @@ class CognitiveAssessmentServiceTest {
     }
 
     @Test
-    void testSubmitAssessment_AiServiceFailure_ThrowsException() {
+    void testSubmitAssessment_AiServiceFailure_SavesWithPredictionUnavailable() {
         authenticateUser("doctor@carevora.com");
         when(userRepository.findByEmail("doctor@carevora.com")).thenReturn(Optional.of(doctorUser));
         when(residentRepository.findById(100L)).thenReturn(Optional.of(resident));
         when(aiMlService.predictCognitive(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new AiServiceException("AI microservice down"));
 
-        assertThrows(AiServiceException.class, () -> cognitiveAssessmentService.submitAssessment(createValidRequest()));
-        verify(cognitiveAssessmentRepository, never()).save(any());
+        CognitiveAssessment saved = CognitiveAssessment.builder()
+                .id(1L)
+                .resident(resident)
+                .memoryScore(80.0)
+                .attentionScore(85.0)
+                .orientationScore(90.0)
+                .recallScore(75.0)
+                .reasoningScore(80.0)
+                .acrfScore(82.0)
+                .status("COMPLETED_PREDICTION_UNAVAILABLE")
+                .assessedBy("Dr. Samantha Reed")
+                .createdAt(LocalDateTime.now())
+                .build();
+        when(cognitiveAssessmentRepository.save(any(CognitiveAssessment.class))).thenReturn(saved);
+
+        ApiResponse<CognitiveAssessmentResponse> response = cognitiveAssessmentService.submitAssessment(createValidRequest());
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+        assertEquals(82.0, response.getData().getAcrfScore());
+        assertEquals("COMPLETED_PREDICTION_UNAVAILABLE", response.getData().getStatus());
+        assertFalse(response.getData().getMlModelEvaluation().isAvailable());
+        verify(cognitiveAssessmentRepository).save(any(CognitiveAssessment.class));
+        verify(residentRepository).save(any(Resident.class));
     }
 
     @Test

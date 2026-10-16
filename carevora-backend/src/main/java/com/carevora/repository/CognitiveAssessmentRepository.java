@@ -9,4 +9,6 @@ import java.util.List;
 @Repository
 public interface CognitiveAssessmentRepository extends JpaRepository<CognitiveAssessment, Long> {
     List<CognitiveAssessment> findByResidentIdOrderByCreatedAtDesc(Long residentId);
+    boolean existsBySessionId(String sessionId);
 }
+
