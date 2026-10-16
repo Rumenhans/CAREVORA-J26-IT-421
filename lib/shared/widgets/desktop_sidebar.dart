@@ -90,7 +90,6 @@ class DesktopSidebar extends ConsumerWidget {
                   icon: LucideIcons.bell,
                   label: 'Alerts & Notifications',
                   route: '/dashboard/alerts',
-                  badge: '3',
                 ),
                 _buildNavItem(
                   context,
@@ -103,7 +102,6 @@ class DesktopSidebar extends ConsumerWidget {
                   icon: LucideIcons.clipboardList,
                   label: 'Care Plans',
                   route: '/dashboard/care-plans',
-                  badge: '3',
                 ),
                 if (!authState.isElder) ...[
                   _buildNavItem(
@@ -117,7 +115,6 @@ class DesktopSidebar extends ConsumerWidget {
                     icon: LucideIcons.pill,
                     label: 'Live Medicine Board',
                     route: '/dashboard/medicine',
-                    badge: '2',
                   ),
                 ],
                 _buildNavItem(
