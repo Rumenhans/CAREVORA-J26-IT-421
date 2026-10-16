@@ -1232,7 +1232,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Loneliness Risk:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: const [
+                                    Text('Loneliness Risk:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                    Text('Questionnaire inverse proxy (non-diagnostic)', style: TextStyle(fontSize: 10, color: AppColors.muted)),
+                                  ],
+                                ),
                                 Text(
                                   '${calculatedRisk.toStringAsFixed(1)}% ($riskTier)',
                                   style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 13),
@@ -1243,11 +1249,34 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Social-Isolation Risk:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                Text(
-                                  '${calculatedRisk.toStringAsFixed(1)}% ($riskTier)',
-                                  style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 13),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: const [
+                                    Text('Social-Isolation Risk:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                    Text('Requires caregiver social audit', style: TextStyle(fontSize: 10, color: AppColors.muted)),
+                                  ],
                                 ),
+                                if (_currentResident.socialScore != null)
+                                  Text(
+                                    '${(100.0 - _currentResident.socialScore!).toStringAsFixed(1)}%',
+                                    style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 13),
+                                  )
+                                else
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFEF3C7),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'Unassessed (No Staff Audit)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF92400E),
+                                      ),
+                                    ),
+                                  ),
                               ],
                             ),
                           ],
@@ -3099,6 +3128,41 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   // 2. Loneliness & Social-Isolation Indicators Card
   Widget _buildLonelinessIsolationCard() {
+    final hasAnswers = _answers.isNotEmpty;
+    final calculatedWellness = hasAnswers
+        ? EmotionalAssessmentService.calculateWellnessScore(_answers)
+        : null;
+    final calculatedLoneliness = calculatedWellness != null
+        ? EmotionalAssessmentService.calculateLonelinessRiskScore(calculatedWellness)
+        : null;
+
+    final q3Answer = _answers[2]; // Someone close to talk to (Social Support)
+    final q4Answer = _answers[3]; // Feel left out or lonely (Perceived Loneliness)
+    final q5Answer = _answers[4]; // Spending day alone in room (Room Isolation)
+
+    final String perceivedLonelinessLevel = q4Answer == null
+        ? 'Pending Q4'
+        : (q4Answer == true ? 'High' : 'Low');
+    final String seclusionLevel = q5Answer == null
+        ? 'Pending Q5'
+        : (q5Answer == true ? 'High' : 'Low');
+    final String socialSupportLevel = q3Answer == null
+        ? 'Pending Q3'
+        : (q3Answer == true ? 'Adequate' : 'Low');
+
+    final int displayLoneliness = calculatedLoneliness != null
+        ? calculatedLoneliness.round()
+        : _lonelinessScore;
+    final String lonelinessTier = displayLoneliness >= 65
+        ? 'High Risk'
+        : (displayLoneliness >= 40 ? 'Moderate Risk' : 'Low Risk');
+    final Color lonelinessColor = displayLoneliness >= 65
+        ? AppColors.riskHigh
+        : (displayLoneliness >= 40 ? AppColors.riskModerate : AppColors.riskLow);
+    final Color lonelinessBg = displayLoneliness >= 65
+        ? AppColors.riskHighBg
+        : (displayLoneliness >= 40 ? AppColors.riskModerateBg : const Color(0xFFDCFCE7));
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -3116,9 +3180,25 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           const SizedBox(height: 16),
 
           // Section A: Loneliness Indicators
-          const Text(
-            'Loneliness Indicators',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+          Row(
+            children: [
+              const Text(
+                'Loneliness Indicators',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.lavenderBg,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'Questionnaire-Derived',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primary),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
@@ -3127,20 +3207,20 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    _IndicatorSubRow(label: 'Emotional Disconnection', level: 'Medium'),
-                    SizedBox(height: 4),
-                    _IndicatorSubRow(label: 'Perceived Loneliness', level: 'High'),
-                    SizedBox(height: 4),
-                    _IndicatorSubRow(label: 'Social Support', level: 'Low'),
+                  children: [
+                    _IndicatorSubRow(label: 'Perceived Loneliness (Q4)', level: perceivedLonelinessLevel),
+                    const SizedBox(height: 4),
+                    _IndicatorSubRow(label: 'Room Seclusion (Q5)', level: seclusionLevel),
+                    const SizedBox(height: 4),
+                    _IndicatorSubRow(label: 'Social Support (Q3)', level: socialSupportLevel),
                   ],
                 ),
               ),
               _buildCircularScoreGauge(
-                score: _lonelinessScore,
-                riskLabel: 'Moderate Risk',
-                riskColor: AppColors.riskModerate,
-                bgRingColor: AppColors.riskModerateBg,
+                score: displayLoneliness,
+                riskLabel: lonelinessTier,
+                riskColor: lonelinessColor,
+                bgRingColor: lonelinessBg,
               ),
             ],
           ),
@@ -3149,34 +3229,72 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           const SizedBox(height: 14),
 
           // Section B: Social-Isolation Indicators
-          const Text(
-            'Social-Isolation Indicators',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.riskHigh),
-          ),
-          const SizedBox(height: 8),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    _IndicatorSubRow(label: 'Social Interaction Frequency', level: 'Medium'),
-                    SizedBox(height: 4),
-                    _IndicatorSubRow(label: 'Participation in Activities', level: 'Low'),
-                    SizedBox(height: 4),
-                    _IndicatorSubRow(label: 'Network Size', level: 'Low'),
-                  ],
+              const Text(
+                'Social-Isolation Indicators',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.riskHigh),
+              ),
+              const SizedBox(width: 8),
+              if (_currentResident.socialScore == null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'Staff Audit Needed',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                  ),
                 ),
-              ),
-              _buildCircularScoreGauge(
-                score: _isolationScore,
-                riskLabel: 'High Risk',
-                riskColor: AppColors.riskHigh,
-                bgRingColor: AppColors.riskHighBg,
-              ),
             ],
           ),
+          const SizedBox(height: 8),
+          if (_currentResident.socialScore != null) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _IndicatorSubRow(label: 'Caregiver Social Score', level: '${_currentResident.socialScore!.toStringAsFixed(0)}%'),
+                      const SizedBox(height: 4),
+                      const _IndicatorSubRow(label: 'Status', level: 'Verified Audit'),
+                    ],
+                  ),
+                ),
+                _buildCircularScoreGauge(
+                  score: (100.0 - _currentResident.socialScore!).round(),
+                  riskLabel: (100.0 - _currentResident.socialScore!) >= 50 ? 'Elevated' : 'Low',
+                  riskColor: (100.0 - _currentResident.socialScore!) >= 50 ? AppColors.riskHigh : AppColors.riskLow,
+                  bgRingColor: (100.0 - _currentResident.socialScore!) >= 50 ? AppColors.riskHighBg : const Color(0xFFDCFCE7),
+                ),
+              ],
+            ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSecondary,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: const [
+                  Icon(LucideIcons.clipboardList, size: 20, color: AppColors.muted),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Unassessed — No Caregiver Social Audit On File. External contacts, visitor logs, and group activity attendance require staff observational audit.',
+                      style: TextStyle(fontSize: 11, color: AppColors.body, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

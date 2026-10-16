@@ -13,6 +13,7 @@ class Resident {
   final double metabolicTrend;
   final double overallIndex;
   final double overallTrend;
+  final double? socialScore;
 
   const Resident({
     required this.id,
@@ -29,6 +30,7 @@ class Resident {
     required this.metabolicTrend,
     required this.overallIndex,
     required this.overallTrend,
+    this.socialScore,
   });
 }
 

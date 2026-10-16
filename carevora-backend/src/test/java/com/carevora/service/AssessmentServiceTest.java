@@ -320,4 +320,45 @@ class AssessmentServiceTest {
         ApiResponse<AssessmentResponse> response = assessmentService.submitAssessment(request);
         assertEquals(TrajectoryStatus.INCREASING_RISK, response.getData().getTrajectory());
     }
+
+    @Test
+    @DisplayName("Saves genuine multimodal contributing factors for facial and vocal inputs")
+    void submitAssessment_withMultimodalInputs_savesGenuineContributingFactors() {
+        when(residentRepository.findById(1L)).thenReturn(Optional.of(sampleResident));
+        mockSaveAssessment();
+
+        AssessmentSubmissionRequest request = AssessmentSubmissionRequest.builder()
+                .residentId(1L)
+                .answers(List.of(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+                .includeFacialCheck(true)
+                .includeVoiceCheck(true)
+                .facialScore(88.5)
+                .vocalScore(76.0)
+                .dominantEmotion("HAPPY")
+                .facialConfidence(0.912)
+                .build();
+
+        ApiResponse<AssessmentResponse> response = assessmentService.submitAssessment(request);
+        assertTrue(response.isSuccess());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ContributingFactor>> factorCaptor = ArgumentCaptor.forClass(List.class);
+        verify(contributingFactorRepository).saveAll(factorCaptor.capture());
+
+        List<ContributingFactor> savedFactors = factorCaptor.getValue();
+        assertEquals(3, savedFactors.size());
+
+        ContributingFactor qFactor = savedFactors.get(0);
+        assertEquals("Questionnaire", qFactor.getCategory());
+        assertEquals(100.0, qFactor.getScore(), 0.001);
+
+        ContributingFactor facialFactor = savedFactors.get(1);
+        assertEquals("Facial", facialFactor.getCategory());
+        assertEquals(88.5, facialFactor.getScore(), 0.001);
+        assertTrue(facialFactor.getDescription().contains("HAPPY with 91.2% confidence"));
+
+        ContributingFactor voiceFactor = savedFactors.get(2);
+        assertEquals("Voice", voiceFactor.getCategory());
+        assertEquals(76.0, voiceFactor.getScore(), 0.001);
+    }
 }

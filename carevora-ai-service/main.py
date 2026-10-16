@@ -41,7 +41,7 @@ class MultimodalAssessmentRequest(BaseModel):
     questionnaire_score: float = 85.0
     facial_cues: Optional[Dict[str, Any]] = None
     vocal_cues: Optional[Dict[str, Any]] = None
-    social_score: Optional[float] = 80.0
+    social_score: Optional[float] = None
     history_scores: Optional[List[Any]] = None
     score_domain: Optional[str] = "wellness"
     raw_features: Optional[Dict[str, Any]] = None
@@ -254,7 +254,7 @@ def predict_ralpa_progression(req: MultimodalAssessmentRequest):
         'questionnaire': req.questionnaire_score,
         'facial': float(face_score),
         'vocal': float(vocal_score),
-        'social': req.social_score or 80.0
+        'social': req.social_score
     }
 
     prediction = ralpa.predict_progression(
