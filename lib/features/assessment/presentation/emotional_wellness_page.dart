@@ -16,6 +16,8 @@ import '../../../data/models/carevora_models.dart';
 import '../application/facial_emotion_ai_service.dart';
 import '../application/automatic_facial_capture_service.dart';
 import '../application/emotional_assessment_service.dart';
+import '../application/social_audit_service.dart';
+import 'widgets/caregiver_social_audit_dialog.dart';
 import '../../auth/application/auth_controller.dart';
 
 class EmotionalWellnessPage extends ConsumerStatefulWidget {
@@ -77,6 +79,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   // Sub-navigation: 0: Assessment Session, 1: RALPA Trajectory, 2: Care Interventions & Reassessment, 3: Assessment History
   int _selectedSubTab = 0;
   late Resident _currentResident;
+  SocialAuditRecord? _latestSocialAudit;
+  bool _isLoadingSocialAudit = false;
 
   final List<Resident> _availableResidents = [
     MockCarevoraData.defaultResident,
@@ -143,6 +147,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _initAnimations();
     _initVoiceEngines();
     _initFacialCapture();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchLatestSocialAuditForCurrentResident();
+    });
   }
 
   void _initActivitiesAndHistory() {
@@ -555,6 +562,99 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _responseTime = 'Normal';
       }
     }
+    _fetchLatestSocialAuditForCurrentResident();
+  }
+
+  Future<void> _fetchLatestSocialAuditForCurrentResident() async {
+    final bId = _resolveBackendResidentId();
+    final authState = ref.read(authProvider).state;
+    setState(() {
+      _isLoadingSocialAudit = true;
+    });
+    try {
+      final audit = await SocialAuditService.fetchLatestAudit(
+        residentId: bId,
+        token: authState.token,
+      );
+      if (mounted) {
+        setState(() {
+          _latestSocialAudit = audit;
+          if (audit != null && audit.socialScore != null) {
+            _currentResident = Resident(
+              id: _currentResident.id,
+              name: _currentResident.name,
+              age: _currentResident.age,
+              gender: _currentResident.gender,
+              roomNo: _currentResident.roomNo,
+              lastAssessmentDate: _currentResident.lastAssessmentDate,
+              cognitiveScore: _currentResident.cognitiveScore,
+              cognitiveTrend: _currentResident.cognitiveTrend,
+              emotionalScore: _currentResident.emotionalScore,
+              emotionalTrend: _currentResident.emotionalTrend,
+              metabolicScore: _currentResident.metabolicScore,
+              metabolicTrend: _currentResident.metabolicTrend,
+              overallIndex: _currentResident.overallIndex,
+              overallTrend: _currentResident.overallTrend,
+              socialScore: audit.socialScore,
+            );
+          }
+          _isLoadingSocialAudit = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingSocialAudit = false;
+        });
+      }
+    }
+  }
+
+  void _openCaregiverSocialAuditDialog() {
+    final authState = ref.read(authProvider).state;
+    final staffName = authState.userName ?? 'David Silva (Lead Caregiver)';
+    showDialog<SocialAuditRecord>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => CaregiverSocialAuditDialog(
+        resident: _currentResident,
+        backendResidentId: _resolveBackendResidentId(),
+        caregiverName: staffName,
+        authToken: authState.token,
+        onAuditSaved: (record) {
+          setState(() {
+            _latestSocialAudit = record;
+            if (record.socialScore != null) {
+              _currentResident = Resident(
+                id: _currentResident.id,
+                name: _currentResident.name,
+                age: _currentResident.age,
+                gender: _currentResident.gender,
+                roomNo: _currentResident.roomNo,
+                lastAssessmentDate: _currentResident.lastAssessmentDate,
+                cognitiveScore: _currentResident.cognitiveScore,
+                cognitiveTrend: _currentResident.cognitiveTrend,
+                emotionalScore: _currentResident.emotionalScore,
+                emotionalTrend: _currentResident.emotionalTrend,
+                metabolicScore: _currentResident.metabolicScore,
+                metabolicTrend: _currentResident.metabolicTrend,
+                overallIndex: _currentResident.overallIndex,
+                overallTrend: _currentResident.overallTrend,
+                socialScore: record.socialScore,
+              );
+            }
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Caregiver Social Audit recorded for ${_currentResident.name}! (Score: ${record.socialScore != null ? "${record.socialScore!.toStringAsFixed(1)}%" : "Unassessed"})',
+              ),
+              backgroundColor: const Color(0xFF166534),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _initAnimations() {
@@ -3230,28 +3330,158 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
           // Section B: Social-Isolation Indicators
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Social-Isolation Indicators',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.riskHigh),
+              Row(
+                children: [
+                  const Text(
+                    'Social-Isolation Indicators',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.riskHigh),
+                  ),
+                  const SizedBox(width: 8),
+                  if (_isLoadingSocialAudit)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                    )
+                  else if (_latestSocialAudit != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Verified Caregiver Audit',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                      ),
+                    )
+                  else if (_currentResident.socialScore != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Verified Score',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Staff Audit Needed',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(width: 8),
-              if (_currentResident.socialScore == null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    'Staff Audit Needed',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
-                  ),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 ),
+                icon: const Icon(LucideIcons.clipboardEdit, size: 14, color: AppColors.primary),
+                label: Text(
+                  _latestSocialAudit != null ? 'New Audit' : 'Record Audit',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                ),
+                onPressed: _openCaregiverSocialAuditDialog,
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          if (_currentResident.socialScore != null) ...[
+          if (_latestSocialAudit != null) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSecondary,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _IndicatorSubRow(
+                              label: 'External Contacts (7d)',
+                              level: _latestSocialAudit!.externalContactUnknown
+                                  ? 'Unknown / Not Recorded'
+                                  : '${_latestSocialAudit!.totalExternalContacts ?? 0} contacts (${_latestSocialAudit!.familyInPersonVisits ?? 0} visits, ${_latestSocialAudit!.familyPhoneVideoContacts ?? 0} calls)',
+                            ),
+                            const SizedBox(height: 4),
+                            _IndicatorSubRow(
+                              label: 'Peer Social Interaction',
+                              level: _latestSocialAudit!.peerInteractionLevel.label,
+                            ),
+                            const SizedBox(height: 4),
+                            _IndicatorSubRow(
+                              label: 'Activity Attendance',
+                              level: _latestSocialAudit!.activitiesAttended != null
+                                  ? '${_latestSocialAudit!.activitiesAttended} / ${_latestSocialAudit!.activitiesAvailable ?? 0} (${_latestSocialAudit!.activityParticipationLevel.label})'
+                                  : _latestSocialAudit!.activityParticipationLevel.label,
+                            ),
+                            const SizedBox(height: 4),
+                            _IndicatorSubRow(
+                              label: 'Time Alone / Day',
+                              level: _latestSocialAudit!.estimatedHoursAlonePerDay != null
+                                  ? '${_latestSocialAudit!.estimatedHoursAlonePerDay!.toStringAsFixed(1)} hrs/day (${_latestSocialAudit!.aloneTimeContext.label})'
+                                  : _latestSocialAudit!.aloneTimeContext.label,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_latestSocialAudit!.socialScore != null)
+                        _buildCircularScoreGauge(
+                          score: (100.0 - _latestSocialAudit!.socialScore!).round(),
+                          riskLabel: (100.0 - _latestSocialAudit!.socialScore!) >= 50 ? 'Elevated' : 'Low',
+                          riskColor: (100.0 - _latestSocialAudit!.socialScore!) >= 50 ? AppColors.riskHigh : AppColors.riskLow,
+                          bgRingColor: (100.0 - _latestSocialAudit!.socialScore!) >= 50 ? AppColors.riskHighBg : const Color(0xFFDCFCE7),
+                        ),
+                    ],
+                  ),
+                  const Divider(height: 16),
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.userCheck, size: 14, color: AppColors.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Audited on ${_latestSocialAudit!.auditDate.day}/${_latestSocialAudit!.auditDate.month}/${_latestSocialAudit!.auditDate.year} by ${_latestSocialAudit!.caregiverName}',
+                          style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      if (_latestSocialAudit!.healthMobilityBarriers)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFEDD5),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'Health Barrier Protected',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFC2410C)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ] else if (_currentResident.socialScore != null) ...[
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -3261,7 +3491,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     children: [
                       _IndicatorSubRow(label: 'Caregiver Social Score', level: '${_currentResident.socialScore!.toStringAsFixed(0)}%'),
                       const SizedBox(height: 4),
-                      const _IndicatorSubRow(label: 'Status', level: 'Verified Audit'),
+                      const _IndicatorSubRow(label: 'Status', level: 'Verified Baseline'),
                     ],
                   ),
                 ),
@@ -3281,14 +3511,37 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.border),
               ),
-              child: Row(
-                children: const [
-                  Icon(LucideIcons.clipboardList, size: 20, color: AppColors.muted),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Unassessed — No Caregiver Social Audit On File. External contacts, visitor logs, and group activity attendance require staff observational audit.',
-                      style: TextStyle(fontSize: 11, color: AppColors.body, height: 1.3),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(LucideIcons.clipboardList, size: 20, color: AppColors.muted),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Unassessed — No Caregiver Social Audit On File. External contacts, visitor logs, and group activity attendance require staff observational audit.',
+                          style: TextStyle(fontSize: 11, color: AppColors.body, height: 1.3),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.lavenderBg,
+                        foregroundColor: AppColors.primary,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: const BorderSide(color: AppColors.lilac),
+                        ),
+                      ),
+                      icon: const Icon(LucideIcons.plusCircle, size: 16),
+                      label: const Text('Record Caregiver Social Audit', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      onPressed: _openCaregiverSocialAuditDialog,
                     ),
                   ),
                 ],
