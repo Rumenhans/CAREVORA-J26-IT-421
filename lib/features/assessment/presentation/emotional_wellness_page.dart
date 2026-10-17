@@ -2309,6 +2309,18 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                           height: 1.35,
                         ),
                       ),
+                      if (currentQ.promptSi != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          currentQ.promptSi!,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primaryDeep,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       InkWell(
                         onTap: _readQuestionAloud,
@@ -5465,6 +5477,19 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       ),
                       textAlign: TextAlign.center,
                     ),
+                    if (currentQ.promptSi != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        currentQ.promptSi!,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primaryDeep,
+                          height: 1.4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                     const SizedBox(height: 20),
 
                     // Microphone interaction button
