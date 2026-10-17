@@ -20,7 +20,8 @@ public interface ResidentRepository extends JpaRepository<Resident, Long> {
     @Query("SELECT r FROM Resident r JOIN r.user u WHERE " +
            "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
-           "LOWER(r.roomNumber) LIKE LOWER(CONCAT('%', :query, '%'))")
+           "LOWER(r.roomNumber) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+           "CAST(r.id AS string) LIKE CONCAT('%', :query, '%')")
     List<Resident> searchResidents(@Param("query") String query);
 
     List<Resident> findByElderHomeId(Long elderHomeId);
@@ -28,7 +29,8 @@ public interface ResidentRepository extends JpaRepository<Resident, Long> {
     @Query("SELECT r FROM Resident r JOIN r.user u WHERE r.elderHome.id = :elderHomeId AND (" +
            "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
-           "LOWER(r.roomNumber) LIKE LOWER(CONCAT('%', :query, '%')))")
+           "LOWER(r.roomNumber) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+           "CAST(r.id AS string) LIKE CONCAT('%', :query, '%'))")
     List<Resident> searchResidentsByElderHomeId(@Param("query") String query, @Param("elderHomeId") Long elderHomeId);
 
     long countByRiskLevel(RiskLevel riskLevel);

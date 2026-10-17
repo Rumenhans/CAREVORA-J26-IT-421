@@ -15,6 +15,8 @@ import '../../features/medicine/presentation/pages/live_medicine_board_page.dart
 import '../../features/medicine/presentation/pages/medicine_history_page.dart';
 import '../../features/assessment/presentation/assessment_session_page.dart';
 import '../../features/assessment/presentation/emotional_wellness_page.dart';
+import '../../features/assessment/presentation/caregiver_social_audit_dashboard_page.dart';
+import '../../features/assessment/presentation/resident_social_audit_detail_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -68,11 +70,17 @@ class AppRouter {
           ),
           GoRoute(
             path: '/dashboard/emotional',
-            builder: (context, state) => const EmotionalWellnessPage(),
+            builder: (context, state) {
+              final resId = state.uri.queryParameters['residentId'];
+              return EmotionalWellnessPage(initialResidentId: resId);
+            },
           ),
           GoRoute(
             path: '/dashboard/emotional/session',
-            builder: (context, state) => const EmotionalWellnessPage(),
+            builder: (context, state) {
+              final resId = state.uri.queryParameters['residentId'];
+              return EmotionalWellnessPage(initialResidentId: resId);
+            },
           ),
           GoRoute(
             path: '/dashboard/metabolic',
@@ -117,6 +125,17 @@ class AppRouter {
           GoRoute(
             path: '/dashboard/medicine/history',
             builder: (context, state) => const MedicineHistoryPage(),
+          ),
+          GoRoute(
+            path: '/dashboard/social-audit',
+            builder: (context, state) => const CaregiverSocialAuditDashboardPage(),
+          ),
+          GoRoute(
+            path: '/dashboard/social-audit/resident/:id',
+            builder: (context, state) {
+              final residentId = state.pathParameters['id'] ?? '1';
+              return ResidentSocialAuditDetailPage(residentId: residentId);
+            },
           ),
           GoRoute(
             path: '/dashboard/settings',

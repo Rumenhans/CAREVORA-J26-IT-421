@@ -1,8 +1,11 @@
 package com.carevora.service;
 
 import com.carevora.dto.ApiResponse;
+import com.carevora.dto.socialaudit.ResidentAuditSummaryResponse;
+import com.carevora.dto.socialaudit.SocialAuditDashboardSummary;
 import com.carevora.dto.socialaudit.SocialAuditRequest;
 import com.carevora.dto.socialaudit.SocialAuditResponse;
+import java.time.LocalDate;
 import com.carevora.entity.Caregiver;
 import com.carevora.entity.Resident;
 import com.carevora.entity.SocialAudit;
@@ -117,9 +120,16 @@ public class SocialAuditService {
 
     @Transactional(readOnly = true)
     public ApiResponse<List<SocialAuditResponse>> getAuditsByResident(Long residentId) {
+        return getAuditsByResident(residentId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public ApiResponse<List<SocialAuditResponse>> getAuditsByResident(Long residentId, String authenticatedEmail) {
         if (!residentRepository.existsById(residentId)) {
             throw new ResourceNotFoundException("Resident not found with id: " + residentId);
         }
+        enforceElderScoping(residentId, authenticatedEmail);
+
         List<SocialAudit> audits = socialAuditRepository.findByResidentIdOrderByAuditDateDesc(residentId);
         List<SocialAuditResponse> responses = audits.stream()
                 .map(this::mapToResponse)
@@ -129,9 +139,16 @@ public class SocialAuditService {
 
     @Transactional(readOnly = true)
     public ApiResponse<SocialAuditResponse> getLatestAudit(Long residentId) {
+        return getLatestAudit(residentId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public ApiResponse<SocialAuditResponse> getLatestAudit(Long residentId, String authenticatedEmail) {
         if (!residentRepository.existsById(residentId)) {
             throw new ResourceNotFoundException("Resident not found with id: " + residentId);
         }
+        enforceElderScoping(residentId, authenticatedEmail);
+
         SocialAudit latest = socialAuditRepository.findFirstByResidentIdOrderByAuditDateDesc(residentId)
                 .orElse(null);
 
@@ -146,6 +163,121 @@ public class SocialAuditService {
         SocialAudit audit = socialAuditRepository.findByIdAndResidentId(auditId, residentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Social audit #" + auditId + " not found for resident #" + residentId));
         return ApiResponse.ok(mapToResponse(audit), "Social audit retrieved successfully");
+    }
+
+    @Transactional(readOnly = true)
+    public ApiResponse<SocialAuditDashboardSummary> getDashboardSummary(String authenticatedEmail) {
+        Long elderHomeId = resolveScopedElderHomeId(authenticatedEmail);
+
+        List<Resident> residents;
+        if (elderHomeId != null) {
+            residents = residentRepository.findByElderHomeId(elderHomeId);
+        } else {
+            residents = residentRepository.findAll();
+        }
+
+        int totalResidents = residents.size();
+        int completedCount = (int) residents.stream().filter(r -> r.getSocialScore() != null).count();
+        int awaitingCount = totalResidents - completedCount;
+
+        LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
+        int todayCount;
+        List<SocialAudit> recentRaw;
+
+        if (elderHomeId != null) {
+            todayCount = (int) socialAuditRepository.countByResidentElderHomeIdAndAuditDateAfter(elderHomeId, startOfToday);
+            recentRaw = socialAuditRepository.findTop10ByResidentElderHomeIdOrderByAuditDateDesc(elderHomeId);
+        } else {
+            todayCount = (int) socialAuditRepository.countByAuditDateAfter(startOfToday);
+            recentRaw = socialAuditRepository.findTop10ByOrderByAuditDateDesc();
+        }
+
+        List<SocialAuditResponse> recentResponses = recentRaw.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+
+        SocialAuditDashboardSummary summary = SocialAuditDashboardSummary.builder()
+                .totalResidents(totalResidents)
+                .residentsWithCompletedAudit(completedCount)
+                .residentsAwaitingAudit(awaitingCount)
+                .auditsCompletedToday(todayCount)
+                .recentAudits(recentResponses)
+                .build();
+
+        return ApiResponse.ok(summary, "Caregiver social audit dashboard metrics retrieved");
+    }
+
+    @Transactional(readOnly = true)
+    public ApiResponse<List<ResidentAuditSummaryResponse>> getResidentsAuditSummary(String search, String authenticatedEmail) {
+        Long elderHomeId = resolveScopedElderHomeId(authenticatedEmail);
+
+        List<Resident> residents;
+        String query = search != null ? search.trim() : "";
+
+        if (elderHomeId != null) {
+            if (!query.isEmpty()) {
+                residents = residentRepository.searchResidentsByElderHomeId(query, elderHomeId);
+            } else {
+                residents = residentRepository.findByElderHomeId(elderHomeId);
+            }
+        } else {
+            if (!query.isEmpty()) {
+                residents = residentRepository.searchResidents(query);
+            } else {
+                residents = residentRepository.findAll();
+            }
+        }
+
+        List<ResidentAuditSummaryResponse> items = residents.stream().map(r -> {
+            Optional<SocialAudit> latestOpt = socialAuditRepository.findFirstByResidentIdOrderByAuditDateDesc(r.getId());
+            long count = socialAuditRepository.countByResidentId(r.getId());
+            String resName = r.getUser() != null
+                    ? (r.getUser().getFirstName() + " " + r.getUser().getLastName()).trim()
+                    : "Resident #" + r.getId();
+
+            return ResidentAuditSummaryResponse.builder()
+                    .residentId(r.getId())
+                    .name(resName)
+                    .roomNumber(r.getRoomNumber())
+                    .age(r.getAge())
+                    .avatarUrl(r.getUser() != null ? r.getUser().getAvatarUrl() : null)
+                    .elderHomeId(r.getElderHome() != null ? r.getElderHome().getId() : null)
+                    .elderHomeName(r.getElderHome() != null ? r.getElderHome().getName() : null)
+                    .hasCompletedAudit(r.getSocialScore() != null || latestOpt.isPresent())
+                    .latestSocialScore(r.getSocialScore() != null ? r.getSocialScore() : latestOpt.map(SocialAudit::getSocialScore).orElse(null))
+                    .latestAuditDate(latestOpt.map(SocialAudit::getAuditDate).orElse(null))
+                    .latestPeerInteractionLevel(latestOpt.map(SocialAudit::getPeerInteractionLevel).orElse(null))
+                    .auditCount(count)
+                    .build();
+        }).collect(Collectors.toList());
+
+        return ApiResponse.ok(items, "Retrieved " + items.size() + " residents for social audit directory");
+    }
+
+    private void enforceElderScoping(Long residentId, String authenticatedEmail) {
+        if (authenticatedEmail == null) return;
+        userRepository.findByEmail(authenticatedEmail).ifPresent(user -> {
+            if (user.getRole() == UserRole.ELDER) {
+                Resident elderRes = residentRepository.findByUserId(user.getId()).orElse(null);
+                if (elderRes == null || !elderRes.getId().equals(residentId)) {
+                    throw new AccessDeniedException("Elders are only authorized to view their own social audit records.");
+                }
+            }
+        });
+    }
+
+    private Long resolveScopedElderHomeId(String authenticatedEmail) {
+        if (authenticatedEmail == null) return null;
+        User user = userRepository.findByEmail(authenticatedEmail).orElse(null);
+        if (user == null) return null;
+
+        if (user.getRole() == UserRole.CAREGIVER) {
+            Caregiver cg = caregiverRepository.findByUserId(user.getId()).orElse(null);
+            if (cg != null && cg.getElderHome() != null) {
+                return cg.getElderHome().getId();
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------------

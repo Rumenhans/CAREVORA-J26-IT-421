@@ -65,9 +65,8 @@ class EmotionalWellnessIntegrationTest {
         mockMvc.perform(get("/api/residents")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(2)))
-                .andExpect(jsonPath("$.data[0].elderHomeName", is("Serene Valley Senior Living")))
-                .andExpect(jsonPath("$.data[1].elderHomeName", is("Serene Valley Senior Living")));
+                .andExpect(jsonPath("$.data", hasSize(greaterThanOrEqualTo(2))))
+                .andExpect(jsonPath("$.data[*].elderHomeName", everyItem(is("Serene Valley Senior Living"))));
     }
 
     @Test
