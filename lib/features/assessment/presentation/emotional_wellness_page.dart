@@ -2590,7 +2590,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                           Expanded(
                             child: Text(
                               _facialCaptureService.isAutoCapturing
-                                  ? 'Auto-capture active (5s interval) • ${_facialCaptureService.aggregate.validCount} valid samples'
+                                  ? 'Auto-capture active (1s interval) • ${_facialCaptureService.aggregate.validCount} valid samples'
                                   : (_hasFacialConsent
                                       ? 'Consent granted • Auto-captures during voice'
                                       : 'Consent required for auto facial capture'),
