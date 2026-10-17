@@ -666,15 +666,24 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _commLevel = 'Low';
         _engagementLevel = 'Low';
         _responseTime = 'Delayed';
-      } else if (pEmotion.contains('agitated') || pEmotion.contains('angry')) {
-        _selectedEmotion = 'Angry';
-        _currentFaceAsset = 'assets/images/landing/senior_sad_face.jpg';
+      } else if (pEmotion.contains('agitated') || pEmotion.contains('angry') || pEmotion.contains('confused')) {
+        _selectedEmotion = 'Confused';
+        _currentFaceAsset = 'assets/images/landing/senior_confused_face.jpg';
         _facialConfidence = 0.74;
-        _voiceEmotion = 'Agitated / Elevated Pitch';
+        _voiceEmotion = 'Puzzled / Hesitant Prosody';
         _voiceConfidence = 0.76;
-        _commLevel = 'Defensive';
+        _commLevel = 'Hesitant';
         _engagementLevel = 'Medium';
-        _responseTime = 'Fast';
+        _responseTime = 'Delayed';
+      } else if (pEmotion.contains('fear') || pEmotion.contains('anxious') || pEmotion.contains('fearful')) {
+        _selectedEmotion = 'Fear';
+        _currentFaceAsset = 'assets/images/landing/senior_fear_face.jpg';
+        _facialConfidence = 0.78;
+        _voiceEmotion = 'Apprehensive / Tremulous Pitch';
+        _voiceConfidence = 0.79;
+        _commLevel = 'Guarded';
+        _engagementLevel = 'Low';
+        _responseTime = 'Variable';
       } else if (pEmotion.contains('happy') || pEmotion.contains('cheerful')) {
         _selectedEmotion = 'Happy';
         _currentFaceAsset = 'assets/images/landing/senior_happy_face.jpg';
@@ -685,7 +694,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _engagementLevel = 'High';
         _responseTime = 'Normal';
       } else {
-        _selectedEmotion = 'Happy';
+        _selectedEmotion = 'Neutral';
         _currentFaceAsset = 'assets/images/landing/senior_neutral_calm_face.jpg';
         _facialConfidence = 0.80;
         _voiceEmotion = 'Calm / Steady Prosody';
@@ -1027,11 +1036,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _lonelinessScore = 79;
         _isolationScore = 75;
       } else if (result.primaryEmotion == EmotionCategory.confusedAgitated) {
-        _selectedEmotion = 'Angry';
+        _selectedEmotion = 'Confused';
         _lonelinessScore = 65;
         _isolationScore = 62;
       } else if (result.primaryEmotion == EmotionCategory.calmNeutral) {
-        _selectedEmotion = 'Happy';
+        _selectedEmotion = 'Neutral';
         _lonelinessScore = 54;
         _isolationScore = 50;
       } else {
@@ -2470,7 +2479,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                         border: Border.all(
                           color: _selectedEmotion == 'Happy'
                               ? AppColors.riskLow.withValues(alpha: 0.85)
-                              : AppColors.primary.withValues(alpha: 0.85),
+                              : (_selectedEmotion == 'Sad'
+                                  ? AppColors.riskHigh.withValues(alpha: 0.85)
+                                  : (_selectedEmotion == 'Confused'
+                                      ? AppColors.riskModerate.withValues(alpha: 0.85)
+                                      : (_selectedEmotion == 'Fear'
+                                          ? AppColors.lilac.withValues(alpha: 0.85)
+                                          : AppColors.primary.withValues(alpha: 0.85)))),
                           width: 2,
                         ),
                         borderRadius: BorderRadius.circular(16),
@@ -2810,24 +2825,28 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           title = 'Sad / Affect Flattening';
           subtitle = 'Depressed lip corners and brow tension observed. Informs RALPA affective drift analysis.';
           break;
-        case 'angry':
+        case 'confused':
         case 'agitated':
+        case 'angry':
           bg = AppColors.riskModerateBg;
           border = AppColors.riskModerate.withValues(alpha: 0.4);
           text = AppColors.riskModerate;
-          emoji = '😠';
-          title = 'Agitated / Elevated Stress';
-          subtitle = 'Corrugator contraction and elevated vocal cadence detected.';
+          emoji = '🤔';
+          title = 'Confused / Agitated';
+          subtitle = 'Corrugator brow furrowing and contraction detected. Informs cognitive-emotional assessment.';
           break;
         case 'fear':
         case 'anxious':
+        case 'fearful':
           bg = AppColors.lavenderBg;
           border = AppColors.lilac;
           text = AppColors.primary;
           emoji = '😨';
-          title = 'Anxious / Apprehensive';
-          subtitle = 'Upper eyelid elevation and vocal tremor indicators observed.';
+          title = 'Fear / Anxious';
+          subtitle = 'Upper eyelid elevation and apprehension markers detected.';
           break;
+        case 'neutral':
+        case 'calm':
         default:
           bg = AppColors.surfaceSecondary;
           border = AppColors.border;
@@ -3264,7 +3283,19 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               const Text('Facial Emotion', style: TextStyle(fontSize: 12, color: AppColors.muted)),
               Text(
                 '$_selectedEmotion  ${(_facialConfidence * 100).toInt()}%',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.riskLow),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: _selectedEmotion == 'Happy'
+                      ? AppColors.riskLow
+                      : (_selectedEmotion == 'Sad'
+                          ? AppColors.riskHigh
+                          : (_selectedEmotion == 'Confused'
+                              ? AppColors.riskModerate
+                              : (_selectedEmotion == 'Fear'
+                                  ? AppColors.primary
+                                  : AppColors.primary))),
+                ),
               ),
             ],
           ),
@@ -3275,7 +3306,15 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               value: _facialConfidence,
               minHeight: 6,
               backgroundColor: AppColors.border,
-              color: AppColors.riskLow,
+              color: _selectedEmotion == 'Happy'
+                  ? AppColors.riskLow
+                  : (_selectedEmotion == 'Sad'
+                      ? AppColors.riskHigh
+                      : (_selectedEmotion == 'Confused'
+                          ? AppColors.riskModerate
+                          : (_selectedEmotion == 'Fear'
+                              ? AppColors.primary
+                              : AppColors.primary))),
             ),
           ),
           const SizedBox(height: 14),
@@ -3842,7 +3881,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     final double deltaLoneliness = currentLoneliness - baselineLoneliness;
     final double deltaIsolation = currentIsolation - baselineIsolation;
 
-    final bool isHighRisk = currentLoneliness >= 70 || _selectedEmotion == 'Sad' || _selectedEmotion == 'Angry';
+    final bool isHighRisk = currentLoneliness >= 70 || _selectedEmotion == 'Sad' || _selectedEmotion == 'Angry' || _selectedEmotion == 'Fear';
     final String trajectoryStatus = !hasSufficientHistory
         ? 'BASELINE ESTABLISHING (INSUFFICIENT DATA)'
         : (dataset.trendSlope > 1.0 || deltaLoneliness > 10.0

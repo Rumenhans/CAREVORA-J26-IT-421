@@ -69,7 +69,7 @@ class FacialEmotionResult {
       case EmotionCategory.confusedAgitated:
         return 'Confused / Agitated';
       case EmotionCategory.anxious:
-        return 'Anxious / Hypervigilant';
+        return 'Fear / Anxious';
     }
   }
 
@@ -87,9 +87,9 @@ class FacialEmotionResult {
       case EmotionCategory.sadDepressed:
         return '😔';
       case EmotionCategory.confusedAgitated:
-        return '😕';
+        return '🤔';
       case EmotionCategory.anxious:
-        return '😟';
+        return '😨';
     }
   }
 
@@ -243,11 +243,24 @@ class FacialEmotionAiService {
             double arousal;
             List<String> actionUnits;
 
-            if (dominant == 'happy' || dominant == 'surprise') {
+            if (dominant == 'happy') {
               category = EmotionCategory.happy;
               valence = conf;
               arousal = 0.50;
               actionUnits = const ['AU6: Cheek Raiser', 'AU12: Lip Corner Puller'];
+            } else if (dominant == 'surprise') {
+              final double happyProb = parsedRawBreakdown['happy'] ?? 0.0;
+              if (happyProb > 25.0) {
+                category = EmotionCategory.happy;
+                valence = 0.40;
+                arousal = 0.60;
+                actionUnits = const ['AU6: Cheek Raiser', 'AU12: Lip Corner Puller'];
+              } else {
+                category = EmotionCategory.anxious;
+                valence = -0.40;
+                arousal = 0.85;
+                actionUnits = const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU26: Jaw Drop'];
+              }
             } else if (dominant == 'neutral') {
               category = EmotionCategory.calmNeutral;
               valence = 0.05;
@@ -258,25 +271,38 @@ class FacialEmotionAiService {
               valence = -conf;
               arousal = 0.25;
               actionUnits = const ['AU1: Inner Brow Raiser', 'AU15: Lip Corner Depressor'];
-            } else if (dominant == 'angry') {
+            } else if (dominant == 'angry' || dominant == 'confused') {
               category = EmotionCategory.confusedAgitated;
-              valence = -0.5 * conf;
-              arousal = 0.80;
+              valence = -0.4 * conf;
+              arousal = 0.75;
               actionUnits = const ['AU4: Brow Lowerer', 'AU7: Lid Tightener'];
+            } else if (dominant == 'fear' || dominant == 'fearful' || dominant == 'anxious') {
+              category = EmotionCategory.anxious;
+              valence = -0.6 * conf;
+              arousal = 0.85;
+              actionUnits = const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU20: Lip Stretcher'];
             } else {
               category = EmotionCategory.anxious;
               valence = -0.6 * conf;
               arousal = 0.70;
-              actionUnits = const ['AU1: Inner Brow Raiser', 'AU20: Lip Stretcher'];
+              actionUnits = const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU20: Lip Stretcher'];
             }
 
             final Map<EmotionCategory, double> probabilities = {
               EmotionCategory.happy: (parsedRawBreakdown['happy'] ?? 0.0) / 100.0,
               EmotionCategory.calmNeutral: (parsedRawBreakdown['neutral'] ?? 0.0) / 100.0,
               EmotionCategory.sadDepressed: (parsedRawBreakdown['sad'] ?? 0.0) / 100.0,
-              EmotionCategory.confusedAgitated: (parsedRawBreakdown['angry'] ?? 0.0) / 100.0,
-              EmotionCategory.anxious: (parsedRawBreakdown['fear'] ?? 0.0) / 100.0,
+              EmotionCategory.confusedAgitated:
+                  ((parsedRawBreakdown['confused'] ?? parsedRawBreakdown['angry']) ?? 0.0) / 100.0,
+              EmotionCategory.anxious:
+                  ((parsedRawBreakdown['fear'] ?? parsedRawBreakdown['anxious']) ?? 0.0) / 100.0,
             };
+
+            final String formattedClassification = dominant == 'confused'
+                ? 'CONFUSED / PUZZLED'
+                : (dominant == 'fear'
+                    ? 'FEAR / ANXIOUS'
+                    : dominant.toUpperCase());
 
             return FacialEmotionResult(
               status: FacialInferenceStatus.success,
@@ -286,7 +312,7 @@ class FacialEmotionAiService {
               arousalScore: arousal,
               emotionProbabilities: probabilities,
               clinicalObservation:
-                  'Real PyTorch Model Inference (FER-2013): Face classified as ${dominant.toUpperCase()} with ${(conf * 100).toStringAsFixed(1)}% model confidence.',
+                  'Real PyTorch Model Inference (FER-2013): Face classified as $formattedClassification with ${(conf * 100).toStringAsFixed(1)}% model confidence.',
               facialActionUnits: actionUnits,
               analyzedAt: DateTime.now(),
               dominantEmotionRaw: dominant,
@@ -309,9 +335,12 @@ class FacialEmotionAiService {
     // 2. Sample asset observation (only used when explicitly selecting demo sample cards)
     await Future.delayed(const Duration(milliseconds: 300));
     if (preferredEmotionHint != null) {
-      if (preferredEmotionHint.toLowerCase() == 'happy') return _buildHappySample();
-      if (preferredEmotionHint.toLowerCase() == 'sad') return _buildSadSample();
-      if (preferredEmotionHint.toLowerCase() == 'neutral') return _buildNeutralSample();
+      final hint = preferredEmotionHint.toLowerCase();
+      if (hint == 'happy') return _buildHappySample();
+      if (hint == 'sad') return _buildSadSample();
+      if (hint == 'neutral') return _buildNeutralSample();
+      if (hint == 'fear' || hint.contains('anxious')) return _buildFearSample();
+      if (hint == 'confused' || hint.contains('agitated')) return _buildConfusedSample();
     }
     if (assetPath != null) {
       if (assetPath.contains('happy')) return _buildHappySample();
@@ -319,9 +348,53 @@ class FacialEmotionAiService {
       if (assetPath.contains('neutral') || assetPath.contains('calm')) {
         return _buildNeutralSample();
       }
+      if (assetPath.contains('fear')) return _buildFearSample();
+      if (assetPath.contains('confused')) return _buildConfusedSample();
     }
 
     return _buildHappySample();
+  }
+
+  static FacialEmotionResult _buildFearSample() {
+    return FacialEmotionResult(
+      status: FacialInferenceStatus.success,
+      primaryEmotion: EmotionCategory.anxious,
+      confidence: 0.82,
+      valenceScore: -0.55,
+      arousalScore: 0.85,
+      emotionProbabilities: const {
+        EmotionCategory.anxious: 0.82,
+        EmotionCategory.confusedAgitated: 0.08,
+        EmotionCategory.sadDepressed: 0.05,
+        EmotionCategory.calmNeutral: 0.03,
+        EmotionCategory.happy: 0.02,
+      },
+      clinicalObservation: 'Face analyzed as FEAR / ANXIOUS: Upper eyelid elevation and apprehension markers.',
+      facialActionUnits: const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU20: Lip Stretcher'],
+      analyzedAt: DateTime.now(),
+      dominantEmotionRaw: 'fear',
+    );
+  }
+
+  static FacialEmotionResult _buildConfusedSample() {
+    return FacialEmotionResult(
+      status: FacialInferenceStatus.success,
+      primaryEmotion: EmotionCategory.confusedAgitated,
+      confidence: 0.78,
+      valenceScore: -0.35,
+      arousalScore: 0.70,
+      emotionProbabilities: const {
+        EmotionCategory.confusedAgitated: 0.78,
+        EmotionCategory.calmNeutral: 0.10,
+        EmotionCategory.anxious: 0.06,
+        EmotionCategory.sadDepressed: 0.04,
+        EmotionCategory.happy: 0.02,
+      },
+      clinicalObservation: 'Face analyzed as CONFUSED / PUZZLED: Corrugator brow contraction and questioning prosody.',
+      facialActionUnits: const ['AU4: Brow Lowerer', 'AU7: Lid Tightener'],
+      analyzedAt: DateTime.now(),
+      dominantEmotionRaw: 'confused',
+    );
   }
 
   static FacialEmotionResult _buildHappySample() {

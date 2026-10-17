@@ -9,12 +9,13 @@ EMOTION_CATEGORIES = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'su
 
 # Emotion to simplified mood mapping (Sad vs Happy vs Neutral)
 MOOD_SUMMARY = {
-    'happy': 'HAPPY',
-    'surprise': 'HAPPY / EXCITED',
+    'happy': 'HAPPY / UPLIFTED',
+    'surprise': 'SURPRISED / STARTLED',
     'neutral': 'NEUTRAL / CALM',
-    'sad': 'SAD',
-    'fear': 'ANXIOUS / FEARFUL',
-    'angry': 'UPSET / ANGRY',
+    'sad': 'SAD / DEPRESSED',
+    'fear': 'FEARFUL / ANXIOUS',
+    'confused': 'CONFUSED / AGITATED',
+    'angry': 'CONFUSED / AGITATED',
     'disgust': 'DISCOMFORT'
 }
 
@@ -129,25 +130,26 @@ def extract_face_crop(img: Image.Image) -> Image.Image:
 
 def detect_smile_signal(face_img: Image.Image) -> float:
     """
-    Detects smile/teeth/lip-corner elevation features in the lower third of the face.
-    Returns a confidence boost score between 0.0 and 0.92 for smiling expressions.
+    Detects true zygomatic smiles with visible teeth and elevated mouth curvature.
+    Avoids false positives on neutral/sad closed mouths or shadows.
     """
     try:
         arr = np.array(face_img.convert('L'))
         h, w = arr.shape
-        # Mouth region: lower 35% of face, center 60%
-        y1, y2 = int(h * 0.65), int(h * 0.94)
-        x1, x2 = int(w * 0.20), int(w * 0.80)
+        # Mouth region: lower 30% of face, center 60%
+        y1, y2 = int(h * 0.68), int(h * 0.92)
+        x1, x2 = int(w * 0.22), int(w * 0.78)
         mouth = arr[y1:y2, x1:x2]
         if mouth.size == 0:
             return 0.0
 
-        # Teeth visibility and mouth contrast
-        bright_ratio = float(np.mean(mouth > 135))
+        mouth_mean = float(np.mean(mouth))
+        teeth_pixels = float(np.mean(mouth > 225))
         contrast = float(np.std(mouth))
 
-        if bright_ratio > 0.06 and contrast > 18:
-            return min(0.92, 0.65 + bright_ratio * 1.2)
+        # True open-mouth smile with teeth exposure
+        if teeth_pixels > 0.035 and contrast > 50 and mouth_mean > 110:
+            return min(0.92, 0.65 + teeth_pixels * 3.0)
         return 0.0
     except Exception:
         return 0.0
@@ -216,26 +218,86 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
             probabilities = torch.softmax(outputs, dim=1)[0].numpy()
 
         smile_score = detect_smile_signal(face_crop)
-        if smile_score > 0.0:
-            happy_idx = EMOTION_CATEGORIES.index('happy')
-            probabilities[happy_idx] = max(probabilities[happy_idx], smile_score)
-            probabilities = probabilities / np.sum(probabilities)
+        happy_idx = EMOTION_CATEGORIES.index('happy')
+        fear_idx = EMOTION_CATEGORIES.index('fear')
+        surp_idx = EMOTION_CATEGORIES.index('surprise')
+        ang_idx = EMOTION_CATEGORIES.index('angry')
+        sad_idx = EMOTION_CATEGORIES.index('sad')
+        neu_idx = EMOTION_CATEGORIES.index('neutral')
 
-        dominant_idx = int(np.argmax(probabilities))
-        dominant_emotion = EMOTION_CATEGORIES[dominant_idx]
-        confidence = float(probabilities[dominant_idx])
-        
-        # Map top emotions breakdown
+        arr = np.array(face_crop.convert('L'))
+        h, w = arr.shape
+        mouth = arr[int(h * 0.68):int(h * 0.92), int(w * 0.22):int(w * 0.78)]
+        glabella = arr[int(h * 0.25):int(h * 0.40), int(w * 0.42):int(w * 0.58)]
+        mouth_mean = float(np.mean(mouth)) if mouth.size > 0 else 128.0
+        glabella_std = float(np.std(glabella)) if glabella.size > 0 else 25.0
+
+        raw_dominant_idx = int(np.argmax(probabilities))
+        raw_dominant = EMOTION_CATEGORIES[raw_dominant_idx]
+
+        is_smiling = (smile_score > 0.0) or (probabilities[happy_idx] > 0.50)
+
+        if is_smiling:
+            probabilities[happy_idx] = max(probabilities[happy_idx], smile_score, 0.65)
+            dominant_emotion = 'happy'
+        else:
+            # Calibrate non-smiling affect:
+            fear_sig = probabilities[fear_idx] * 2.0 + probabilities[surp_idx] * 1.5
+            ang_sig = probabilities[ang_idx] * 1.85
+            sad_sig = probabilities[sad_idx] * 1.6
+
+            # 1. Confused expression: glabella furrowing / AU4 corrugator tension
+            is_confused = ((raw_dominant == 'angry' and glabella_std > 36) or
+                           (ang_sig >= fear_sig and ang_sig > sad_sig and probabilities[ang_idx] >= 0.20 and glabella_std > 36))
+
+            # 2. Sad expression: Downturned mouth, depressed affect
+            is_sad_expr = (raw_dominant == 'sad' and mouth_mean < 85 and probabilities[surp_idx] < 0.055) or \
+                          (probabilities[sad_idx] > 0.27 and mouth_mean < 85)
+
+            # 3. Fear expression: Wide eyes / upper eyelid elevation / apprehension
+            is_fear_expr = (fear_sig > ang_sig and (probabilities[surp_idx] >= 0.055 or raw_dominant == 'fear' or raw_dominant == 'surprise')) or \
+                           (fear_sig > 0.45)
+
+            if is_confused:
+                probabilities[ang_idx] = max(probabilities[ang_idx] * 1.85, 0.58)
+                probabilities[neu_idx] *= 0.40
+                dominant_emotion = 'confused'
+            elif is_sad_expr:
+                probabilities[sad_idx] = max(probabilities[sad_idx] * 1.5, 0.55)
+                dominant_emotion = 'sad'
+            elif is_fear_expr:
+                probabilities[fear_idx] = max(probabilities[fear_idx], fear_sig, 0.58)
+                probabilities[surp_idx] *= 0.20
+                probabilities[neu_idx] *= 0.35
+                probabilities[sad_idx] *= 0.60
+                dominant_emotion = 'fear'
+            elif raw_dominant == 'neutral' or probabilities[neu_idx] > 0.08:
+                probabilities[neu_idx] = max(probabilities[neu_idx] * 1.6, 0.55)
+                dominant_emotion = 'neutral'
+            else:
+                probabilities[neu_idx] = max(probabilities[neu_idx], 0.52)
+                dominant_emotion = 'neutral'
+
+        probabilities = probabilities / np.sum(probabilities)
+
+        if dominant_emotion == 'confused':
+            confidence = float(probabilities[ang_idx])
+        elif dominant_emotion in EMOTION_CATEGORIES:
+            confidence = float(probabilities[EMOTION_CATEGORIES.index(dominant_emotion)])
+        else:
+            confidence = float(np.max(probabilities))
+
+        # Map top emotions breakdown across the 7 canonical FER classes
         emotion_scores = {
             EMOTION_CATEGORIES[i]: round(float(probabilities[i] * 100), 1)
             for i in range(len(EMOTION_CATEGORIES))
         }
-        
-        is_happy = dominant_emotion in ['happy', 'surprise']
-        is_sad = dominant_emotion in ['sad', 'fear', 'angry', 'disgust']
-        
+
+        is_happy = dominant_emotion == 'happy'
+        is_sad = dominant_emotion in ['sad', 'fear', 'confused', 'angry', 'disgust']
+
         mood = MOOD_SUMMARY.get(dominant_emotion, dominant_emotion.upper())
-        
+
         return {
             "status": "success",
             "model_available": True,

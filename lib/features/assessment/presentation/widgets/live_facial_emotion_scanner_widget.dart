@@ -238,7 +238,13 @@ class _LiveFacialEmotionScannerWidgetState
                                   : (_analysisResult?.primaryEmotion ==
                                           EmotionCategory.sadDepressed)
                                       ? AppColors.riskHigh
-                                      : AppColors.primary,
+                                      : (_analysisResult?.primaryEmotion ==
+                                              EmotionCategory.confusedAgitated)
+                                          ? AppColors.riskModerate
+                                          : (_analysisResult?.primaryEmotion ==
+                                                  EmotionCategory.anxious)
+                                              ? AppColors.lilac
+                                              : AppColors.primary,
                               width: 2.0,
                             ),
                             borderRadius: BorderRadius.circular(16),
@@ -382,6 +388,24 @@ class _LiveFacialEmotionScannerWidgetState
                       ),
                       const SizedBox(height: 8),
                       _buildProbabilityBar(
+                        'Confused / Agitated',
+                        '🤔',
+                        _analysisResult!.emotionProbabilities[
+                                EmotionCategory.confusedAgitated] ??
+                            0.0,
+                        AppColors.riskModerate,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildProbabilityBar(
+                        'Fear / Anxious',
+                        '😨',
+                        _analysisResult!.emotionProbabilities[
+                                EmotionCategory.anxious] ??
+                            0.0,
+                        AppColors.lilac,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildProbabilityBar(
                         'Sad / Depressed',
                         '😔',
                         _analysisResult!.emotionProbabilities[
@@ -435,12 +459,20 @@ class _LiveFacialEmotionScannerWidgetState
                 asset: 'assets/images/landing/senior_happy_face.jpg',
               ),
               _buildSwitchChip(
-                label: '😔 Sad / Depressed',
-                asset: 'assets/images/landing/senior_sad_face.jpg',
-              ),
-              _buildSwitchChip(
                 label: '😌 Calm Neutral',
                 asset: 'assets/images/landing/senior_neutral_calm_face.jpg',
+              ),
+              _buildSwitchChip(
+                label: '🤔 Confused Face',
+                asset: 'assets/images/landing/senior_confused_face.jpg',
+              ),
+              _buildSwitchChip(
+                label: '😨 Fear Face',
+                asset: 'assets/images/landing/senior_fear_face.jpg',
+              ),
+              _buildSwitchChip(
+                label: '😔 Sad / Depressed',
+                asset: 'assets/images/landing/senior_sad_face.jpg',
               ),
               ElevatedButton.icon(
                 onPressed: _captureLiveCameraPhoto,
