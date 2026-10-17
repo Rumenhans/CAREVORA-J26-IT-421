@@ -82,6 +82,7 @@ class AssessmentQuestion {
   final int id;
   final String category;
   final String prompt;
+  final String? promptSi;
   final String audioPrompt;
   final String tip;
 
@@ -89,6 +90,7 @@ class AssessmentQuestion {
     required this.id,
     required this.category,
     required this.prompt,
+    this.promptSi,
     required this.audioPrompt,
     required this.tip,
   });
