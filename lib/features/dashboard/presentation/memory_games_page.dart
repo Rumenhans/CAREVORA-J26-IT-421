@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../assessment/application/memory_game_service.dart';
+import '../../auth/application/auth_controller.dart';
 
 /// Available games in the Memory Games suite.
 enum MemoryGameType {
@@ -13,21 +17,25 @@ enum MemoryGameType {
   items,
 }
 
-class MemoryGamesPage extends StatefulWidget {
+class MemoryGamesPage extends ConsumerStatefulWidget {
   final MemoryGameType initialGame;
   final List<int>? initialSequence;
+  final int? residentId;
+  final String? token;
 
   const MemoryGamesPage({
     super.key,
     this.initialGame = MemoryGameType.none,
     this.initialSequence,
+    this.residentId,
+    this.token,
   });
 
   @override
-  State<MemoryGamesPage> createState() => _MemoryGamesPageState();
+  ConsumerState<MemoryGamesPage> createState() => _MemoryGamesPageState();
 }
 
-class _MemoryGamesPageState extends State<MemoryGamesPage> {
+class _MemoryGamesPageState extends ConsumerState<MemoryGamesPage> {
   late MemoryGameType _activeGame;
 
   @override
@@ -70,22 +78,32 @@ class _MemoryGamesPageState extends State<MemoryGamesPage> {
   }
 
   Widget _buildCurrentView() {
+    final auth = ref.watch(authProvider).state;
+    final effectiveResidentId = widget.residentId ?? auth.residentId ?? 1;
+    final effectiveToken = widget.token ?? auth.token;
+
     switch (_activeGame) {
       case MemoryGameType.sequence:
         return _SequenceGameView(
           key: const ValueKey('sequence_game'),
           onBack: _backToHub,
           initialSequence: widget.initialSequence,
+          residentId: effectiveResidentId,
+          token: effectiveToken,
         );
       case MemoryGameType.pairs:
         return _PairsGameView(
           key: const ValueKey('pairs_game'),
           onBack: _backToHub,
+          residentId: effectiveResidentId,
+          token: effectiveToken,
         );
       case MemoryGameType.items:
         return _ItemsGameView(
           key: const ValueKey('items_game'),
           onBack: _backToHub,
+          residentId: effectiveResidentId,
+          token: effectiveToken,
         );
       case MemoryGameType.none:
         return _buildHubView();
@@ -519,17 +537,149 @@ class _MemoryGamesPageState extends State<MemoryGamesPage> {
 }
 
 // ==============================================================================
+// COMMON GAME SCORE CARD WIDGET
+// ==============================================================================
+
+Widget _buildGameScoreCard({
+  required double score,
+  required String scoreLabel,
+  required String details,
+  required bool isSaving,
+  required String? successMessage,
+  required String? errorMessage,
+}) {
+  return Container(
+    width: double.infinity,
+    constraints: const BoxConstraints(maxWidth: 520),
+    margin: const EdgeInsets.symmetric(vertical: 16),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+    decoration: BoxDecoration(
+      color: AppColors.lavenderBg.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+    ),
+    child: Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '$scoreLabel: ${score.toStringAsFixed(1)}%',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          details,
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            color: AppColors.navy,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 10),
+        if (isSaving)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+              ),
+              SizedBox(width: 8),
+              Text(
+                'Saving session to care records...',
+                style: TextStyle(fontSize: 12.5, color: AppColors.body),
+              ),
+            ],
+          )
+        else if (successMessage != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.riskLowBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.riskLow.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.checkCheck, size: 16, color: AppColors.riskLow),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    successMessage,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.riskLow,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (errorMessage != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDE8E8),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.riskHigh.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.alertTriangle, size: 16, color: AppColors.riskHigh),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    errorMessage,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.riskHigh,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+// ==============================================================================
 // GAME 1: REMEMBER THE SEQUENCE
 // ==============================================================================
 
 class _SequenceGameView extends StatefulWidget {
   final VoidCallback onBack;
   final List<int>? initialSequence;
+  final int residentId;
+  final String? token;
 
   const _SequenceGameView({
     super.key,
     required this.onBack,
     this.initialSequence,
+    required this.residentId,
+    this.token,
   });
 
   @override
@@ -592,6 +742,15 @@ class _SequenceGameViewState extends State<_SequenceGameView> {
   _SeqPhase _phase = _SeqPhase.showing;
   final Random _random = Random();
 
+  int _roundAttempts = 1;
+  int _wrongTapsInRound = 0;
+  bool _isSaving = false;
+  String? _saveSuccessMessage;
+  String? _saveErrorMessage;
+  double? _lastScore;
+  int _lastAttempts = 1;
+  int _lastCorrectCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -614,6 +773,10 @@ class _SequenceGameViewState extends State<_SequenceGameView> {
       _targetSequence = seq;
       _userTaps = [];
       _phase = _SeqPhase.showing;
+      _roundAttempts = 1;
+      _wrongTapsInRound = 0;
+      _saveSuccessMessage = null;
+      _saveErrorMessage = null;
     });
   }
 
@@ -651,20 +814,83 @@ class _SequenceGameViewState extends State<_SequenceGameView> {
     if (tileId != expected) {
       setState(() {
         _userTaps = updatedTaps;
+        _wrongTapsInRound++;
+        _roundAttempts++;
         _phase = _SeqPhase.retry;
       });
       return;
     }
 
     if (updatedTaps.length == _targetSequence.length) {
+      final correctCount = _targetSequence.length;
+      final totalTaps = correctCount + _wrongTapsInRound;
+      final accuracy = ((correctCount.toDouble() / totalTaps.toDouble()) * 100.0).clamp(0.0, 100.0);
+      final roundedScore = (accuracy * 10).round() / 10.0;
+      final attemptsCount = _roundAttempts;
+
       setState(() {
         _userTaps = updatedTaps;
         _phase = _SeqPhase.success;
+        _lastScore = roundedScore;
+        _lastAttempts = attemptsCount;
+        _lastCorrectCount = correctCount;
       });
+
+      _saveSession(
+        score: roundedScore,
+        attempts: attemptsCount,
+        correctAnswers: correctCount,
+        totalItems: _targetSequence.length,
+      );
     } else {
       setState(() {
         _userTaps = updatedTaps;
       });
+    }
+  }
+
+  Future<void> _saveSession({
+    required double score,
+    required int attempts,
+    required int correctAnswers,
+    required int totalItems,
+  }) async {
+    setState(() {
+      _isSaving = true;
+      _saveSuccessMessage = null;
+      _saveErrorMessage = null;
+    });
+
+    try {
+      final record = await MemoryGameService.saveCompletedSession(
+        residentId: widget.residentId,
+        gameType: 'SEQUENCE',
+        scorePercentage: score,
+        attempts: attempts,
+        correctAnswers: correctAnswers,
+        totalItems: totalItems,
+        status: 'COMPLETED',
+        completionDetailsJson: jsonEncode({
+          'sequenceLength': _sequenceLength,
+          'level': _currentLevel,
+          'wrongTaps': _wrongTapsInRound,
+        }),
+        token: widget.token,
+      );
+
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveSuccessMessage = 'Session #${record.sessionId} saved to care records.';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveErrorMessage = 'Could not save session: $e';
+        });
+      }
     }
   }
 
@@ -1056,7 +1282,16 @@ class _SequenceGameViewState extends State<_SequenceGameView> {
           ),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 10),
+        _buildGameScoreCard(
+          score: _lastScore ?? 100.0,
+          scoreLabel: 'Accuracy',
+          details: 'Recalled: $_lastCorrectCount / $_sequenceLength Tiles • Attempts: $_lastAttempts',
+          isSaving: _isSaving,
+          successMessage: _saveSuccessMessage,
+          errorMessage: _saveErrorMessage,
+        ),
+        const SizedBox(height: 14),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1178,8 +1413,15 @@ class _SequenceGameViewState extends State<_SequenceGameView> {
 
 class _PairsGameView extends StatefulWidget {
   final VoidCallback onBack;
+  final int residentId;
+  final String? token;
 
-  const _PairsGameView({super.key, required this.onBack});
+  const _PairsGameView({
+    super.key,
+    required this.onBack,
+    required this.residentId,
+    this.token,
+  });
 
   @override
   State<_PairsGameView> createState() => _PairsGameViewState();
@@ -1256,6 +1498,13 @@ class _PairsGameViewState extends State<_PairsGameView> {
   bool _isProcessing = false;
   Timer? _flipBackTimer;
 
+  int _turnsTaken = 0;
+  bool _isSaving = false;
+  String? _saveSuccessMessage;
+  String? _saveErrorMessage;
+  double? _lastScore;
+  int _lastTurns = 0;
+
   @override
   void initState() {
     super.initState();
@@ -1283,6 +1532,10 @@ class _PairsGameViewState extends State<_PairsGameView> {
       _flippedIndices.clear();
       _pairsFound = 0;
       _isProcessing = false;
+      _turnsTaken = 0;
+      _isSaving = false;
+      _saveSuccessMessage = null;
+      _saveErrorMessage = null;
     });
   }
 
@@ -1300,18 +1553,40 @@ class _PairsGameViewState extends State<_PairsGameView> {
       final firstCard = _cards[firstIndex];
       final secondCard = _cards[index];
 
+      _turnsTaken++;
+
       setState(() {
         _flippedIndices.add(index);
       });
 
       if (firstCard.symbol.key == secondCard.symbol.key) {
         // MATCH!
+        final updatedPairsFound = _pairsFound + 1;
+        final isCompleted = updatedPairsFound == _symbols.length;
+        final totalPairs = _symbols.length;
+        final turns = _turnsTaken;
+        final accuracy = ((totalPairs.toDouble() / turns.toDouble()) * 100.0).clamp(0.0, 100.0);
+        final roundedScore = (accuracy * 10).round() / 10.0;
+
         setState(() {
           firstCard.isMatched = true;
           secondCard.isMatched = true;
-          _pairsFound++;
+          _pairsFound = updatedPairsFound;
           _flippedIndices.clear();
+          if (isCompleted) {
+            _lastScore = roundedScore;
+            _lastTurns = turns;
+          }
         });
+
+        if (isCompleted) {
+          _saveSession(
+            score: roundedScore,
+            attempts: turns,
+            correctAnswers: totalPairs,
+            totalItems: totalPairs,
+          );
+        }
       } else {
         // MISMATCH: allow elder plenty of time to view both cards
         _isProcessing = true;
@@ -1322,6 +1597,50 @@ class _PairsGameViewState extends State<_PairsGameView> {
               _isProcessing = false;
             });
           }
+        });
+      }
+    }
+  }
+
+  Future<void> _saveSession({
+    required double score,
+    required int attempts,
+    required int correctAnswers,
+    required int totalItems,
+  }) async {
+    setState(() {
+      _isSaving = true;
+      _saveSuccessMessage = null;
+      _saveErrorMessage = null;
+    });
+
+    try {
+      final record = await MemoryGameService.saveCompletedSession(
+        residentId: widget.residentId,
+        gameType: 'PAIRS',
+        scorePercentage: score,
+        attempts: attempts,
+        correctAnswers: correctAnswers,
+        totalItems: totalItems,
+        status: 'COMPLETED',
+        completionDetailsJson: jsonEncode({
+          'pairsMatched': correctAnswers,
+          'totalTurns': attempts,
+        }),
+        token: widget.token,
+      );
+
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveSuccessMessage = 'Session #${record.sessionId} saved to care records.';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveErrorMessage = 'Could not save session: $e';
         });
       }
     }
@@ -1542,6 +1861,15 @@ class _PairsGameViewState extends State<_PairsGameView> {
               const SizedBox(height: 28),
 
               if (isGameCompleted) ...[
+                _buildGameScoreCard(
+                  score: _lastScore ?? 100.0,
+                  scoreLabel: 'Matching Performance',
+                  details: 'Pairs Found: $_pairsFound / ${_symbols.length} • Turns Taken: $_lastTurns',
+                  isSaving: _isSaving,
+                  successMessage: _saveSuccessMessage,
+                  errorMessage: _saveErrorMessage,
+                ),
+                const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -1606,8 +1934,15 @@ class _PairsGameViewState extends State<_PairsGameView> {
 
 class _ItemsGameView extends StatefulWidget {
   final VoidCallback onBack;
+  final int residentId;
+  final String? token;
 
-  const _ItemsGameView({super.key, required this.onBack});
+  const _ItemsGameView({
+    super.key,
+    required this.onBack,
+    required this.residentId,
+    this.token,
+  });
 
   @override
   State<_ItemsGameView> createState() => _ItemsGameViewState();
@@ -1703,6 +2038,12 @@ class _ItemsGameViewState extends State<_ItemsGameView> {
   _ItemPhase _phase = _ItemPhase.memorize;
   final Random _random = Random();
 
+  bool _isSaving = false;
+  String? _saveSuccessMessage;
+  String? _saveErrorMessage;
+  double? _lastScore;
+  int _correctRecalledCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -1728,6 +2069,9 @@ class _ItemsGameViewState extends State<_ItemsGameView> {
     _displayPool = combined;
     _selectedIds.clear();
     _phase = _ItemPhase.memorize;
+    _isSaving = false;
+    _saveSuccessMessage = null;
+    _saveErrorMessage = null;
   }
 
   void _startSelectionPhase() {
@@ -1749,9 +2093,68 @@ class _ItemsGameViewState extends State<_ItemsGameView> {
   }
 
   void _checkAnswers() {
+    final correctCount = _selectedIds.where((id) => _targetItems.any((t) => t.id == id)).length;
+    final totalItems = _targetItems.length;
+    final accuracy = ((correctCount.toDouble() / totalItems.toDouble()) * 100.0).clamp(0.0, 100.0);
+    final roundedScore = (accuracy * 10).round() / 10.0;
+
     setState(() {
+      _correctRecalledCount = correctCount;
+      _lastScore = roundedScore;
       _phase = _ItemPhase.feedback;
     });
+
+    _saveSession(
+      score: roundedScore,
+      attempts: 1,
+      correctAnswers: correctCount,
+      totalItems: totalItems,
+    );
+  }
+
+  Future<void> _saveSession({
+    required double score,
+    required int attempts,
+    required int correctAnswers,
+    required int totalItems,
+  }) async {
+    setState(() {
+      _isSaving = true;
+      _saveSuccessMessage = null;
+      _saveErrorMessage = null;
+    });
+
+    try {
+      final record = await MemoryGameService.saveCompletedSession(
+        residentId: widget.residentId,
+        gameType: 'ITEMS',
+        scorePercentage: score,
+        attempts: attempts,
+        correctAnswers: correctAnswers,
+        totalItems: totalItems,
+        status: 'COMPLETED',
+        completionDetailsJson: jsonEncode({
+          'selectedCount': _selectedIds.length,
+          'correctCount': correctAnswers,
+          'totalTargets': totalItems,
+        }),
+        token: widget.token,
+      );
+
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveSuccessMessage = 'Session #${record.sessionId} saved to care records.';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveErrorMessage = 'Could not save session: $e';
+        });
+      }
+    }
   }
 
   void _peekOriginalItems() {
@@ -2199,7 +2602,16 @@ class _ItemsGameViewState extends State<_ItemsGameView> {
           }).toList(),
         ),
 
-        const SizedBox(height: 32),
+        const SizedBox(height: 16),
+        _buildGameScoreCard(
+          score: _lastScore ?? 100.0,
+          scoreLabel: 'Recall Accuracy',
+          details: 'Recalled: $_correctRecalledCount / ${_targetItems.length} Items • Attempts: 1',
+          isSaving: _isSaving,
+          successMessage: _saveSuccessMessage,
+          errorMessage: _saveErrorMessage,
+        ),
+        const SizedBox(height: 20),
 
         Row(
           mainAxisAlignment: MainAxisAlignment.center,

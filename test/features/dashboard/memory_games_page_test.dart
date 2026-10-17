@@ -1,7 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
+import 'package:carevora/features/assessment/application/memory_game_service.dart';
 import 'package:carevora/features/auth/application/auth_controller.dart';
 import 'package:carevora/features/dashboard/presentation/memory_games_page.dart';
 import 'package:carevora/shared/widgets/desktop_sidebar.dart';
@@ -33,6 +37,35 @@ class MockCaregiverAuthNotifier extends AuthNotifier {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    MemoryGameService.client = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'success': true,
+          'data': {
+            'id': 1,
+            'sessionId': 'MG-TEST-123',
+            'residentId': 1,
+            'residentName': 'Sarah Jenkins',
+            'gameType': 'ITEMS',
+            'scorePercentage': 100.0,
+            'attempts': 1,
+            'correctAnswers': 4,
+            'totalItems': 4,
+            'status': 'COMPLETED',
+            'completedAt': DateTime.now().toIso8601String(),
+          },
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+  });
+
+  tearDown(() {
+    MemoryGameService.client = null;
+  });
 
   Widget createSidebarWidget({required bool isElder}) {
     return ProviderScope(
@@ -229,7 +262,7 @@ void main() {
 
   group('Game 3: Remember the Items Tests', () {
     testWidgets('8. Remember items starts in study phase, transitions to select, and shows feedback', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      await tester.binding.setSurfaceSize(const Size(1200, 1400));
       await tester.pumpWidget(createMemoryGamesWidget(initialGame: MemoryGameType.items));
       await tester.pumpAndSettle();
 

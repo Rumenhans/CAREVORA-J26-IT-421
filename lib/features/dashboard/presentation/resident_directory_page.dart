@@ -8,6 +8,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../assessment/application/cognitive_assessment_service.dart';
+import '../../assessment/application/memory_game_service.dart';
 import '../../assessment/domain/cognitive_scoring.dart';
 
 class ResidentItem {
@@ -83,6 +84,9 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
   String? _historyError;
   bool _showHistoryView = false;
   int? _expandedHistoryIndex;
+  MemoryGameProgressSummary? _memoryGameProgress;
+  bool _isLoadingMemoryGames = false;
+  String? _memoryGameError;
 
   final List<ResidentItem> _allEldersFallback = [
     const ResidentItem(
@@ -317,9 +321,15 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       _residentCognitiveHistory = [];
       _showHistoryView = false;
       _expandedHistoryIndex = null;
+      _memoryGameProgress = null;
+      _isLoadingMemoryGames = true;
+      _memoryGameError = null;
     });
 
-    await _loadResidentHistory(resident.id);
+    await Future.wait([
+      _loadResidentHistory(resident.id),
+      _loadResidentMemoryGameProgress(resident.id),
+    ]);
   }
 
   Future<void> _loadResidentHistory(int residentId) async {
@@ -351,6 +361,35 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
     }
   }
 
+  Future<void> _loadResidentMemoryGameProgress(int residentId) async {
+    final token = ref.read(authProvider).state.token;
+    setState(() {
+      _isLoadingMemoryGames = true;
+      _memoryGameError = null;
+    });
+
+    try {
+      final summary = await MemoryGameService.fetchResidentProgress(
+        residentId,
+        token: token,
+      );
+      if (mounted && _selectedResident?.id == residentId) {
+        setState(() {
+          _memoryGameProgress = summary;
+          _isLoadingMemoryGames = false;
+          _memoryGameError = null;
+        });
+      }
+    } catch (err) {
+      if (mounted && _selectedResident?.id == residentId) {
+        setState(() {
+          _isLoadingMemoryGames = false;
+          _memoryGameError = err.toString();
+        });
+      }
+    }
+  }
+
   void _clearSelectedResident() {
     setState(() {
       _selectedResident = null;
@@ -359,6 +398,9 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       _historyError = null;
       _showHistoryView = false;
       _expandedHistoryIndex = null;
+      _memoryGameProgress = null;
+      _isLoadingMemoryGames = false;
+      _memoryGameError = null;
     });
   }
 
@@ -949,6 +991,7 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                 _buildCognitiveWellnessCard(r, cardWidth),
                 _buildEmotionalWellnessCard(r, cardWidth),
                 _buildMetabolicWellnessCard(r, cardWidth),
+                _buildMemoryGamesProgressCard(r, cardWidth),
               ],
             );
           },
@@ -1553,6 +1596,225 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Card 4 — Memory Games Progress (Quick Summary for Caregiver Directory)
+  Widget _buildMemoryGamesProgressCard(ResidentItem r, [double? cardWidth]) {
+    final progress = _memoryGameProgress;
+    final totalSessions = progress?.totalCompletedSessions ?? 0;
+    final latestDateStr = progress?.latestActivityDate != null
+        ? _formatDate(progress!.latestActivityDate!.toIso8601String())
+        : 'No sessions recorded';
+
+    // Friendly progress indicator badge based on real saved records
+    String progressText;
+    Color progressBg;
+    Color progressColor;
+    IconData progressIcon;
+
+    if (totalSessions == 0) {
+      progressText = 'No practice yet';
+      progressBg = AppColors.surfaceSecondary;
+      progressColor = AppColors.muted;
+      progressIcon = LucideIcons.circle;
+    } else if (progress?.hasRepeatedDecline == true) {
+      progressText = 'Decline Notice';
+      progressBg = const Color(0xFFFEF3C7);
+      progressColor = const Color(0xFFB45309);
+      progressIcon = LucideIcons.alertTriangle;
+    } else {
+      progressText = progress?.overallProgress == 'IMPROVING'
+          ? 'Improving (+)'
+          : (progress?.overallProgress == 'STEADY' ? 'Steady Practice' : 'Practicing Regularly');
+      progressBg = AppColors.riskLowBg;
+      progressColor = AppColors.riskLow;
+      progressIcon = LucideIcons.sparkles;
+    }
+
+    return Container(
+      width: cardWidth ?? 340,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(LucideIcons.gamepad2, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Memory Games',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: progressBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(progressIcon, size: 11, color: progressColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      progressText,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: progressColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          if (_isLoadingMemoryGames) ...[
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                ),
+              ),
+            ),
+          ] else if (_memoryGameError != null) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFDE8E8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.alertCircle, size: 16, color: AppColors.riskHigh),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _memoryGameError!,
+                      style: const TextStyle(fontSize: 12, color: AppColors.riskHigh),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            // Sessions Completed Counter
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.lavenderBg.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Completed Sessions',
+                    style: TextStyle(fontSize: 13, color: AppColors.body, fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    '$totalSessions',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Latest Scores per Game
+            _buildGameScoreRow('Remember Sequence', progress?.latestSequenceScore),
+            const SizedBox(height: 6),
+            _buildGameScoreRow('Matching Pairs', progress?.latestPairsScore),
+            const SizedBox(height: 6),
+            _buildGameScoreRow('Remember Items', progress?.latestItemsScore),
+            const SizedBox(height: 12),
+
+            // Recent Activity Date
+            Row(
+              children: [
+                const Icon(LucideIcons.calendar, size: 13, color: AppColors.muted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Last Activity: $latestDateStr',
+                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Open Memory Games in Care Plans
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const ValueKey('open_memory_games_care_plan_button'),
+                onPressed: () {
+                  context.go('/dashboard/care-plans?residentId=${r.id}');
+                },
+                icon: const Icon(LucideIcons.arrowUpRight, size: 14),
+                label: const Text('View in Care Plans'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGameScoreRow(String gameTitle, double? score) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          gameTitle,
+          style: const TextStyle(fontSize: 12.5, color: AppColors.navy),
+        ),
+        Text(
+          MemoryGameService.formatScore(score),
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.bold,
+            color: score != null ? AppColors.primary : AppColors.muted,
+          ),
+        ),
+      ],
     );
   }
 

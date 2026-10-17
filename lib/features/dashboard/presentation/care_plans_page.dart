@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../assessment/application/care_plans_service.dart';
 import '../../assessment/application/cognitive_assessment_service.dart';
+import '../../assessment/application/memory_game_service.dart';
 import '../../auth/application/auth_controller.dart';
 
 class CarePlansPage extends ConsumerStatefulWidget {
@@ -32,6 +33,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
   CarePlanCognitiveData? _cognitiveData;
   CarePlanEmotionalData? _emotionalData;
   CarePlanMetabolicData? _metabolicData;
+  MemoryGameProgressSummary? _memoryGameProgress;
   bool _isLoadingWellness = false;
   String? _wellnessError;
 
@@ -147,11 +149,19 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
 
       final results = await Future.wait([cognitiveFuture, emotionalFuture, metabolicFuture]);
 
+      MemoryGameProgressSummary? memoryGames;
+      try {
+        memoryGames = await MemoryGameService.fetchResidentProgress(resident.id, token: token);
+      } catch (_) {
+        memoryGames = MemoryGameProgressSummary.empty(resident.id, resident.name);
+      }
+
       if (mounted && _selectedResident?.id == resident.id) {
         setState(() {
           _cognitiveData = results[0] as CarePlanCognitiveData;
           _emotionalData = results[1] as CarePlanEmotionalData;
           _metabolicData = results[2] as CarePlanMetabolicData;
+          _memoryGameProgress = memoryGames;
           _isLoadingWellness = false;
         });
       }
@@ -171,6 +181,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
       _cognitiveData = null;
       _emotionalData = null;
       _metabolicData = null;
+      _memoryGameProgress = null;
       _showCognitiveHistory = false;
     });
   }
@@ -664,8 +675,8 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
           _buildErrorBanner(_wellnessError!, () => _loadResidentWellness(resident)),
         ] else ...[
           // THREE SEPARATE RECOMMENDATION CARDS
-          // 1. Cognitive Wellness
-          _buildCognitiveWellnessCard(),
+          // 1. Cognitive Wellness (Includes Integrated Memory Games Progress)
+          _buildCognitiveWellnessCard(resident),
           const SizedBox(height: 20),
 
           // 2. Emotional Wellness
@@ -713,10 +724,10 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
   // ----------------------------------------------------
   // 1. COGNITIVE WELLNESS CARD
   // ----------------------------------------------------
-  Widget _buildCognitiveWellnessCard() {
+  Widget _buildCognitiveWellnessCard(CarePlanResident resident) {
     final cog = _cognitiveData;
     if (cog == null || !cog.hasAssessment) {
-      return _buildEmptyCognitiveCard();
+      return _buildEmptyCognitiveCard(resident);
     }
 
     final latest = cog.latestAssessment!;
@@ -1024,6 +1035,12 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                     _buildCognitiveHistoryList(priorRecords),
                   ],
                 ],
+                const SizedBox(height: 24),
+                const Divider(height: 1, color: AppColors.border),
+                const SizedBox(height: 24),
+
+                // Integrated Memory Games Progress Sub-Section
+                _buildMemoryGamesProgressSection(resident),
               ],
             ),
           ),
@@ -1032,7 +1049,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
     );
   }
 
-  Widget _buildEmptyCognitiveCard() {
+  Widget _buildEmptyCognitiveCard(CarePlanResident resident) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -1040,32 +1057,50 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(LucideIcons.brain, size: 40, color: AppColors.muted),
-          const SizedBox(height: 12),
-          const Text(
-            'No Cognitive Assessment Recorded',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'This resident has not completed a cognitive evaluation yet. Start an assessment to generate risk-based care plans.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppColors.muted),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => context.push('/dashboard/assessment'),
-            icon: const Icon(LucideIcons.play, size: 16),
-            label: const Text('Start Cognitive Assessment'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          Center(
+            child: Column(
+              children: [
+                const Icon(LucideIcons.brain, size: 40, color: AppColors.muted),
+                const SizedBox(height: 12),
+                const Text(
+                  'No Cognitive Assessment Recorded',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'This resident has not completed a cognitive evaluation yet. Start an assessment to generate risk-based care plans.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: AppColors.muted),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => context.push('/dashboard/assessment'),
+                  icon: const Icon(LucideIcons.play, size: 16),
+                  label: const Text('Start Cognitive Assessment'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: 24),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 24),
+          _buildMemoryGamesProgressSection(resident),
         ],
       ),
     );
@@ -1628,6 +1663,561 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
           ),
         ],
       ),
+    );
+  }
+
+  // ----------------------------------------------------
+  // SECTION 4: MEMORY GAMES PROGRESS
+  // ----------------------------------------------------
+  Widget _buildMemoryGamesProgressSection(CarePlanResident resident) {
+    final progress = _memoryGameProgress;
+    final totalSessions = progress?.totalCompletedSessions ?? 0;
+    final sessions = progress?.sessions ?? [];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+          // Section Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(LucideIcons.gamepad2, color: AppColors.primary, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Memory Games Progress',
+                      style: AppTextStyles.h3.copyWith(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.navy,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Longitudinal cognitive practice sessions and game performance',
+                      style: TextStyle(fontSize: 13, color: AppColors.body),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: totalSessions > 0 ? AppColors.riskLowBg : AppColors.surfaceSecondary,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$totalSessions ${totalSessions == 1 ? 'Session' : 'Sessions'} Completed',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: totalSessions > 0 ? AppColors.riskLow : AppColors.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Non-Clinical Assessment Separation Disclaimer
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Icon(LucideIcons.shieldCheck, size: 16, color: AppColors.primary),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Practice Activity Disclaimer: Memory Games are optional cognitive practice exercises. Performance scores reflect mental recreation and do not alter clinical AI risk level, ACRF scores, or formal medical care plans.',
+                    style: TextStyle(fontSize: 12, color: AppColors.body, height: 1.35),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Neutral Caregiver Notice if repeated decline is observed
+          if (progress?.hasRepeatedDecline == true) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFF59E0B)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(LucideIcons.alertTriangle, size: 20, color: Color(0xFFB45309)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Caregiver Observation: Noticeable Practice Variation',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF92400E),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          progress?.caregiverNotice ??
+                              'A gentle decline in recent game scores has been observed across recent sessions. Consider scheduling a relaxed practice session or checking if the resident was fatigued during play.',
+                          style: const TextStyle(fontSize: 12.5, color: Color(0xFF78350F), height: 1.3),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          // Friendly Empty State when 0 sessions exist
+          if (totalSessions == 0) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSecondary.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primarySoft,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(LucideIcons.gamepad2, color: AppColors.primary, size: 26),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'No Completed Game Sessions Yet',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navy),
+                  ),
+                  const SizedBox(height: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 480),
+                    child: Text(
+                      'When ${resident.name} plays Remember the Sequence, Matching Pairs, or Remember the Items, their practice accuracy, trends, and session records will be displayed here.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 13, color: AppColors.body, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            // 1. Separate Progress Summaries for All 3 Games
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final double cardWidth = constraints.maxWidth < 680
+                    ? constraints.maxWidth
+                    : (constraints.maxWidth - 32) / 3;
+
+                // Group sessions per game
+                final seqSessions = sessions.where((s) => s.gameType == 'SEQUENCE').toList();
+                final pairsSessions = sessions.where((s) => s.gameType == 'PAIRS').toList();
+                final itemsSessions = sessions.where((s) => s.gameType == 'ITEMS').toList();
+
+                return Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  children: [
+                    _buildGameSummaryCard(
+                      title: 'Remember the Sequence',
+                      icon: LucideIcons.sparkles,
+                      color: const Color(0xFF7C3AED),
+                      latestScore: seqSessions.isNotEmpty ? seqSessions.first.scorePercentage : null,
+                      previousScore: seqSessions.length > 1 ? seqSessions[1].scorePercentage : null,
+                      totalSessions: seqSessions.length,
+                      progressStatus: progress?.sequenceProgress ?? 'NO_DATA',
+                      width: cardWidth,
+                    ),
+                    _buildGameSummaryCard(
+                      title: 'Matching Pairs',
+                      icon: LucideIcons.puzzle,
+                      color: const Color(0xFF2563EB),
+                      latestScore: pairsSessions.isNotEmpty ? pairsSessions.first.scorePercentage : null,
+                      previousScore: pairsSessions.length > 1 ? pairsSessions[1].scorePercentage : null,
+                      totalSessions: pairsSessions.length,
+                      progressStatus: progress?.pairsProgress ?? 'NO_DATA',
+                      width: cardWidth,
+                    ),
+                    _buildGameSummaryCard(
+                      title: 'Remember the Items',
+                      icon: LucideIcons.bookOpen,
+                      color: const Color(0xFF16A34A),
+                      latestScore: itemsSessions.isNotEmpty ? itemsSessions.first.scorePercentage : null,
+                      previousScore: itemsSessions.length > 1 ? itemsSessions[1].scorePercentage : null,
+                      totalSessions: itemsSessions.length,
+                      progressStatus: progress?.itemsProgress ?? 'NO_DATA',
+                      width: cardWidth,
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+
+            // 2. Simple Progress Chart (Visual score bars of recent sessions)
+            _buildProgressScoreChart(sessions),
+            const SizedBox(height: 24),
+
+            // 3. Session History
+            _buildSessionHistoryList(sessions),
+          ],
+        ],
+      );
+  }
+
+  Widget _buildGameSummaryCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required double? latestScore,
+    required double? previousScore,
+    required int totalSessions,
+    required String progressStatus,
+    required double width,
+  }) {
+    String trendText;
+    Color trendBg;
+    Color trendColor;
+
+    if (latestScore == null) {
+      trendText = 'No Plays Yet';
+      trendBg = AppColors.surfaceSecondary;
+      trendColor = AppColors.muted;
+    } else if (previousScore == null) {
+      trendText = '1 Round Completed';
+      trendBg = AppColors.lavenderBg;
+      trendColor = AppColors.primary;
+    } else {
+      final diff = latestScore - previousScore;
+      if (diff > 0) {
+        trendText = '+${diff.toStringAsFixed(1)}% Improvement';
+        trendBg = AppColors.riskLowBg;
+        trendColor = AppColors.riskLow;
+      } else if (diff < 0) {
+        trendText = '${diff.toStringAsFixed(1)}% Variation';
+        trendBg = const Color(0xFFFEF3C7);
+        trendColor = const Color(0xFFB45309);
+      } else {
+        trendText = 'Steady (0.0%)';
+        trendBg = AppColors.lavenderBg;
+        trendColor = AppColors.primary;
+      }
+    }
+
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: color),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                MemoryGameService.formatScore(latestScore),
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: latestScore != null ? AppColors.navy : AppColors.muted,
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (previousScore != null)
+                Text(
+                  'Prev: ${MemoryGameService.formatScore(previousScore)}',
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: trendBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  trendText,
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: trendColor),
+                ),
+              ),
+              Text(
+                '$totalSessions ${totalSessions == 1 ? 'play' : 'plays'}',
+                style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressScoreChart(List<MemoryGameSessionRecord> sessions) {
+    final recent = sessions.take(6).toList().reversed.toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.lavenderBg.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(LucideIcons.barChart2, size: 18, color: AppColors.primary),
+              SizedBox(width: 8),
+              Text(
+                'Recent Performance Chart',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
+              ),
+              Spacer(),
+              Text(
+                'Accuracy % by session',
+                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Column(
+            children: recent.map((s) {
+              final gameName = s.gameType == 'SEQUENCE'
+                  ? 'Sequence'
+                  : (s.gameType == 'PAIRS' ? 'Pairs' : 'Items');
+              final pct = (s.scorePercentage.clamp(0.0, 100.0)) / 100.0;
+              final Color barColor = s.scorePercentage >= 80
+                  ? AppColors.riskLow
+                  : (s.scorePercentage >= 60 ? AppColors.primary : AppColors.riskModerate);
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 75,
+                      child: Text(
+                        gameName,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy),
+                      ),
+                    ),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: pct,
+                          backgroundColor: Colors.white,
+                          valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                          minHeight: 14,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        '${s.scorePercentage.toStringAsFixed(1)}%',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.navy),
+                        textAlign: TextAlign.end,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSessionHistoryList(List<MemoryGameSessionRecord> sessions) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(LucideIcons.history, size: 18, color: AppColors.navy),
+            const SizedBox(width: 8),
+            Text(
+              'Session History (${sessions.length})',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.navy),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: sessions.length,
+            separatorBuilder: (context, index) => const Divider(height: 1, color: AppColors.border),
+            itemBuilder: (context, index) {
+              final s = sessions[index];
+              final gameTitle = s.gameType == 'SEQUENCE'
+                  ? 'Remember the Sequence'
+                  : (s.gameType == 'PAIRS' ? 'Matching Pairs' : 'Remember the Items');
+              final dateStr = s.completedAt != null
+                  ? _formatDate(s.completedAt!.toIso8601String())
+                  : 'Recent session';
+
+              String metrics;
+              if (s.gameType == 'SEQUENCE') {
+                metrics = 'Level: ${s.totalItems} Tiles • Attempts: ${s.attempts} • Correct: ${s.correctAnswers}';
+              } else if (s.gameType == 'PAIRS') {
+                metrics = 'Turns Taken: ${s.attempts} • Pairs Found: ${s.correctAnswers} / ${s.totalItems}';
+              } else {
+                metrics = 'Attempts: ${s.attempts} • Recalled: ${s.correctAnswers} / ${s.totalItems} Items';
+              }
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: AppColors.primarySoft,
+                      child: Text(
+                        '#${index + 1}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                gameTitle,
+                                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: AppColors.navy),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceSecondary,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  s.status,
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.muted),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            metrics,
+                            style: const TextStyle(fontSize: 12, color: AppColors.body),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: s.scorePercentage >= 80
+                                ? AppColors.riskLowBg
+                                : (s.scorePercentage >= 60 ? AppColors.lavenderBg : const Color(0xFFFEF3C7)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${s.scorePercentage.toStringAsFixed(1)}%',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: s.scorePercentage >= 80
+                                  ? AppColors.riskLow
+                                  : (s.scorePercentage >= 60 ? AppColors.primary : const Color(0xFFB45309)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          dateStr,
+                          style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
