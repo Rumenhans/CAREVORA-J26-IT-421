@@ -261,7 +261,15 @@ class AutomaticFacialCaptureService {
   FacialCaptureStatus get status => _status;
   List<FacialEmotionResult> get sessionResults => List.unmodifiable(_sessionResults);
   FacialSessionAggregate get lastAggregate => _lastAggregate;
-  FacialSessionAggregate get aggregate => _lastAggregate;
+  FacialSessionAggregate get aggregate {
+    if (_sessionResults.isNotEmpty) {
+      return FacialSessionAggregate.fromResults(
+        totalAttempts: _totalCapturesAttempted,
+        results: _sessionResults,
+      );
+    }
+    return _lastAggregate;
+  }
   bool get isAutoCapturing => _isVoiceRecordingActive && _hasInformedConsent;
   bool get isCameraInitialized => _cameraAdapter.isInitialized;
 
@@ -398,6 +406,10 @@ class AutomaticFacialCaptureService {
       }
 
       _sessionResults.add(result);
+      _lastAggregate = FacialSessionAggregate.fromResults(
+        totalAttempts: _totalCapturesAttempted,
+        results: _sessionResults,
+      );
       onFrameAnalyzed?.call(result);
       if (result.isSuccess) {
         _setStatus(FacialCaptureStatus.standby);

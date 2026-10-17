@@ -138,6 +138,13 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         }
 
     try:
+        w, h = img.size
+        if w != h:
+            min_side = min(w, h)
+            left = (w - min_side) // 2
+            top = (h - min_side) // 2
+            img = img.crop((left, top, left + min_side, top + min_side))
+
         img_tensor = transform(img).unsqueeze(0)
         with torch.no_grad():
             outputs = model(img_tensor)
