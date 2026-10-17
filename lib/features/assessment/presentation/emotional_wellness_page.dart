@@ -85,6 +85,14 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   late final TextEditingController _reasonTextController;
   bool _isRecordingReason = false;
 
+  // Conversational AI Support Intervention Flow
+  int _interventionStage = 0;
+  String _selectedSongTitle = 'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)';
+  bool _isPlayingMusic = false;
+  int _songPlaybackSeconds = 0;
+  Timer? _songTimer;
+  bool _caregiverNotified = false;
+
   // Sub-navigation: 0: Assessment Session, 1: RALPA Trajectory, 2: Care Interventions & Reassessment, 3: Assessment History
   int _selectedSubTab = 0;
   late Resident _currentResident;
@@ -940,6 +948,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   void dispose() {
     _facialCaptureService.dispose();
     _recordTimer?.cancel();
+    _songTimer?.cancel();
     _waveController.dispose();
     _scannerController.dispose();
     _clapController.dispose();
@@ -1144,6 +1153,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 _reasonTextController.text = result.recognizedWords;
                 _elderNegativeReasons[currentQ.id] = result.recognizedWords;
               });
+              _detectKeywordsInReason(result.recognizedWords);
             }
           });
         } catch (e) {
@@ -1153,12 +1163,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         // Fallback simulation when speech engine is not supported or browser mic permission blocked
         Future.delayed(const Duration(milliseconds: 1400), () {
           if (mounted && _isRecordingReason) {
-            const fallbackSample = 'අද උදෑසන සිට මට තරමක තනිකමක් සහ සිතේ නොසන්සුන්තාවක් දැනුණා.';
+            const fallbackSample = 'අද මට ඇඟට අමාරුයි සහ අසනීප ගතියක් දැනෙනවා.';
             setState(() {
               _reasonTextController.text = fallbackSample;
               _elderNegativeReasons[currentQ.id] = fallbackSample;
               _isRecordingReason = false;
             });
+            _detectKeywordsInReason(fallbackSample);
           }
         });
       }
@@ -1169,6 +1180,881 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       if (_speechEnabled) {
         await _speech.stop();
       }
+    }
+  }
+
+  void _detectKeywordsInReason(String text) {
+    final lower = text.toLowerCase();
+    if (lower.contains('leda') ||
+        lower.contains('amarui') ||
+        lower.contains('sick') ||
+        lower.contains('pain') ||
+        lower.contains('headache') ||
+        lower.contains('unwell') ||
+        lower.contains('beheth') ||
+        lower.contains('අසනීප') ||
+        lower.contains('අමාරු') ||
+        lower.contains('කැක්කුම') ||
+        lower.contains('උණ')) {
+      _selectUnwellPath();
+    } else if (lower.contains('nidahasa') ||
+        lower.contains('quiet') ||
+        lower.contains('peace') ||
+        lower.contains('rest') ||
+        lower.contains('නිදහස්') ||
+        lower.contains('විවේක') ||
+        lower.contains('තනියම')) {
+      _selectQuietPath();
+    }
+  }
+
+  void _selectUnwellPath() {
+    setState(() {
+      _interventionStage = 1;
+      _elderNegativeReasons[_questions[_currentIndex].id] = 'මට අසනීප ගතියක් දැනෙනවා.';
+      _reasonTextController.text = 'මට අසනීප ගතියක් දැනෙනවා.';
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('Did you take your medication? Are you in a lot of discomfort? Do you need to see a doctor?');
+  }
+
+  void _selectQuietPath() {
+    setState(() {
+      _interventionStage = 3;
+      _elderNegativeReasons[_questions[_currentIndex].id] = 'මට ටිකක් නිදහසේ ඉන්න අවශ්‍යයි.';
+      _reasonTextController.text = 'මට ටිකක් නිදහසේ ඉන්න අවශ්‍යයි.';
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('Would you like to listen to a soothing song or read a book to calm your mind?');
+  }
+
+  void _dispatchDoctorAndCaregiverAlert() {
+    setState(() {
+      _interventionStage = 2;
+      _caregiverNotified = true;
+    });
+    MockCarevoraData.alerts.insert(
+      0,
+      AlertItem(
+        id: 'ALT-${DateTime.now().millisecondsSinceEpoch}',
+        title: '🚨 Urgent Doctor Request: ${_currentResident.name}',
+        description: 'Resident in Room ${_currentResident.roomNo} reported severe discomfort and requested urgent medical review.',
+        severity: 'High',
+        timestamp: 'Just now',
+      ),
+    );
+    _flutterTts.stop();
+    _flutterTts.speak('An urgent notification has been sent to your caregiver and attending physician. Please remain calm, assistance is arriving right now.');
+  }
+
+  void _startMusicIntervention(String songTitle) {
+    setState(() {
+      _selectedSongTitle = songTitle;
+      _interventionStage = 4;
+      _isPlayingMusic = true;
+      _songPlaybackSeconds = 0;
+    });
+    _songTimer?.cancel();
+    _songTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (mounted) {
+        setState(() {
+          _songPlaybackSeconds++;
+        });
+        if (_songPlaybackSeconds >= 45) {
+          _finishMusicIntervention();
+        }
+      }
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('Playing $songTitle to help soothe and relax your mind.');
+  }
+
+  void _toggleMusicPlayback() {
+    setState(() {
+      _isPlayingMusic = !_isPlayingMusic;
+    });
+    if (!_isPlayingMusic) {
+      _songTimer?.cancel();
+    } else {
+      _songTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (mounted) {
+          setState(() {
+            _songPlaybackSeconds++;
+          });
+          if (_songPlaybackSeconds >= 45) {
+            _finishMusicIntervention();
+          }
+        }
+      });
+    }
+  }
+
+  void _finishMusicIntervention() {
+    _songTimer?.cancel();
+    setState(() {
+      _isPlayingMusic = false;
+      _interventionStage = 6;
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('Now that you have listened to the music, are you feeling more peaceful and in good spirits?');
+  }
+
+  void _startBookIntervention() {
+    setState(() {
+      _interventionStage = 5;
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('Here are some gentle stories and reflections for you to read.');
+  }
+
+  void _finishBookIntervention() {
+    setState(() {
+      _interventionStage = 6;
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('Now that you have rested and read, are you feeling more peaceful and in good spirits?');
+  }
+
+  void _handlePostInterventionAnswer(bool feelBetter) {
+    if (feelBetter) {
+      setState(() {
+        _answers[_questions[_currentIndex].id] = true;
+        _showClapAnimation = true;
+        _interventionStage = 0;
+      });
+      _clapController.forward(from: 0.0);
+      _flutterTts.stop();
+      _flutterTts.speak('Wonderful! I am so delighted that this helped you feel calm and in good spirits. Moving to the next question.');
+      Future.delayed(const Duration(milliseconds: 2500), () {
+        if (mounted && _currentIndex < _questions.length - 1) {
+          _nextQuestion();
+        }
+      });
+    } else {
+      setState(() {
+        _interventionStage = 7;
+      });
+      _flutterTts.stop();
+      _flutterTts.speak('Did this not help you feel better? Would you like me to send a caregiver to come sit and talk with you?');
+    }
+  }
+
+  void _callCaregiverForCompanionship() {
+    setState(() {
+      _caregiverNotified = true;
+    });
+    MockCarevoraData.alerts.insert(
+      0,
+      AlertItem(
+        id: 'ALT-${DateTime.now().millisecondsSinceEpoch}',
+        title: 'Caregiver Companionship Request: ${_currentResident.name}',
+        description: 'Resident in Room ${_currentResident.roomNo} feels persistent low mood and requested personal companion support.',
+        severity: 'Moderate',
+        timestamp: 'Just now',
+      ),
+    );
+    _flutterTts.stop();
+    _flutterTts.speak('Your caregiver has been notified to come spend some comforting time with you. Please take it easy.');
+  }
+
+  Widget _buildSongChip(String title) {
+    final isSelected = _selectedSongTitle == title;
+    return ChoiceChip(
+      label: Text(title, style: TextStyle(fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+      selected: isSelected,
+      onSelected: (_) => _startMusicIntervention(title),
+      selectedColor: AppColors.primarySoft,
+      backgroundColor: Colors.white,
+    );
+  }
+
+  Widget _buildConversationalSupportCard(AssessmentQuestion currentQ) {
+    switch (_interventionStage) {
+      case 1:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF7ED),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFDBA74)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.stethoscope, size: 20, color: Color(0xFFC2410C)),
+                  SizedBox(width: 8),
+                  Text(
+                    'AI Assistant: සෞඛ්‍ය සහ විවේක විමසුම (Health & Care Check)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'ඔබ බෙහෙත් බිව්වාද? ඔබට ගොඩක් අමාරුද? ඔබට වෛද්‍යවරයෙක් (Doctor) හමුවෙන්න අවශ්‍යද?',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF9A3412), height: 1.35),
+              ),
+              const SizedBox(height: 3),
+              const Text(
+                'Did you take your medication? Are you in a lot of discomfort? Do you need to see a doctor?',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFFC2410C)),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _dispatchDoctorAndCaregiverAlert,
+                    icon: const Icon(LucideIcons.bellRing, size: 16),
+                    label: const Text('🚨 ඔව්, දොස්තර මහත්තයෙක් (Doctor) හමුවෙන්න ඕනේ'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _selectQuietPath,
+                    icon: const Icon(LucideIcons.pill, size: 16),
+                    label: const Text('💊 බෙහෙත් බිව්වා, මට නිදහසේ විවේක ගත්තාම හරි'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF9A3412),
+                      side: const BorderSide(color: Color(0xFFFDBA74)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _selectQuietPath,
+                    icon: const Icon(LucideIcons.leaf, size: 16),
+                    label: const Text('🌿 ගොඩක් අමාරුවක් නෑ, සිත සන්සුන් කරගත්තාම හරි'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF9A3412),
+                      side: const BorderSide(color: Color(0xFFFDBA74)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      case 2:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF2F2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFF87171)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.bellRing, size: 22, color: Color(0xFFDC2626)),
+                  SizedBox(width: 8),
+                  Text(
+                    'හදිසි දැනුම්දීමක් (Emergency Alert Dispatched)',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'ඔබේ කාමරයේ (${_currentResident.roomNo}) රැකවරණ නිලධාරියාට (Caregiver) සහ වෛද්‍ය කණ්ඩායමට වහාම පැමිණෙන ලෙස හදිසි Notification එකක් යවන ලදී. කරුණාකර සුවපහසුව සිටින්න, ඔවුන් දැන්ම පැමිණෙනු ඇත.',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF991B1B), height: 1.4),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Immediate alert sent to Caregiver & Doctor to attend to your room. Help is on the way.',
+                style: TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFFDC2626)),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Caregiver: Nurse Seetha N. (RN) Dispatched to Room ${_currentResident.roomNo}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _selectQuietPath,
+                    icon: const Icon(LucideIcons.music, size: 16),
+                    label: const Text('ඔවුන් එනතුරු සන්සුන් සංගීතයකට සවන් දෙන්න'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  TextButton(
+                    onPressed: () => setState(() => _interventionStage = 0),
+                    child: const Text('ආපසු (Back)'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      case 3:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF5F3FF),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFDDD6FE)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.sparkles, size: 18, color: AppColors.primary),
+                  SizedBox(width: 8),
+                  Text(
+                    'AI Assistant: සිත සන්සුන් කරගැනීම (Mindfulness & Calm)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'සිත සන්සුන් කරගන්න සින්දුවකට (Song) සවන් දෙන්න කැමතිද? නැත්නම් පොතක් (Book) කියවන්න කැමතිද?',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.navy, height: 1.35),
+              ),
+              const SizedBox(height: 3),
+              const Text(
+                'Would you like to listen to a soothing song or read a book to calm your mind?',
+                style: TextStyle(fontSize: 12, color: AppColors.body),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _startMusicIntervention('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)'),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.lilac, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(color: AppColors.primary.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2)),
+                          ],
+                        ),
+                        child: Column(
+                          children: const [
+                            Icon(LucideIcons.music, size: 28, color: AppColors.primary),
+                            SizedBox(height: 8),
+                            Text(
+                              '🎵 සින්දුවක් අහන්න',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
+                            ),
+                            SizedBox(height: 2),
+                            Text('Listen to a Song', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: InkWell(
+                      onTap: _startBookIntervention,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.lilac, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(color: AppColors.primary.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2)),
+                          ],
+                        ),
+                        child: Column(
+                          children: const [
+                            Icon(LucideIcons.bookOpen, size: 28, color: Color(0xFF0D9488)),
+                            SizedBox(height: 8),
+                            Text(
+                              '📖 පොතක් කියවන්න',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
+                            ),
+                            SizedBox(height: 2),
+                            Text('Read a Book', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      case 4:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F0FF),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFC4B5FD)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(LucideIcons.music, size: 18, color: AppColors.primary),
+                      SizedBox(width: 8),
+                      Text(
+                        'සන්සුන් සංගීත චිකිත්සාව (Acoustic Relaxation)',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _isPlayingMusic ? '🎶 ධාවනය වෙමින්...' : '⏸️ විරාමය',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _buildSongChip('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)'),
+                  _buildSongChip('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව'),
+                  _buildSongChip('සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute)'),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.lilac),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(_isPlayingMusic ? LucideIcons.pause : LucideIcons.play, size: 24, color: AppColors.primary),
+                      onPressed: _toggleMusicPlayback,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _selectedSongTitle,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.navy),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: List.generate(16, (i) {
+                              final barHeight = _isPlayingMusic ? 6.0 + ((i * 7 + _songPlaybackSeconds * 5) % 18) : 6.0;
+                              return Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                                width: 3,
+                                height: barHeight,
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary.withValues(alpha: 0.75),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              );
+                            }),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '0:${_songPlaybackSeconds.toString().padLeft(2, '0')} / 0:45',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: _finishMusicIntervention,
+                  icon: const Icon(LucideIcons.checkCheck, size: 18),
+                  label: const Text(
+                    '✨ අහලා ඉවරයි (Finished Listening - Check How I Feel)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF16A34A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+
+      case 5:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0FDFA),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF99F6E4)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.bookOpen, size: 20, color: Color(0xFF0D9488)),
+                  SizedBox(width: 8),
+                  Text(
+                    'සන්සුන් කියවීම් අංශය (Serene Reading Corner)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFCCFBF1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      '📖 ජාතක කතා සහ බුද්ධ ධර්මයේ සැනසිලිදායක සිතිවිලි',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.navy),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      '"සිත නිශ්චල වූ විට සියලු කරදර පහව යයි. ගලා යන ගංගාවක් සේ ජීවිතයේ සෑම මොහොතක්ම සැනසීමෙන් සහ ඉවසීමෙන් විඳගන්න. අද දිනයද ඔබට සුවය සහ සාමය ගෙන දෙනු ඇත..."',
+                      style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: Color(0xFF134E4A), height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _startMusicIntervention('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)'),
+                    icon: const Icon(LucideIcons.music, size: 16),
+                    label: const Text('සින්දුවක් අහන්න කැමතිද?'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _finishBookIntervention,
+                    icon: const Icon(LucideIcons.checkCheck, size: 16),
+                    label: const Text('✨ කියවා අවසන් (Done Reading)'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0D9488),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      case 6:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEEF2FF),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFA5B4FC), width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.sparkles, size: 20, color: Color(0xFF4F46E5)),
+                  SizedBox(width: 8),
+                  Text(
+                    'AI Re-evaluation: මනෝභාවය නැවත විමසීම',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF312E81)),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'Are you feeling peaceful and in good spirits now?',
+                style: TextStyle(fontSize: 13, color: Color(0xFF4338CA)),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => _handlePostInterventionAnswer(true),
+                    icon: const Icon(LucideIcons.smile, size: 18),
+                    label: const Text('Yes / ඔව්, දැන් සතුටුයි'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF16A34A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: () => _handlePostInterventionAnswer(false),
+                    icon: const Icon(LucideIcons.frown, size: 18),
+                    label: const Text('No / තවමත් නැහැ'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      case 7:
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF2F2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFCA5A5)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.heartPulse, size: 20, color: Color(0xFFDC2626)),
+                  SizedBox(width: 8),
+                  Text(
+                    'AI Caregiver Dispatch Assistance',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'ඔබට මේ දේවලින් සිතට සැනසීමක් ලැබුණේ නැද්ද? අපි රැකවරණ නිලධාරියෙකු (Caregiver) ඔබ ළඟට එවන්නද?',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF991B1B), height: 1.35),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'Did this not help you feel better? Would you like me to send a caregiver to come sit and talk with you?',
+                style: TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _callCaregiverForCompanionship,
+                    icon: const Icon(LucideIcons.bellRing, size: 16),
+                    label: Text(_caregiverNotified ? '✓ Caregiver කැඳවන ලදී' : '🚨 ඔව්, රැකවරණ නිලධාරියෙකු කැඳවන්න'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton(
+                    onPressed: _nextQuestion,
+                    child: const Text('ඊළඟ ප්‍රශ්නයට යන්න (Next)'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      default:
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFDE68A)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(LucideIcons.heartHandshake, size: 18, color: Color(0xFFD97706)),
+                  SizedBox(width: 8),
+                  Text(
+                    'AI Assistant',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF92400E), height: 1.35),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'I am sorry to hear that. Could you tell me or type what is making you feel this way?',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFFB45309)),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFCD34D)),
+                ),
+                child: TextField(
+                  controller: _reasonTextController,
+                  maxLines: 2,
+                  onChanged: (val) {
+                    setState(() {
+                      _elderNegativeReasons[currentQ.id] = val;
+                    });
+                    _detectKeywordsInReason(val);
+                  },
+                  style: const TextStyle(fontSize: 13, color: AppColors.navy),
+                  decoration: const InputDecoration(
+                    hintText: 'ඔබට එසේ දැනෙන්න හේතුව මෙහි ටයිප් කරන්න... / Type why you feel this way...',
+                    hintStyle: TextStyle(fontSize: 12, color: AppColors.muted),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.all(10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  InkWell(
+                    onTap: _toggleReasonVoiceRecording,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _isRecordingReason ? AppColors.riskHigh : AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isRecordingReason ? LucideIcons.square : LucideIcons.mic,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _isRecordingReason ? 'සවන් දෙමින්... (නැවැත්වීමට ඔබන්න)' : '🎙️ හඬින් පවසන්න (Speak Reason)',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if ((_elderNegativeReasons[currentQ.id] ?? '').trim().isNotEmpty)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(LucideIcons.checkCheck, size: 14, color: Color(0xFF16A34A)),
+                        SizedBox(width: 4),
+                        Text(
+                          'හේතුව සටහන් විය (Saved)',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF16A34A)),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'නැතහොත් පහතින් පහසු විකල්පයක් තෝරන්න (Or choose below):',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFB45309)),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ActionChip(
+                    avatar: const Text('🤒'),
+                    label: const Text('මට අසනීපයි / ඇඟට අමාරුයි (Feeling sick/unwell)'),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFFFDBA74)),
+                    onPressed: _selectUnwellPath,
+                  ),
+                  ActionChip(
+                    avatar: const Text('🌿'),
+                    label: const Text('මට ටිකක් නිදහසේ ඉන්න ඕනෙ (Just need quiet/peace)'),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFFC4B5FD)),
+                    onPressed: _selectQuietPath,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
     }
   }
 
@@ -1216,6 +2102,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     final ans = _answers[q.id];
     _showClapAnimation = false;
     _reasonTextController.text = _elderNegativeReasons[q.id] ?? '';
+    _interventionStage = 0;
+    _isPlayingMusic = false;
+    _songTimer?.cancel();
+    _caregiverNotified = false;
 
     switch (q.id) {
       case 1:
@@ -2539,133 +3429,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                             ),
                           ],
 
-                          // If NO: Reason prompt with speech and typing support
+                          // If NO: Conversational Support Intervention Card
                           if (_answers[currentQ.id] == false) ...[
                             const SizedBox(height: 14),
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFFFBEB),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0xFFFDE68A)),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: const [
-                                      Icon(LucideIcons.heartHandshake, size: 18, color: Color(0xFFD97706)),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        'AI Assistant',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFFB45309),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF92400E),
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  const Text(
-                                    'I am sorry to hear that. Could you tell me or type what is making you feel this way?',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: Color(0xFFB45309),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: const Color(0xFFFCD34D)),
-                                    ),
-                                    child: TextField(
-                                      controller: _reasonTextController,
-                                      maxLines: 2,
-                                      onChanged: (val) {
-                                        setState(() {
-                                          _elderNegativeReasons[currentQ.id] = val;
-                                        });
-                                      },
-                                      style: const TextStyle(fontSize: 13, color: AppColors.navy),
-                                      decoration: const InputDecoration(
-                                        hintText: 'ඔබට එසේ දැනෙන්න හේතුව මෙහි ටයිප් කරන්න... / Type why you feel this way...',
-                                        hintStyle: TextStyle(fontSize: 12, color: AppColors.muted),
-                                        border: InputBorder.none,
-                                        contentPadding: EdgeInsets.all(10),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      InkWell(
-                                        onTap: _toggleReasonVoiceRecording,
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                          decoration: BoxDecoration(
-                                            color: _isRecordingReason ? AppColors.riskHigh : AppColors.primary,
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                _isRecordingReason ? LucideIcons.square : LucideIcons.mic,
-                                                size: 14,
-                                                color: Colors.white,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                _isRecordingReason
-                                                    ? 'සවන් දෙමින්... (නැවැත්වීමට ඔබන්න)'
-                                                : '🎙️ හඬින් පවසන්න (Speak Reason)',
-                                                style: const TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      if ((_elderNegativeReasons[currentQ.id] ?? '').trim().isNotEmpty)
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: const [
-                                            Icon(LucideIcons.checkCheck, size: 14, color: Color(0xFF16A34A)),
-                                            SizedBox(width: 4),
-                                            Text(
-                                              'හේතුව සටහන් විය (Saved)',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: Color(0xFF16A34A),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
+                            _buildConversationalSupportCard(currentQ),
                           ],
                         ],
                       ),
