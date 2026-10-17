@@ -218,12 +218,39 @@ class _LiveFacialEmotionScannerWidgetState
                                   fit: BoxFit.cover,
                                   width: double.infinity,
                                   height: double.infinity,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      Image.asset(
+                                    'assets/images/landing/senior_neutral_calm_face.jpg',
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                  ),
                                 )
                               : Image.asset(
                                   _selectedSampleAsset,
                                   fit: BoxFit.cover,
                                   width: double.infinity,
                                   height: double.infinity,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Image.asset(
+                                      'assets/images/landing/senior_neutral_calm_face.jpg',
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      errorBuilder: (ctx, err, st) {
+                                        return Container(
+                                          color: const Color(0xFF1E293B),
+                                          child: const Center(
+                                            child: Icon(
+                                              LucideIcons.user,
+                                              size: 48,
+                                              color: Colors.white38,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
                                 ),
                         ),
 
