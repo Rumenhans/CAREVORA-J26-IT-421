@@ -138,7 +138,7 @@ class SocialAuditControllerTest {
     @Test
     @DisplayName("GET /api/residents/{residentId}/social-audits returns list of audits")
     void getAuditsByResident_returnsList() throws Exception {
-        when(socialAuditService.getAuditsByResident(1L))
+        when(socialAuditService.getAuditsByResident(eq(1L), any()))
                 .thenReturn(ApiResponse.ok(List.of(sampleResponse()), "Retrieved 1 social audit records"));
 
         mockMvc.perform(get("/api/residents/1/social-audits"))
@@ -151,7 +151,7 @@ class SocialAuditControllerTest {
     @Test
     @DisplayName("GET /api/residents/{residentId}/social-audits/latest returns latest audit")
     void getLatestAudit_returnsLatest() throws Exception {
-        when(socialAuditService.getLatestAudit(1L))
+        when(socialAuditService.getLatestAudit(eq(1L), any()))
                 .thenReturn(ApiResponse.ok(sampleResponse(), "Latest caregiver social audit retrieved"));
 
         mockMvc.perform(get("/api/residents/1/social-audits/latest"))

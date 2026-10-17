@@ -38,17 +38,21 @@ public class SocialAuditController {
     @GetMapping
     @Operation(summary = "Retrieve chronological caregiver social audit history for a resident")
     public ResponseEntity<ApiResponse<List<SocialAuditResponse>>> getAuditsByResident(
-            @PathVariable Long residentId
+            @PathVariable Long residentId,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(socialAuditService.getAuditsByResident(residentId));
+        String email = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(socialAuditService.getAuditsByResident(residentId, email));
     }
 
     @GetMapping("/latest")
     @Operation(summary = "Retrieve the latest caregiver social audit record for a resident")
     public ResponseEntity<ApiResponse<SocialAuditResponse>> getLatestAudit(
-            @PathVariable Long residentId
+            @PathVariable Long residentId,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(socialAuditService.getLatestAudit(residentId));
+        String email = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(socialAuditService.getLatestAudit(residentId, email));
     }
 
     @GetMapping("/{auditId}")

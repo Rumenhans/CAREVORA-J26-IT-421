@@ -13,4 +13,8 @@ public interface SocialAuditRepository extends JpaRepository<SocialAudit, Long> 
     Optional<SocialAudit> findFirstByResidentIdOrderByAuditDateDesc(Long residentId);
     Optional<SocialAudit> findByIdAndResidentId(Long id, Long residentId);
     long countByResidentId(Long residentId);
+    List<SocialAudit> findTop10ByOrderByAuditDateDesc();
+    List<SocialAudit> findTop10ByResidentElderHomeIdOrderByAuditDateDesc(Long elderHomeId);
+    long countByAuditDateAfter(java.time.LocalDateTime date);
+    long countByResidentElderHomeIdAndAuditDateAfter(Long elderHomeId, java.time.LocalDateTime date);
 }

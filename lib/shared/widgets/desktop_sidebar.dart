@@ -119,6 +119,12 @@ class DesktopSidebar extends ConsumerWidget {
                     route: '/dashboard/medicine',
                     badge: '2',
                   ),
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.clipboardCheck,
+                    label: 'Social Audit Hub',
+                    route: '/dashboard/social-audit',
+                  ),
                 ],
                 _buildNavItem(
                   context,

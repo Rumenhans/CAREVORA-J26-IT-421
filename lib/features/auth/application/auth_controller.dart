@@ -108,11 +108,13 @@ class AuthNotifier extends ChangeNotifier {
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
     final isAuth = prefs.getBool('carevora_auth') ?? false;
-    final email = prefs.getString('carevora_email') ?? 'david.silva@carevora.com';
+    final email = prefs.getString('carevora_email') ?? (isAuth ? 'david.silva@carevora.com' : null);
     final roleStr = prefs.getString('carevora_role') ?? 'caregiver';
-    final userName = prefs.getString('carevora_user_name') ?? 'David Silva';
-    final elderHomeId = prefs.getInt('carevora_elder_home_id') ?? 2;
-    final elderHomeName = prefs.getString('carevora_elder_home_name') ?? 'Golden Sunset Eldercare';
+    final userName = prefs.getString('carevora_user_name') ?? (isAuth ? 'David Silva' : null);
+    final elderHomeId = prefs.getInt('carevora_elder_home_id');
+    final elderHomeName = prefs.getString('carevora_elder_home_name');
+    final residentId = prefs.getInt('carevora_resident_id');
+    final caregiverId = prefs.getInt('carevora_caregiver_id');
     final token = prefs.getString('carevora_token');
 
     UserRole role = UserRole.caregiver;
@@ -131,6 +133,8 @@ class AuthNotifier extends ChangeNotifier {
       role: role,
       elderHomeId: elderHomeId,
       elderHomeName: elderHomeName,
+      residentId: residentId,
+      caregiverId: caregiverId,
       token: token,
     );
     notifyListeners();
@@ -205,6 +209,8 @@ class AuthNotifier extends ChangeNotifier {
             if (token != null) await prefs.setString('carevora_token', token);
             if (elderHomeId != null) await prefs.setInt('carevora_elder_home_id', elderHomeId);
             if (elderHomeName != null) await prefs.setString('carevora_elder_home_name', elderHomeName);
+            if (residentId != null) await prefs.setInt('carevora_resident_id', residentId);
+            if (caregiverId != null) await prefs.setInt('carevora_caregiver_id', caregiverId);
           }
 
           _state = _state.copyWith(
@@ -307,6 +313,12 @@ class AuthNotifier extends ChangeNotifier {
         if (fallbackState.elderHomeName != null) {
           await prefs.setString('carevora_elder_home_name', fallbackState.elderHomeName!);
         }
+        if (fallbackState.residentId != null) {
+          await prefs.setInt('carevora_resident_id', fallbackState.residentId!);
+        }
+        if (fallbackState.caregiverId != null) {
+          await prefs.setInt('carevora_caregiver_id', fallbackState.caregiverId!);
+        }
       }
       _state = fallbackState.copyWith(
         isLoading: false,
@@ -359,8 +371,12 @@ class AuthNotifier extends ChangeNotifier {
     await prefs.remove('carevora_auth');
     await prefs.remove('carevora_role');
     await prefs.remove('carevora_token');
+    await prefs.remove('carevora_email');
+    await prefs.remove('carevora_user_name');
     await prefs.remove('carevora_elder_home_id');
     await prefs.remove('carevora_elder_home_name');
+    await prefs.remove('carevora_resident_id');
+    await prefs.remove('carevora_caregiver_id');
     _state = const AuthState(isAuthenticated: false);
     notifyListeners();
   }

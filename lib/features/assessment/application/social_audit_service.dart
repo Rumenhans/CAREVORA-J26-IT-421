@@ -409,4 +409,139 @@ class SocialAuditService {
       return [];
     }
   }
+
+  /// Retrieves aggregated summary metrics for the caregiver social audit dashboard.
+  static Future<SocialAuditDashboardSummary?> fetchDashboardSummary(String? token) async {
+    final uri = Uri.parse('$baseUrl/api/social-audits/dashboard-summary');
+    final Map<String, String> headers = {
+      'Accept': 'application/json',
+    };
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    try {
+      final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+        if (decoded != null && decoded['success'] == true && decoded['data'] != null) {
+          return SocialAuditDashboardSummary.fromJson(decoded['data'] as Map<String, dynamic>);
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Searches residents directory with real-time audit status for the caregiver dashboard.
+  static Future<List<ResidentAuditDirectoryItem>> fetchResidentAuditDirectory({
+    String? search,
+    String? token,
+  }) async {
+    final queryParams = search != null && search.trim().isNotEmpty
+        ? '?search=${Uri.encodeComponent(search.trim())}'
+        : '';
+    final uri = Uri.parse('$baseUrl/api/social-audits/residents$queryParams');
+    final Map<String, String> headers = {
+      'Accept': 'application/json',
+    };
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    try {
+      final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+        if (decoded != null && decoded['success'] == true && decoded['data'] is List) {
+          final list = decoded['data'] as List;
+          return list.map((item) => ResidentAuditDirectoryItem.fromJson(item as Map<String, dynamic>)).toList();
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+}
+
+class SocialAuditDashboardSummary {
+  final int totalResidents;
+  final int residentsWithCompletedAudit;
+  final int residentsAwaitingAudit;
+  final int auditsCompletedToday;
+  final List<SocialAuditRecord> recentAudits;
+
+  const SocialAuditDashboardSummary({
+    required this.totalResidents,
+    required this.residentsWithCompletedAudit,
+    required this.residentsAwaitingAudit,
+    required this.auditsCompletedToday,
+    required this.recentAudits,
+  });
+
+  factory SocialAuditDashboardSummary.fromJson(Map<String, dynamic> json) {
+    final recent = (json['recentAudits'] as List?)
+            ?.map((e) => SocialAuditRecord.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    return SocialAuditDashboardSummary(
+      totalResidents: (json['totalResidents'] as num?)?.toInt() ?? 0,
+      residentsWithCompletedAudit: (json['residentsWithCompletedAudit'] as num?)?.toInt() ?? 0,
+      residentsAwaitingAudit: (json['residentsAwaitingAudit'] as num?)?.toInt() ?? 0,
+      auditsCompletedToday: (json['auditsCompletedToday'] as num?)?.toInt() ?? 0,
+      recentAudits: recent,
+    );
+  }
+}
+
+class ResidentAuditDirectoryItem {
+  final int residentId;
+  final String name;
+  final String? roomNumber;
+  final int? age;
+  final String? avatarUrl;
+  final int? elderHomeId;
+  final String? elderHomeName;
+  final bool hasCompletedAudit;
+  final double? latestSocialScore;
+  final DateTime? latestAuditDate;
+  final PeerInteractionFrequency? latestPeerInteractionLevel;
+  final int auditCount;
+
+  const ResidentAuditDirectoryItem({
+    required this.residentId,
+    required this.name,
+    this.roomNumber,
+    this.age,
+    this.avatarUrl,
+    this.elderHomeId,
+    this.elderHomeName,
+    required this.hasCompletedAudit,
+    this.latestSocialScore,
+    this.latestAuditDate,
+    this.latestPeerInteractionLevel,
+    required this.auditCount,
+  });
+
+  factory ResidentAuditDirectoryItem.fromJson(Map<String, dynamic> json) {
+    return ResidentAuditDirectoryItem(
+      residentId: (json['residentId'] as num?)?.toInt() ?? 0,
+      name: json['name'] as String? ?? 'Resident',
+      roomNumber: json['roomNumber'] as String?,
+      age: (json['age'] as num?)?.toInt(),
+      avatarUrl: json['avatarUrl'] as String?,
+      elderHomeId: (json['elderHomeId'] as num?)?.toInt(),
+      elderHomeName: json['elderHomeName'] as String?,
+      hasCompletedAudit: json['hasCompletedAudit'] as bool? ?? false,
+      latestSocialScore: (json['latestSocialScore'] as num?)?.toDouble(),
+      latestAuditDate: json['latestAuditDate'] != null
+          ? DateTime.tryParse(json['latestAuditDate'] as String)
+          : null,
+      latestPeerInteractionLevel:
+          PeerInteractionFrequencyX.fromApi(json['latestPeerInteractionLevel'] as String?),
+      auditCount: (json['auditCount'] as num?)?.toInt() ?? 0,
+    );
+  }
 }

@@ -21,7 +21,9 @@ import 'widgets/caregiver_social_audit_dialog.dart';
 import '../../auth/application/auth_controller.dart';
 
 class EmotionalWellnessPage extends ConsumerStatefulWidget {
-  const EmotionalWellnessPage({super.key});
+  final String? initialResidentId;
+
+  const EmotionalWellnessPage({super.key, this.initialResidentId});
 
   @override
   ConsumerState<EmotionalWellnessPage> createState() => _EmotionalWellnessPageState();
@@ -148,7 +150,20 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
     if (authState.isElder) {
       Resident? matchedResident;
-      if (userName != null && userName.isNotEmpty) {
+      if (authState.residentId != null) {
+        final bId = authState.residentId!;
+        for (final r in _availableResidents) {
+          final parsed = int.tryParse(r.id);
+          if (parsed == bId ||
+              (bId == 1 && (parsed == 9002 || r.name.contains('Sarah'))) ||
+              (bId == 2 && (parsed == 9003 || r.name.contains('Arthur'))) ||
+              (bId == 3 && (parsed == 9004 || r.name.contains('Margaret')))) {
+            matchedResident = r;
+            break;
+          }
+        }
+      }
+      if (matchedResident == null && userName != null && userName.isNotEmpty) {
         final cleanName = userName.toLowerCase();
         for (final r in _availableResidents) {
           final rClean = r.name.toLowerCase().replaceAll('mrs. ', '').replaceAll('mr. ', '').replaceAll('dr. ', '');
@@ -178,11 +193,27 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           overallIndex: 0.73,
           overallTrend: 0.05,
         );
-        _availableResidents.insert(0, newResident);
         _currentResident = newResident;
       }
+      _availableResidents = [_currentResident];
     } else {
-      _currentResident = _availableResidents.first;
+      if (widget.initialResidentId != null) {
+        final target = widget.initialResidentId!;
+        Resident? found;
+        for (final r in _availableResidents) {
+          final parsed = int.tryParse(r.id);
+          if (r.id == target ||
+              (target == '1' && (parsed == 9002 || r.name.contains('Sarah'))) ||
+              (target == '2' && (parsed == 9003 || r.name.contains('Arthur'))) ||
+              (target == '3' && (parsed == 9004 || r.name.contains('Margaret')))) {
+            found = r;
+            break;
+          }
+        }
+        _currentResident = found ?? _availableResidents.first;
+      } else {
+        _currentResident = _availableResidents.first;
+      }
     }
   }
 
@@ -712,53 +743,6 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     }
   }
 
-  void _openCaregiverSocialAuditDialog() {
-    final authState = ref.read(authProvider).state;
-    final staffName = authState.userName ?? 'David Silva (Lead Caregiver)';
-    showDialog<SocialAuditRecord>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => CaregiverSocialAuditDialog(
-        resident: _currentResident,
-        backendResidentId: _resolveBackendResidentId(),
-        caregiverName: staffName,
-        authToken: authState.token,
-        onAuditSaved: (record) {
-          setState(() {
-            _latestSocialAudit = record;
-            if (record.socialScore != null) {
-              _currentResident = Resident(
-                id: _currentResident.id,
-                name: _currentResident.name,
-                age: _currentResident.age,
-                gender: _currentResident.gender,
-                roomNo: _currentResident.roomNo,
-                lastAssessmentDate: _currentResident.lastAssessmentDate,
-                cognitiveScore: _currentResident.cognitiveScore,
-                cognitiveTrend: _currentResident.cognitiveTrend,
-                emotionalScore: _currentResident.emotionalScore,
-                emotionalTrend: _currentResident.emotionalTrend,
-                metabolicScore: _currentResident.metabolicScore,
-                metabolicTrend: _currentResident.metabolicTrend,
-                overallIndex: _currentResident.overallIndex,
-                overallTrend: _currentResident.overallTrend,
-                socialScore: record.socialScore,
-              );
-            }
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Caregiver Social Audit recorded for ${_currentResident.name}! (Score: ${record.socialScore != null ? "${record.socialScore!.toStringAsFixed(1)}%" : "Unassessed"})',
-              ),
-              backgroundColor: const Color(0xFF166534),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   void _initAnimations() {
     _waveController = AnimationController(
       vsync: this,
@@ -1217,7 +1201,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   int _resolveBackendResidentId() {
     final authState = ref.read(authProvider).state;
-    if (authState.residentId != null) {
+    if (authState.isElder && authState.residentId != null) {
       return authState.residentId!;
     }
     final parsed = int.tryParse(_currentResident.id);
@@ -1226,6 +1210,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       if (parsed == 9003 || _currentResident.name.contains('Arthur')) return 2;
       if (parsed == 9004 || _currentResident.name.contains('Margaret')) return 3;
       if (parsed <= 100) return parsed;
+    }
+    if (authState.residentId != null) {
+      return authState.residentId!;
     }
     return 1;
   }
@@ -1697,7 +1684,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
                           setState(() {
                             _lonelinessScore = calculatedRisk.round();
-                            _isolationScore = calculatedRisk.round();
+                            if (_latestSocialAudit != null && _latestSocialAudit!.socialScore != null) {
+                              _isolationScore = (100.0 - _latestSocialAudit!.socialScore!).round();
+                            }
                             _isSubmittingAssessment = false;
                           });
 
@@ -2039,6 +2028,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   // --- RESIDENT HEADER CARD ---
   Widget _buildResidentHeaderCard() {
+    final authState = ref.watch(authProvider).state;
     final initials = _currentResident.name
         .split(' ')
         .where((w) => !w.startsWith('Mr.') && !w.startsWith('Mrs.') && !w.startsWith('Dr.'))
@@ -2101,33 +2091,33 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                           color: AppColors.navy,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      // Dropdown to switch residents seamlessly
-                      DropdownButtonHideUnderline(
-                        child: DropdownButton<Resident>(
-                          value: _currentResident,
-                          icon: const Icon(LucideIcons.chevronDown, size: 16, color: AppColors.primary),
-                          dropdownColor: AppColors.card,
-                          borderRadius: BorderRadius.circular(12),
-                          onChanged: (Resident? newRes) {
-                            if (newRes != null) {
-                              setState(() {
-                                _currentResident = newRes;
-                                _loadResidentData(newRes.id);
-                              });
-                            }
-                          },
-                          items: _availableResidents.map((Resident r) {
-                            return DropdownMenuItem<Resident>(
-                              value: r,
-                              child: Text(
-                                r.name,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy),
-                              ),
-                            );
-                          }).toList(),
+                      // Dropdown to switch residents seamlessly for staff
+                      if (!authState.isElder && _availableResidents.length > 1)
+                        DropdownButtonHideUnderline(
+                          child: DropdownButton<Resident>(
+                            value: _currentResident,
+                            icon: const Icon(LucideIcons.chevronDown, size: 16, color: AppColors.primary),
+                            dropdownColor: AppColors.card,
+                            borderRadius: BorderRadius.circular(12),
+                            onChanged: (Resident? newRes) {
+                              if (newRes != null) {
+                                setState(() {
+                                  _currentResident = newRes;
+                                  _loadResidentData(newRes.id);
+                                });
+                              }
+                            },
+                            items: _availableResidents.map((Resident r) {
+                              return DropdownMenuItem<Resident>(
+                                value: r,
+                                child: Text(
+                                  r.name,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy),
+                                ),
+                              );
+                            }).toList(),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -3353,6 +3343,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   // 2. Loneliness & Social-Isolation Indicators Card
   Widget _buildLonelinessIsolationCard() {
+    final authState = ref.watch(authProvider).state;
     final hasAnswers = _answers.isNotEmpty;
     final calculatedWellness = hasAnswers
         ? EmotionalAssessmentService.calculateWellnessScore(_answers)
@@ -3482,18 +3473,6 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                         style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
                       ),
                     )
-                  else if (_currentResident.socialScore != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'Verified Score',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
-                      ),
-                    )
                   else
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -3502,24 +3481,25 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: const Text(
-                        'Staff Audit Needed',
+                        'Unassessed — No Caregiver Social Audit On File',
                         style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
                       ),
                     ),
                 ],
               ),
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              if (!authState.isElder)
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                  icon: const Icon(LucideIcons.clipboardCheck, size: 14, color: AppColors.primary),
+                  label: const Text(
+                    'Social Audit Hub',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  ),
+                  onPressed: () => context.go('/dashboard/social-audit/resident/${_resolveBackendResidentId()}'),
                 ),
-                icon: const Icon(LucideIcons.clipboardEdit, size: 14, color: AppColors.primary),
-                label: Text(
-                  _latestSocialAudit != null ? 'New Audit' : 'Record Audit',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
-                ),
-                onPressed: _openCaregiverSocialAuditDialog,
-              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -3606,28 +3586,6 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 ],
               ),
             ),
-          ] else if (_currentResident.socialScore != null) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _IndicatorSubRow(label: 'Caregiver Social Score', level: '${_currentResident.socialScore!.toStringAsFixed(0)}%'),
-                      const SizedBox(height: 4),
-                      const _IndicatorSubRow(label: 'Status', level: 'Verified Baseline'),
-                    ],
-                  ),
-                ),
-                _buildCircularScoreGauge(
-                  score: (100.0 - _currentResident.socialScore!).round(),
-                  riskLabel: (100.0 - _currentResident.socialScore!) >= 50 ? 'Elevated' : 'Low',
-                  riskColor: (100.0 - _currentResident.socialScore!) >= 50 ? AppColors.riskHigh : AppColors.riskLow,
-                  bgRingColor: (100.0 - _currentResident.socialScore!) >= 50 ? AppColors.riskHighBg : const Color(0xFFDCFCE7),
-                ),
-              ],
-            ),
           ] else ...[
             Container(
               padding: const EdgeInsets.all(12),
@@ -3651,24 +3609,26 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.lavenderBg,
-                        foregroundColor: AppColors.primary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: AppColors.lilac),
+                  if (!authState.isElder) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.lavenderBg,
+                          foregroundColor: AppColors.primary,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: const BorderSide(color: AppColors.lilac),
+                          ),
                         ),
+                        icon: const Icon(LucideIcons.clipboardPlus, size: 16),
+                        label: const Text('Open in Caregiver Social Audit Hub', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        onPressed: () => context.go('/dashboard/social-audit/resident/${_resolveBackendResidentId()}'),
                       ),
-                      icon: const Icon(LucideIcons.plusCircle, size: 16),
-                      label: const Text('Record Caregiver Social Audit', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      onPressed: _openCaregiverSocialAuditDialog,
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
