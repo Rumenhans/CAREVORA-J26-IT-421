@@ -82,6 +82,77 @@ transform = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
+def extract_face_crop(img: Image.Image) -> Image.Image:
+    """
+    Locates the primary human face in the webcam image using robust YCrCb skin segmentation
+    and returns a square crop tightly focused on the face (avoiding ceilings/backgrounds).
+    """
+    try:
+        w, h = img.size
+        arr = np.array(img).astype(np.float32)
+        R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        Y = 0.299 * R + 0.587 * G + 0.114 * B
+        Cr = (R - Y) * 0.713 + 128.0
+        Cb = (B - Y) * 0.564 + 128.0
+
+        # Human skin chrominance cluster
+        skin = (Cr >= 133) & (Cr <= 178) & (Cb >= 77) & (Cb <= 127) & (Y >= 30) & (Y <= 245)
+        ys, xs = np.where(skin)
+
+        if len(xs) > 400:
+            x_min, x_max = int(np.percentile(xs, 5)), int(np.percentile(xs, 95))
+            y_min, y_max = int(np.percentile(ys, 5)), int(np.percentile(ys, 95))
+            fw, fh = x_max - x_min, y_max - y_min
+            if fw > 30 and fh > 30:
+                cx = (x_min + x_max) // 2
+                cy = (y_min + y_max) // 2
+                side = int(max(fw, fh) * 1.35)
+                half = side // 2
+                l = max(0, cx - half)
+                t = max(0, cy - half)
+                r = min(w, cx + half)
+                b = min(h, cy + half)
+                return img.crop((l, t, r, b))
+    except Exception:
+        pass
+
+    # Fallback: lower-center crop (avoiding top ceiling area of webcam)
+    w, h = img.size
+    crop_size = int(min(w, h) * 0.75)
+    cx, cy = w // 2, int(h * 0.55)
+    l = max(0, cx - crop_size // 2)
+    t = max(0, cy - crop_size // 2)
+    r = min(w, l + crop_size)
+    b = min(h, t + crop_size)
+    return img.crop((l, t, r, b))
+
+
+def detect_smile_signal(face_img: Image.Image) -> float:
+    """
+    Detects smile/teeth/lip-corner elevation features in the lower third of the face.
+    Returns a confidence boost score between 0.0 and 0.92 for smiling expressions.
+    """
+    try:
+        arr = np.array(face_img.convert('L'))
+        h, w = arr.shape
+        # Mouth region: lower 35% of face, center 60%
+        y1, y2 = int(h * 0.65), int(h * 0.94)
+        x1, x2 = int(w * 0.20), int(w * 0.80)
+        mouth = arr[y1:y2, x1:x2]
+        if mouth.size == 0:
+            return 0.0
+
+        # Teeth visibility and mouth contrast
+        bright_ratio = float(np.mean(mouth > 135))
+        contrast = float(np.std(mouth))
+
+        if bright_ratio > 0.06 and contrast > 18:
+            return min(0.92, 0.65 + bright_ratio * 1.2)
+        return 0.0
+    except Exception:
+        return 0.0
+
+
 def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None) -> dict:
     """
     Analyzes live captured photo image bytes using trained PyTorch FER CNN model.
@@ -138,18 +209,18 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         }
 
     try:
-        w, h = img.size
-        if w != h:
-            min_side = min(w, h)
-            left = (w - min_side) // 2
-            top = (h - min_side) // 2
-            img = img.crop((left, top, left + min_side, top + min_side))
-
-        img_tensor = transform(img).unsqueeze(0)
+        face_crop = extract_face_crop(img)
+        img_tensor = transform(face_crop).unsqueeze(0)
         with torch.no_grad():
             outputs = model(img_tensor)
             probabilities = torch.softmax(outputs, dim=1)[0].numpy()
-            
+
+        smile_score = detect_smile_signal(face_crop)
+        if smile_score > 0.0:
+            happy_idx = EMOTION_CATEGORIES.index('happy')
+            probabilities[happy_idx] = max(probabilities[happy_idx], smile_score)
+            probabilities = probabilities / np.sum(probabilities)
+
         dominant_idx = int(np.argmax(probabilities))
         dominant_emotion = EMOTION_CATEGORIES[dominant_idx]
         confidence = float(probabilities[dominant_idx])

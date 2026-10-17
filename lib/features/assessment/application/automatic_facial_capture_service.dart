@@ -250,7 +250,7 @@ class AutomaticFacialCaptureService {
   AutomaticFacialCaptureService({
     FacialCameraAdapter? cameraAdapter,
     FacialEmotionAiService? aiService,
-    this.captureInterval = const Duration(seconds: 5),
+    this.captureInterval = const Duration(seconds: 1),
   })  : _cameraAdapter = cameraAdapter ?? DefaultFacialCameraAdapter(),
         _aiService = aiService ?? FacialEmotionAiService.instance;
 
