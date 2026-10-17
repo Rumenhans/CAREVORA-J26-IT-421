@@ -53,6 +53,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   bool _speechAvailable = false;
   String? _speechStatusMessage;
   int _activeListeningSessionId = 0;
+  bool _isTogglingMic = false;
+  int _listeningQId = -1;
 
   // Resident Context
   CognitiveResidentProfile? _resident;
@@ -137,19 +139,30 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         'buffer="${_responseController.text}"',
       );
       if (mounted) {
-        setState(() {
-          if (status == 'notListening' || status == 'done') {
+        if (status == 'notListening' || status == 'done') {
+          final currentQId =
+              _currentIndex < _questions.length ? _questions[_currentIndex].id : -1;
+
+          // If this end-status belongs to a previous question session, do NOT cancel
+          // the listening state or overwrite the status of the new question!
+          if (_listeningQId != -1 && currentQId != -1 && _listeningQId != currentQId) {
+            debugPrint(
+              '[CARE-STT] Ignoring late end status "$status" from Q$_listeningQId while active on Q$currentQId',
+            );
+            return;
+          }
+
+          setState(() {
             _isListening = false;
             final text = _responseController.text.trim();
             debugPrint(
               '[CARE-STT] [7. Final Save Tracking] End status "$status". '
-              'Buffer to save: "$text", targetQ=${_currentIndex < _questions.length ? _questions[_currentIndex].id : -1}',
+              'Buffer to save: "$text", targetQ=$currentQId',
             );
-            if (_currentIndex < _questions.length) {
-              final qId = _questions[_currentIndex].id;
+            if (currentQId != -1) {
               if (text.isNotEmpty) {
-                _responses[qId] = text;
-                _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
+                _responses[currentQId] = text;
+                _grades[currentQId] = CognitiveScoring.scoreQuestion(currentQId, text);
                 _speechStatusMessage = 'Voice response captured.';
                 _persistResponses();
               } else {
@@ -159,8 +172,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 }
               }
             }
-          }
-        });
+          });
+        }
       }
     }
 
@@ -190,6 +203,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             _speechStatusMessage = 'Voice response captured.';
             _persistResponses();
           } else {
+            if (errorMsg.contains('aborted')) {
+              return;
+            }
             if (errorMsg.contains('no-speech') || errorMsg.contains('error_no_match')) {
               _speechStatusMessage =
                   'Speech not recognized. Please tap the microphone to retry or type your answer.';
@@ -199,6 +215,9 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             } else if (errorMsg.contains('network')) {
               _speechStatusMessage =
                   'Speech service network issue. Please check connection or type your answer.';
+            } else if (errorMsg.contains('already started') || errorMsg.contains('invalidstateerror')) {
+              _speechStatusMessage =
+                  'Please tap the microphone again to speak.';
             } else {
               _speechStatusMessage =
                   'Audio note: $errorMsg. Please retry or type your answer.';
@@ -503,7 +522,16 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _activeListeningSessionId++;
     _recordCurrentQuestionDuration();
     if (_isSpeaking) _flutterTts.stop();
-    if (_isListening || _speech.isListening) _speech.stop();
+    if (_isListening || _speech.isListening) {
+      if (kIsWeb) {
+        try {
+          _speech.cancel();
+        } catch (_) {}
+      } else {
+        _speech.stop();
+      }
+      _isListening = false;
+    }
     final qId = _questions[_currentIndex].id;
     final text = _responseController.text;
     _responses[qId] = text;
@@ -542,129 +570,226 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Future<void> _toggleListening() async {
-    final qId = _currentIndex < _questions.length ? _questions[_currentIndex].id : -1;
-    debugPrint(
-      '[CARE-STT] [1. Mic Pressed] qId=$qId, isListening=$_isListening, '
-      'speechListening=${_speech.isListening}, isSpeaking=$_isSpeaking, '
-      'speechAvailable=$_speechAvailable, speechInitialized=$_speechInitialized, '
-      'currentBuffer="${_responseController.text}"',
-    );
-
-    // 1. Promptly stop any active TTS output so audio playback does not conflict with microphone capture
-    if (_isSpeaking) {
-      await _flutterTts.stop();
-      if (mounted) setState(() => _isSpeaking = false);
-    }
-
-    if (_isListening || _speech.isListening) {
-      _activeListeningSessionId++;
-      debugPrint(
-        '[CARE-STT] [6. Stop/Cancel Reason] User tapped to stop listening. '
-        'qId=$qId, finalBuffer="${_responseController.text}"',
-      );
-      await _speech.stop();
-      if (mounted) {
-        setState(() {
-          _isListening = false;
-          final text = _responseController.text.trim();
-          if (text.isNotEmpty) {
-            _responses[qId] = text;
-            _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
-            _speechStatusMessage = 'Voice response captured.';
-            _persistResponses();
-          } else {
-            _speechStatusMessage =
-                'Speech not recognized. Please tap the microphone to retry or type your answer.';
-          }
-        });
-      }
-      return;
-    }
-
-    if (!_speechInitialized) {
-      await _initSpeech();
-    }
-    if (!_speechAvailable) {
-      debugPrint('[CARE-STT] [3. Listen Failed] Speech not available. Cannot start listening.');
-      setState(() {
-        _speechStatusMessage =
-            'Microphone not available. Please enter the answer manually below or apply caregiver clinical scoring.';
-      });
-      return;
-    }
-
-    setState(() {
-      _isListening = true;
-      _speechStatusMessage = 'Listening... Speak now.';
-    });
-
-    final currentSessionId = ++_activeListeningSessionId;
-    final targetQId = qId;
+    if (_isTogglingMic) return;
+    _isTogglingMic = true;
 
     try {
+      final qId = _currentIndex < _questions.length ? _questions[_currentIndex].id : -1;
       debugPrint(
-        '[CARE-STT] [3. Listen Start Attempt] Calling _speech.listen for qId=$targetQId (session $currentSessionId), '
-        'currentText="${_responseController.text}"',
+        '[CARE-STT] [1. Mic Pressed] qId=$qId, isListening=$_isListening, '
+        'speechListening=${_speech.isListening}, isSpeaking=$_isSpeaking, '
+        'speechAvailable=$_speechAvailable, speechInitialized=$_speechInitialized, '
+        'currentBuffer="${_responseController.text}"',
       );
-      await _speech.listen(
-        onResult: (result) {
-          if (currentSessionId != _activeListeningSessionId ||
-              _currentIndex >= _questions.length ||
-              _questions[_currentIndex].id != targetQId) {
-            debugPrint(
-              '[CARE-STT] Discarding late callback: session $currentSessionId vs active $_activeListeningSessionId, '
-              'targetQ=$targetQId vs current=${_currentIndex < _questions.length ? _questions[_currentIndex].id : -1}',
-            );
-            return;
-          }
 
-          final incoming = result.recognizedWords;
-          final incomingTrimmed = incoming.trim();
-          final prevText = _responseController.text.trim();
-
-          debugPrint(
-            '[CARE-STT] [4. onResult] qId=$targetQId, recognizedWords="$incoming", '
-            'finalResult=${result.finalResult}, confidence=${result.confidence.toStringAsFixed(2)}',
-          );
-
-          // Never wipe valid recognized text with an empty callback
-          if (incomingTrimmed.isEmpty && prevText.isNotEmpty) {
-            debugPrint('[CARE-STT] Preserving existing non-empty text, ignoring empty callback.');
-            return;
-          }
-
-          if (mounted) {
-            setState(() {
-              if (incomingTrimmed.isNotEmpty) {
-                _responseController.text = incoming;
-                _responseController.selection = TextSelection.collapsed(
-                  offset: incoming.length,
-                );
-                _responses[targetQId] = incoming;
-              }
-            });
-            // NOTE: We do not invoke _persistResponses() on partial callbacks.
-            // Persistence is handled when the session ends naturally or is stopped.
-          }
-        },
-        listenOptions: stt.SpeechListenOptions(
-          listenMode: stt.ListenMode.dictation,
-          listenFor: const Duration(seconds: 45),
-          pauseFor: kIsWeb ? null : const Duration(seconds: 5),
-          cancelOnError: false,
-          partialResults: true,
-          localeId: 'en_US',
-        ),
-      );
-      debugPrint('[CARE-STT] [3. Listen Started] Session active: speechListening=${_speech.isListening}');
-    } catch (err) {
-      debugPrint('[CARE-STT] [3. Listen Failed] Exception while starting listen: $err');
-      if (mounted) {
-        setState(() {
-          _isListening = false;
-          _speechStatusMessage = 'Recording note: $err';
-        });
+      // 1. Promptly stop any active TTS output so audio playback does not conflict with microphone capture
+      if (_isSpeaking) {
+        await _flutterTts.stop();
+        if (mounted) setState(() => _isSpeaking = false);
       }
+
+      if (_isListening || _speech.isListening) {
+        _activeListeningSessionId++;
+        _listeningQId = -1;
+        debugPrint(
+          '[CARE-STT] [6. Stop/Cancel Reason] User tapped to stop listening. '
+          'qId=$qId, finalBuffer="${_responseController.text}"',
+        );
+        await _speech.stop();
+        if (mounted) {
+          setState(() {
+            _isListening = false;
+            final text = _responseController.text.trim();
+            if (text.isNotEmpty) {
+              _responses[qId] = text;
+              _grades[qId] = CognitiveScoring.scoreQuestion(qId, text);
+              _speechStatusMessage = 'Voice response captured.';
+              _persistResponses();
+            } else {
+              _speechStatusMessage =
+                  'Speech not recognized. Please tap the microphone to retry or type your answer.';
+            }
+          });
+        }
+        return;
+      }
+
+      if (!_speechInitialized) {
+        await _initSpeech();
+      }
+      if (!_speechAvailable) {
+        debugPrint('[CARE-STT] [3. Listen Failed] Speech not available. Cannot start listening.');
+        setState(() {
+          _speechStatusMessage =
+              'Microphone not available. Please enter the answer manually below or apply caregiver clinical scoring.';
+        });
+        return;
+      }
+
+      // Pre-listen reset: If web and previous session still linger, cancel cleanly
+      if (kIsWeb && _speech.isListening) {
+        try {
+          await _speech.cancel();
+          await Future.delayed(const Duration(milliseconds: 100));
+        } catch (_) {}
+      }
+
+      _listeningQId = qId;
+      setState(() {
+        _isListening = true;
+        _speechStatusMessage = 'Listening... Speak now.';
+      });
+
+      final currentSessionId = ++_activeListeningSessionId;
+      final targetQId = qId;
+
+      try {
+        debugPrint(
+          '[CARE-STT] [3. Listen Start Attempt] Calling _speech.listen for qId=$targetQId (session $currentSessionId), '
+          'currentText="${_responseController.text}"',
+        );
+        await _speech.listen(
+          onResult: (result) {
+            final incoming = result.recognizedWords;
+            final incomingTrimmed = incoming.trim();
+            final prevText = _responseController.text.trim();
+
+            debugPrint(
+              '[CARE-STT] [4. onResult] qId=$targetQId, recognizedWords="$incoming", '
+              'finalResult=${result.finalResult}, confidence=${result.confidence.toStringAsFixed(2)}',
+            );
+
+            // Never wipe valid recognized text with an empty callback
+            if (incomingTrimmed.isEmpty && prevText.isNotEmpty) {
+              debugPrint('[CARE-STT] Preserving existing non-empty text, ignoring empty callback.');
+              return;
+            }
+
+            if (currentSessionId != _activeListeningSessionId ||
+                _currentIndex >= _questions.length ||
+                _questions[_currentIndex].id != targetQId) {
+              debugPrint(
+                '[CARE-STT] Late callback saved for targetQ=$targetQId while current=${_currentIndex < _questions.length ? _questions[_currentIndex].id : -1}',
+              );
+              if (incomingTrimmed.isNotEmpty) {
+                _responses[targetQId] = incoming;
+                if (_grades[targetQId] == null) {
+                  _grades[targetQId] =
+                      CognitiveScoring.scoreQuestion(targetQId, incoming);
+                }
+                _persistResponses();
+              }
+              return;
+            }
+
+            if (mounted) {
+              setState(() {
+                if (incomingTrimmed.isNotEmpty) {
+                  _responseController.text = incoming;
+                  _responseController.selection = TextSelection.collapsed(
+                    offset: incoming.length,
+                  );
+                  _responses[targetQId] = incoming;
+                }
+              });
+              // NOTE: We do not invoke _persistResponses() on partial callbacks.
+              // Persistence is handled when the session ends naturally or is stopped.
+            }
+          },
+          listenOptions: stt.SpeechListenOptions(
+            listenMode: stt.ListenMode.dictation,
+            listenFor: const Duration(seconds: 45),
+            pauseFor: kIsWeb ? null : const Duration(seconds: 5),
+            cancelOnError: false,
+            partialResults: true,
+            localeId: 'en_US',
+          ),
+        );
+        debugPrint('[CARE-STT] [3. Listen Started] Session active: speechListening=${_speech.isListening}');
+      } catch (err) {
+        debugPrint('[CARE-STT] [3. Listen Failed] Exception while starting listen: $err');
+        final errStr = err.toString();
+        if (errStr.contains('already started') || errStr.contains('InvalidStateError')) {
+          debugPrint('[CARE-STT] Recognition already started. Aborting and re-initializing fresh engine...');
+          try {
+            await _speech.cancel();
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 200));
+
+          try {
+            await _initSpeech();
+            if (mounted &&
+                _currentIndex < _questions.length &&
+                _questions[_currentIndex].id == targetQId) {
+              _listeningQId = targetQId;
+              final retrySessionId = ++_activeListeningSessionId;
+              await _speech.listen(
+                onResult: (result) {
+                  final incoming = result.recognizedWords;
+                  final incomingTrimmed = incoming.trim();
+                  final prevText = _responseController.text.trim();
+
+                  if (incomingTrimmed.isEmpty && prevText.isNotEmpty) {
+                    return;
+                  }
+
+                  if (retrySessionId != _activeListeningSessionId ||
+                      _currentIndex >= _questions.length ||
+                      _questions[_currentIndex].id != targetQId) {
+                    if (incomingTrimmed.isNotEmpty) {
+                      _responses[targetQId] = incoming;
+                      if (_grades[targetQId] == null) {
+                        _grades[targetQId] =
+                            CognitiveScoring.scoreQuestion(targetQId, incoming);
+                      }
+                      _persistResponses();
+                    }
+                    return;
+                  }
+
+                  if (mounted) {
+                    setState(() {
+                      if (incomingTrimmed.isNotEmpty) {
+                        _responseController.text = incoming;
+                        _responseController.selection = TextSelection.collapsed(
+                          offset: incoming.length,
+                        );
+                        _responses[targetQId] = incoming;
+                      }
+                    });
+                  }
+                },
+                listenOptions: stt.SpeechListenOptions(
+                  listenMode: stt.ListenMode.dictation,
+                  listenFor: const Duration(seconds: 45),
+                  pauseFor: kIsWeb ? null : const Duration(seconds: 5),
+                  cancelOnError: false,
+                  partialResults: true,
+                  localeId: 'en_US',
+                ),
+              );
+              debugPrint('[CARE-STT] Retry listen active on fresh engine!');
+              return;
+            }
+          } catch (retryErr) {
+            debugPrint('[CARE-STT] Fresh engine retry listen failed: $retryErr');
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _isListening = false;
+            if (errStr.contains('not-allowed') || errStr.contains('permission')) {
+              _speechStatusMessage =
+                  'Microphone permission denied. Please allow microphone access in Chrome or type your answer.';
+            } else {
+              _speechStatusMessage = 'Please tap the microphone again to speak.';
+            }
+          });
+        }
+      }
+    } finally {
+      _isTogglingMic = false;
     }
   }
 
@@ -1435,528 +1560,922 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Presentation helpers (UI only — no business logic)
+  // ---------------------------------------------------------------------------
+  BoxDecoration _cardDecoration({double radius = 20}) {
+    return BoxDecoration(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: AppColors.border),
+      boxShadow: [
+        BoxShadow(
+          color: AppColors.primary.withValues(alpha: 0.05),
+          blurRadius: 24,
+          offset: const Offset(0, 8),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPanelHeader(IconData icon, String title, {Widget? trailing}) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: AppColors.primarySoft,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 15, color: AppColors.primary),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navy,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        ?trailing,
+      ],
+    );
+  }
+
+  Widget _buildInfoChip({
+    required String label,
+    IconData? icon,
+    Color color = AppColors.primary,
+    Color background = Colors.white,
+    Color borderColor = AppColors.lilac,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoticeBanner({
+    required String text,
+    required IconData icon,
+    required Color color,
+    required Color background,
+    required Color borderColor,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMainQuestionWorkspace(
     CognitiveQuestionItem currentQ,
     int progressPct,
     double? currentGrade,
     bool isElder,
   ) {
+    final bool isLastQuestion = !(_currentIndex < _questions.length - 1);
+
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: _cardDecoration(radius: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Responsive Header
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 12,
-            runSpacing: 6,
+          // Header: question number, summary & completion chip
+          _buildWorkspaceHeader(progressPct, isElder),
+          const SizedBox(height: 16),
+
+          // Segmented step indicator (one segment per question)
+          _buildStepIndicator(isElder),
+          const SizedBox(height: 22),
+
+          // Question card
+          _buildQuestionCard(currentQ, isElder),
+          const SizedBox(height: 20),
+
+          // Response panel: voice capture, typed answer & scoring
+          _buildResponsePanel(currentQ, currentGrade, isElder),
+          const SizedBox(height: 20),
+
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 18),
+
+          // Bottom navigation actions
+          _buildBottomActions(currentQ, isElder, isLastQuestion),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceHeader(int progressPct, bool isElder) {
+    return Row(
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            gradient: AppColors.primaryGradient,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.30),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Text(
+            '${_currentIndex + 1}',
+            style: AppTextStyles.h3.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'Question ${_currentIndex + 1} of $_totalCount',
-                style: AppTextStyles.bodyMedium.copyWith(
-                  fontWeight: FontWeight.bold,
+                style: AppTextStyles.h4.copyWith(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 3),
               Text(
                 isElder
                     ? 'Questions Answered: $_answeredCount/$_totalCount ($progressPct%) • Status: Self-Response'
                     : 'Completed: $_fullyCompletedCount/$_totalCount ($progressPct%) • Answered: $_answeredCount • Graded: $_gradedCount',
                 style: const TextStyle(
                   fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.body,
+                  height: 1.35,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-              value: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
-              minHeight: 6,
-              backgroundColor: AppColors.lavenderBg,
-              valueColor: const AlwaysStoppedAnimation<Color>(
-                AppColors.primary,
-              ),
+        ),
+        const SizedBox(width: 12),
+        _buildInfoChip(
+          label: '$progressPct% completed',
+          icon: LucideIcons.listChecks,
+          background: AppColors.primarySoft,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStepIndicator(bool isElder) {
+    return Row(
+      children: List.generate(_questions.length, (i) {
+        final q = _questions[i];
+        final bool isCurrent = i == _currentIndex;
+        final bool isDone = isElder ? _isAnswered(q.id) : _isFullyCompleted(q.id);
+        final Color color = isCurrent
+            ? AppColors.primary
+            : isDone
+                ? AppColors.riskLow
+                : AppColors.lavenderBg;
+        return Expanded(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            height: isCurrent ? 8 : 6,
+            margin: EdgeInsets.only(right: i == _questions.length - 1 ? 0 : 4),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(4),
+              border: (!isCurrent && !isDone)
+                  ? Border.all(color: AppColors.lilac)
+                  : null,
             ),
           ),
-          const SizedBox(height: 20),
+        );
+      }),
+    );
+  }
 
-          // Lavender Question Card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.lavenderBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.lilac, width: 1.5),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildQuestionCard(CognitiveQuestionItem currentQ, bool isElder) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.lavenderBg, Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.lilac, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.lilac),
-                          ),
-                          child: Text(
-                            currentQ.category,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Domain: ${currentQ.domain}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
+                    _buildInfoChip(
+                      label: currentQ.category,
+                      icon: LucideIcons.brain,
                     ),
-                    IconButton(
-                      icon: Icon(
-                        _isSpeaking ? LucideIcons.volume2 : LucideIcons.volumeX,
-                        size: 20,
-                        color: _isSpeaking
-                            ? AppColors.primaryDeep
-                            : AppColors.primary,
-                      ),
-                      tooltip:
-                          _isSpeaking ? 'Stop audio' : 'Read question aloud',
-                      onPressed: () => _toggleTts(currentQ.prompt),
+                    _buildInfoChip(
+                      label: 'Domain: ${currentQ.domain}',
+                      color: AppColors.navy,
+                      background: Colors.white.withValues(alpha: 0.85),
+                      borderColor: AppColors.border,
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  currentQ.prompt,
-                  style: AppTextStyles.h2.copyWith(fontSize: 19, height: 1.35),
-                ),
-                const SizedBox(height: 16),
+              ),
+              const SizedBox(width: 10),
+              _buildListenButton(currentQ.prompt),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            currentQ.prompt,
+            style: AppTextStyles.h2.copyWith(
+              fontSize: 24,
+              height: 1.4,
+              fontWeight: FontWeight.w700,
+              color: AppColors.navy,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.lilac.withValues(alpha: 0.8)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border),
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Row(
+                  child: Icon(
+                    isElder ? LucideIcons.lightbulb : LucideIcons.sparkles,
+                    size: 15,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      isElder
+                          ? 'Helpful Tip: Take your time. Speak clearly into the microphone or type your answer.'
+                          : 'AI Guidance: ${currentQ.aiTip}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.navy,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListenButton(String prompt) {
+    final Color fg = _isSpeaking ? Colors.white : AppColors.primary;
+    return Tooltip(
+      message: _isSpeaking ? 'Stop audio' : 'Read question aloud',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _toggleTts(prompt),
+          borderRadius: BorderRadius.circular(24),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: _isSpeaking ? AppColors.primary : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: _isSpeaking ? AppColors.primary : AppColors.lilac,
+                width: 1.2,
+              ),
+              boxShadow: _isSpeaking
+                  ? [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.30),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : [],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _isSpeaking ? LucideIcons.volumeX : LucideIcons.volume2,
+                  size: 18,
+                  color: fg,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _isSpeaking ? 'Stop Audio' : 'Read Aloud',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: fg,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMicButton() {
+    final Color base = _isListening ? AppColors.riskHigh : AppColors.primary;
+    return Tooltip(
+      message: _isListening ? 'Stop listening' : 'Tap to speak',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: _toggleListening,
+          child: SizedBox(
+            width: 78,
+            height: 78,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (_isListening)
+                  AnimatedBuilder(
+                    animation: _waveformController,
+                    builder: (context, _) {
+                      final v = _waveformController.value;
+                      return Container(
+                        width: 62 + 16 * v,
+                        height: 62 + 16 * v,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: base.withValues(alpha: 0.28 * (1 - v)),
+                        ),
+                      );
+                    },
+                  ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 62,
+                  height: 62,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: _isListening
+                        ? const LinearGradient(
+                            colors: [Color(0xFFF87171), AppColors.riskHigh],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : AppColors.primaryGradient,
+                    boxShadow: [
+                      BoxShadow(
+                        color: base.withValues(alpha: 0.35),
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _isListening ? LucideIcons.micOff : LucideIcons.mic,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResponsePanel(
+    CognitiveQuestionItem currentQ,
+    double? currentGrade,
+    bool isElder,
+  ) {
+    final bool hasStatus = _speechStatusMessage != null;
+    final bool statusOk = hasStatus && _speechStatusMessage!.contains('captured');
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSecondary,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _isListening
+              ? AppColors.riskLow.withValues(alpha: 0.5)
+              : AppColors.border,
+          width: _isListening ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Panel title row
+          Row(
+            children: [
+              Icon(
+                _isListening ? LucideIcons.audioLines : LucideIcons.messageSquare,
+                size: 17,
+                color: _isListening ? AppColors.riskLow : AppColors.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _isListening
+                      ? 'Listening to speech...'
+                      : (isElder ? 'Your Answer' : 'Response Capture'),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navy,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    if (_isAnswered(currentQ.id))
+                      _buildInfoChip(
+                        label: 'Answer Saved',
+                        icon: LucideIcons.checkCircle2,
+                        color: AppColors.riskLow,
+                        background: AppColors.riskLowBg,
+                        borderColor: AppColors.riskLow.withValues(alpha: 0.3),
+                      ),
+                    Text(
+                      isElder ? 'Voice or Keyboard' : 'Voice & Clinical Grading',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Voice capture area: large mic button + live waveform
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: _isListening
+                  ? AppColors.riskLowBg.withValues(alpha: 0.7)
+                  : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isListening
+                    ? AppColors.riskLow.withValues(alpha: 0.4)
+                    : AppColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                _buildMicButton(),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        LucideIcons.sparkles,
-                        size: 14,
-                        color: AppColors.primary,
+                      Text(
+                        _isListening
+                            ? 'Listening… tap the mic to stop'
+                            : 'Tap the microphone to speak',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _isListening
+                            ? 'Speak clearly — your words will appear in the box below.'
+                            : (isElder
+                                ? 'Or simply type your answer in the box below.'
+                                : 'Or type the resident\'s answer in the box below.'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildAnimatedWaveform(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Editable Response Text Field
+          TextField(
+            controller: _responseController,
+            onChanged: (val) {
+              final qId = currentQ.id;
+              setState(() {
+                _responses[qId] = val;
+                _grades[qId] = CognitiveScoring.scoreQuestion(qId, val);
+              });
+              _persistResponses();
+            },
+            minLines: 3,
+            maxLines: 4,
+            decoration: InputDecoration(
+              hintText: isElder
+                  ? 'Type your answer here, or tap the microphone to speak...'
+                  : 'Type resident answer here, or tap the microphone to dictate...',
+              hintStyle: const TextStyle(
+                fontSize: 14,
+                color: AppColors.muted,
+                fontStyle: FontStyle.italic,
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppColors.border, width: 1.2),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppColors.border, width: 1.2),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppColors.primary, width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 16,
+              ),
+            ),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: AppColors.navy,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: const [
+              Icon(LucideIcons.keyboard, size: 13, color: AppColors.muted),
+              SizedBox(width: 6),
+              Text(
+                'You can also type your answer.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          if (hasStatus) ...[
+            const SizedBox(height: 10),
+            _buildNoticeBanner(
+              text: _speechStatusMessage!,
+              icon: statusOk ? LucideIcons.checkCircle2 : LucideIcons.info,
+              color: statusOk ? AppColors.riskLow : const Color(0xFF92400E),
+              background: statusOk ? AppColors.riskLowBg : const Color(0xFFFEF3C7),
+              borderColor: statusOk ? AppColors.riskLow : const Color(0xFFF59E0B),
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          // Role-Specific Section:
+          // - CAREGIVER sees automatic scoring indicator and optional override buttons
+          // - ELDER sees confirmation that answers are auto-evaluated upon submission
+          if (!isElder) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: const [
+                      Text(
+                        'Automatic Scoring (Deterministic Rubric):',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                      Text(
+                        'System auto-grades answers • Optional override',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildGradeButton(
+                          label: 'Correct (1.0)',
+                          icon: LucideIcons.checkCircle,
+                          scoreValue: 1.0,
+                          selectedColor: AppColors.riskLow,
+                          selectedBg: AppColors.riskLowBg,
+                          isSelected: currentGrade == 1.0,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          isElder
-                              ? 'Tip: Take your time. Speak clearly into the microphone or type your answer.'
-                              : 'AI Guidance: ${currentQ.aiTip}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.body,
-                            fontStyle: FontStyle.italic,
-                          ),
+                        child: _buildGradeButton(
+                          label: 'Partial (0.5)',
+                          icon: LucideIcons.minusCircle,
+                          scoreValue: 0.5,
+                          selectedColor: AppColors.riskModerate,
+                          selectedBg: AppColors.riskModerateBg,
+                          isSelected: currentGrade == 0.5,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildGradeButton(
+                          label: 'Incorrect (0.0)',
+                          icon: LucideIcons.xCircle,
+                          scoreValue: 0.0,
+                          selectedColor: AppColors.riskHigh,
+                          selectedBg: AppColors.riskHighBg,
+                          isSelected: currentGrade == 0.0,
                         ),
                       ),
                     ],
                   ),
+                ],
+              ),
+            ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: _isAnswered(currentQ.id)
+                    ? AppColors.riskLowBg
+                    : AppColors.lavenderBg,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _isAnswered(currentQ.id)
+                      ? AppColors.riskLow.withValues(alpha: 0.35)
+                      : AppColors.lilac,
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Response Panel: Animated Waveform, Voice Transcript & Manual Entry
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceSecondary,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      _isListening
-                          ? 'Listening to speech...'
-                          : (isElder
-                              ? 'Your Response'
-                              : 'Response Capture'),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isAnswered(currentQ.id)
+                        ? LucideIcons.checkCircle2
+                        : LucideIcons.userCheck,
+                    size: 17,
+                    color: _isAnswered(currentQ.id)
+                        ? AppColors.riskLow
+                        : AppColors.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _isAnswered(currentQ.id)
+                          ? 'Answer saved. The system will automatically evaluate and score your response upon submission.'
+                          : 'Type or speak your answer above. The system will evaluate your response.',
                       style: const TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.bold,
                         color: AppColors.navy,
+                        fontWeight: FontWeight.w500,
+                        height: 1.35,
                       ),
-                    ),
-                    Row(
-                      children: [
-                        if (_isAnswered(currentQ.id))
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            margin: const EdgeInsets.only(right: 8),
-                            decoration: BoxDecoration(
-                              color: AppColors.riskLowBg,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Text(
-                              'Answer Saved',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.riskLow,
-                              ),
-                            ),
-                          ),
-                        Text(
-                          isElder
-                              ? 'Voice or Keyboard'
-                              : 'Voice & Clinical Grading',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Animated Green Waveform Simulator
-                _buildAnimatedWaveform(),
-                const SizedBox(height: 12),
-
-                // Editable Response Text Field (Real-time sync to single source of truth)
-                TextField(
-                  controller: _responseController,
-                  onChanged: (val) {
-                    final qId = currentQ.id;
-                    setState(() {
-                      _responses[qId] = val;
-                      _grades[qId] = CognitiveScoring.scoreQuestion(qId, val);
-                    });
-                    _persistResponses();
-                  },
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    hintText: isElder
-                        ? 'Type your answer here, or tap the microphone to speak...'
-                        : 'Type resident answer here, or tap the microphone to dictate...',
-                    hintStyle: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.muted,
-                      fontStyle: FontStyle.italic,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.primary),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                  ),
-                  style: const TextStyle(fontSize: 12, color: AppColors.navy),
-                ),
-                if (_speechStatusMessage != null) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(LucideIcons.info, size: 12, color: AppColors.muted),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          _speechStatusMessage!,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 16),
-
-                // Role-Specific Section:
-                // - CAREGIVER sees automatic scoring indicator and optional override buttons
-                // - ELDER sees confirmation that answers are auto-evaluated upon submission
-                if (!isElder) ...[
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        alignment: WrapAlignment.spaceBetween,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: const [
-                          Text(
-                            'Automatic Scoring (Deterministic Rubric):',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.navy,
-                            ),
-                          ),
-                          Text(
-                            'System auto-grades answers • Optional override',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: AppColors.muted,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildGradeButton(
-                              label: 'Correct (1.0)',
-                              icon: LucideIcons.checkCircle,
-                              scoreValue: 1.0,
-                              selectedColor: AppColors.riskLow,
-                              selectedBg: AppColors.riskLowBg,
-                              isSelected: currentGrade == 1.0,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildGradeButton(
-                              label: 'Partial (0.5)',
-                              icon: LucideIcons.minusCircle,
-                              scoreValue: 0.5,
-                              selectedColor: AppColors.riskModerate,
-                              selectedBg: AppColors.riskModerateBg,
-                              isSelected: currentGrade == 0.5,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildGradeButton(
-                              label: 'Incorrect (0.0)',
-                              icon: LucideIcons.xCircle,
-                              scoreValue: 0.0,
-                              selectedColor: AppColors.riskHigh,
-                              selectedBg: AppColors.riskHighBg,
-                              isSelected: currentGrade == 0.0,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ] else ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.lavenderBg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.lilac),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _isAnswered(currentQ.id)
-                              ? LucideIcons.checkCircle2
-                              : LucideIcons.userCheck,
-                          size: 16,
-                          color: _isAnswered(currentQ.id)
-                              ? AppColors.riskLow
-                              : AppColors.primary,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _isAnswered(currentQ.id)
-                                ? 'Answer saved. The system will automatically evaluate and score your response upon submission.'
-                                : 'Type or speak your answer above. The system will evaluate your response.',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.navy,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomActions(
+    CognitiveQuestionItem currentQ,
+    bool isElder,
+    bool isLastQuestion,
+  ) {
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 10,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => _toggleTts(currentQ.prompt),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                backgroundColor: Colors.white,
+                side: const BorderSide(color: AppColors.lilac, width: 1.5),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(LucideIcons.rotateCcw, size: 16),
+              label: const Text(
+                'Repeat Question',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              ),
+            ),
+            _buildInfoChip(
+              label: isElder
+                  ? 'Self-Paced • Take Your Time'
+                  : 'Time: ${(_questionTimes[currentQ.id] ?? 0.0).toStringAsFixed(0)}s',
+              icon: LucideIcons.timer,
+              color: AppColors.body,
+              background: AppColors.surfaceSecondary,
+              borderColor: AppColors.border,
+            ),
+          ],
+        ),
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 10,
+          runSpacing: 8,
+          children: [
+            if (_currentIndex > 0)
+              OutlinedButton.icon(
+                onPressed: _prevQuestion,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.navy,
+                  backgroundColor: Colors.white,
+                  side: const BorderSide(color: AppColors.border, width: 1.5),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: const Icon(LucideIcons.chevronLeft, size: 16),
+                label: const Text(
+                  'Previous',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+              ),
+            _buildPrimaryActionButton(
+              label: isLastQuestion
+                  ? (isElder ? 'Finish & Submit' : 'Finish Assessment')
+                  : 'Next Question',
+              icon: isLastQuestion ? LucideIcons.send : LucideIcons.arrowRight,
+              onTap: () => _nextQuestion(isElder),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPrimaryActionButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: AppColors.primaryGradient,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.30),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(icon, size: 16, color: Colors.white),
               ],
             ),
           ),
-          const SizedBox(height: 20),
-
-          // Bottom Action Buttons: Repeat, Mic Toggle, Next/Finish (Responsive Wrap)
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 10,
-                runSpacing: 6,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () => _toggleTts(currentQ.prompt),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.primary,
-                      side: const BorderSide(color: AppColors.lilac),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    icon: const Icon(LucideIcons.rotateCcw, size: 14),
-                    label: const Text(
-                      'Repeat Question',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                  Text(
-                    'Time: ${(_questionTimes[currentQ.id] ?? 0.0).toStringAsFixed(0)}s',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.muted,
-                    ),
-                  ),
-                ],
-              ),
-              Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 10,
-                runSpacing: 6,
-                children: [
-                  if (_currentIndex > 0)
-                    OutlinedButton(
-                      onPressed: _prevQuestion,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text(
-                        '← Prev',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  // Round Mic Button
-                  GestureDetector(
-                    onTap: _toggleListening,
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: _isListening
-                            ? AppColors.riskHigh
-                            : AppColors.primary,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (_isListening
-                                    ? AppColors.riskHigh
-                                    : AppColors.primary)
-                                .withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        _isListening ? LucideIcons.micOff : LucideIcons.mic,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                  ElevatedButton(
-                    onPressed: () => _nextQuestion(isElder),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      elevation: 1,
-                    ),
-                    child: Text(
-                      _currentIndex < _questions.length - 1
-                          ? 'Next Question →'
-                          : (isElder
-                              ? 'Finish & Submit'
-                              : 'Finish Assessment'),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1969,40 +2488,44 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     required Color selectedBg,
     required bool isSelected,
   }) {
-    return InkWell(
-      onTap: () => _setGrade(scoreValue),
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? selectedBg : Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected ? selectedColor : AppColors.border,
-            width: isSelected ? 2 : 1,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _setGrade(scoreValue),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? selectedBg : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? selectedColor : AppColors.border,
+              width: isSelected ? 2 : 1,
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 15,
-              color: isSelected ? selectedColor : AppColors.muted,
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                  color: isSelected ? selectedColor : AppColors.body,
-                ),
-                overflow: TextOverflow.ellipsis,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected ? selectedColor : AppColors.muted,
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected ? selectedColor : AppColors.body,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2014,22 +2537,26 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       builder: (context, child) {
         return SizedBox(
           height: 28,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(24, (i) {
-              final waveHeight = _isListening
-                  ? (10 + 16 * ((i + _waveformController.value * 24) % 6) / 6)
-                  : 4.0;
-              return Container(
-                width: 3.5,
-                height: waveHeight,
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  color: _isListening ? AppColors.riskLow : AppColors.lilac,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              );
-            }),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(24, (i) {
+                final waveHeight = _isListening
+                    ? (10 + 16 * ((i + _waveformController.value * 24) % 6) / 6)
+                    : (4.0 + 4.0 * ((i * 7) % 5) / 5);
+                return Container(
+                  width: 3.5,
+                  height: waveHeight,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: _isListening ? AppColors.riskLow : AppColors.lilac,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                );
+              }),
+            ),
           ),
         );
       },
@@ -2040,321 +2567,358 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     return Column(
       children: [
         // 1. Circular Progress Card
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            children: [
-              Text(
-                isElder ? 'Your Answer Progress' : 'Assessment Progress',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.navy,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  SizedBox(
-                    width: 90,
-                    height: 90,
-                    child: CircularProgressIndicator(
-                      value: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
-                      strokeWidth: 8,
-                      backgroundColor: AppColors.lavenderBg,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        AppColors.primary,
-                      ),
-                    ),
-                  ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '$progressPct%',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.navy,
-                        ),
-                      ),
-                      Text(
-                        isElder ? 'Answered' : 'Completed',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: AppColors.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              // Responsive Stat Row
-              if (isElder) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildStatItem(
-                        'Answered',
-                        '$_answeredCount/$_totalCount',
-                        AppColors.primary,
-                      ),
-                    ),
-                    Expanded(
-                      child: _buildStatItem(
-                        'Remaining',
-                        '$_remainingToAnswerCount',
-                        AppColors.muted,
-                      ),
-                    ),
-                    Expanded(
-                      child: _buildStatItem(
-                        'Status',
-                        _answeredCount == _totalCount
-                            ? 'Ready'
-                            : 'In Progress',
-                        _answeredCount == _totalCount
-                            ? AppColors.riskLow
-                            : const Color(0xFFB45309),
-                      ),
-                    ),
-                    Expanded(
-                      child: _buildStatItem(
-                        'Reviewer',
-                        'Care Specialist',
-                        AppColors.navy,
-                      ),
-                    ),
-                  ],
-                ),
-                if (_remainingToAnswerCount > 0) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.riskModerateBg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.riskModerate),
-                    ),
-                    child: Text(
-                      '$_remainingToAnswerCount question(s) pending your answer',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFB45309),
-                      ),
-                    ),
-                  ),
-                ] else ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.riskLowBg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.riskLow),
-                    ),
-                    child: const Text(
-                      'All 10 questions answered — Ready for review!',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.riskLow,
-                      ),
-                    ),
-                  ),
-                ],
-              ] else ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildStatItem(
-                        'Completed',
-                        '$_fullyCompletedCount/$_totalCount',
-                        AppColors.primary,
-                      ),
-                    ),
-                    Expanded(
-                      child: _buildStatItem(
-                        'Answered',
-                        '$_answeredCount/$_totalCount',
-                        const Color(0xFFB45309),
-                      ),
-                    ),
-                    Expanded(
-                      child: _buildStatItem(
-                        'Graded',
-                        '$_gradedCount/$_totalCount',
-                        AppColors.riskLow,
-                      ),
-                    ),
-                    Expanded(
-                      child: _buildStatItem(
-                        'Remaining',
-                        '$_remainingToCompleteCount',
-                        AppColors.muted,
-                      ),
-                    ),
-                  ],
-                ),
-                if (_remainingToCompleteCount > 0) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.riskModerateBg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.riskModerate),
-                    ),
-                    child: Text(
-                      '$_remainingToCompleteCount item(s) pending response or score',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFB45309),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ],
-          ),
-        ),
+        _buildProgressCard(progressPct, isElder),
         const SizedBox(height: 16),
 
         // 2. Questions Overview Checklist
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
+        _buildQuestionsOverviewCard(isElder),
+        const SizedBox(height: 16),
+
+        // 3. Clinical Scoring Rubric Guidance (or Elder Session Tips)
+        _buildGuidanceCard(isElder),
+        const SizedBox(height: 16),
+
+        // AI Methodology & Synthetic Model Metrics Card
+        _buildAiMethodologyCard(),
+        const SizedBox(height: 16),
+
+        // 4. End / Finish Assessment Button
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => _showFinishConfirmationDialog(isElder),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: isElder ? AppColors.primary : AppColors.riskHigh,
+              side: BorderSide(
+                color: isElder ? AppColors.lilac : AppColors.riskHighBg,
+                width: 1.5,
+              ),
+              backgroundColor: isElder
+                  ? AppColors.primarySoft
+                  : AppColors.riskHighBg.withValues(alpha: 0.5),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: Icon(
+              isElder ? LucideIcons.send : LucideIcons.alertOctagon,
+              size: 16,
+            ),
+            label: Text(
+              isElder
+                  ? (_answeredCount == _totalCount
+                      ? 'Submit for Caregiver Review'
+                      : 'End & Save Session')
+                  : 'End Assessment',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProgressCard(int progressPct, bool isElder) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: _cardDecoration(),
+      child: Column(
+        children: [
+          _buildPanelHeader(
+            LucideIcons.chartPie,
+            isElder ? 'Your Answer Progress' : 'Assessment Progress',
+          ),
+          const SizedBox(height: 18),
+          Stack(
+            alignment: Alignment.center,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              SizedBox(
+                width: 112,
+                height: 112,
+                child: CircularProgressIndicator(
+                  value: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
+                  strokeWidth: 10,
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: AppColors.lavenderBg,
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    AppColors.primary,
+                  ),
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Questions Overview',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.navy,
+                  Text(
+                    '$progressPct%',
+                    style: AppTextStyles.h2.copyWith(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                   Text(
-                    isElder
-                        ? '$_answeredCount / $_totalCount Answered'
-                        : '$_fullyCompletedCount / $_totalCount Completed',
+                    isElder ? 'Answered' : 'Completed',
                     style: const TextStyle(
                       fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 280),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _questions.length,
-                  itemBuilder: (context, idx) {
-                    final q = _questions[idx];
-                    final isCurrent = idx == _currentIndex;
-                    final isGraded = _isGraded(q.id);
-                    final isAnswered = _isAnswered(q.id);
-                    final isComplete = _isFullyCompleted(q.id);
-                    final gradeValue = _grades[q.id];
+            ],
+          ),
+          const SizedBox(height: 18),
+          if (isElder) ...[
+            _buildStatGrid([
+              _buildStatItem(
+                'Answered',
+                '$_answeredCount/$_totalCount',
+                AppColors.primary,
+              ),
+              _buildStatItem(
+                'Remaining',
+                '$_remainingToAnswerCount',
+                AppColors.muted,
+              ),
+              _buildStatItem(
+                'Status',
+                _answeredCount == _totalCount ? 'Ready' : 'In Progress',
+                _answeredCount == _totalCount
+                    ? AppColors.riskLow
+                    : const Color(0xFFB45309),
+              ),
+              _buildStatItem(
+                'Reviewer',
+                'Care Specialist',
+                AppColors.navy,
+              ),
+            ]),
+            const SizedBox(height: 12),
+            if (_remainingToAnswerCount > 0)
+              _buildNoticeBanner(
+                text: '$_remainingToAnswerCount question(s) pending your answer',
+                icon: LucideIcons.clock,
+                color: const Color(0xFFB45309),
+                background: AppColors.riskModerateBg,
+                borderColor: AppColors.riskModerate,
+              )
+            else
+              _buildNoticeBanner(
+                text: 'All 10 questions answered — Ready for review!',
+                icon: LucideIcons.circleCheckBig,
+                color: AppColors.riskLow,
+                background: AppColors.riskLowBg,
+                borderColor: AppColors.riskLow,
+              ),
+          ] else ...[
+            _buildStatGrid([
+              _buildStatItem(
+                'Completed',
+                '$_fullyCompletedCount/$_totalCount',
+                AppColors.primary,
+              ),
+              _buildStatItem(
+                'Answered',
+                '$_answeredCount/$_totalCount',
+                const Color(0xFFB45309),
+              ),
+              _buildStatItem(
+                'Graded',
+                '$_gradedCount/$_totalCount',
+                AppColors.riskLow,
+              ),
+              _buildStatItem(
+                'Remaining',
+                '$_remainingToCompleteCount',
+                AppColors.muted,
+              ),
+            ]),
+            if (_remainingToCompleteCount > 0) ...[
+              const SizedBox(height: 12),
+              _buildNoticeBanner(
+                text: '$_remainingToCompleteCount item(s) pending response or score',
+                icon: LucideIcons.clock,
+                color: const Color(0xFFB45309),
+                background: AppColors.riskModerateBg,
+                borderColor: AppColors.riskModerate,
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
 
-                    return InkWell(
+  Widget _buildStatGrid(List<Widget> items) {
+    final rows = <Widget>[];
+    for (var i = 0; i < items.length; i += 2) {
+      rows.add(
+        Row(
+          children: [
+            Expanded(child: items[i]),
+            const SizedBox(width: 10),
+            Expanded(
+              child: i + 1 < items.length ? items[i + 1] : const SizedBox(),
+            ),
+          ],
+        ),
+      );
+      if (i + 2 < items.length) rows.add(const SizedBox(height: 10));
+    }
+    return Column(children: rows);
+  }
+
+  Widget _buildQuestionsOverviewCard(bool isElder) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildPanelHeader(
+            LucideIcons.listChecks,
+            'Questions Overview',
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                isElder
+                    ? '$_answeredCount / $_totalCount Answered'
+                    : '$_fullyCompletedCount / $_totalCount Completed',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 340),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _questions.length,
+              itemBuilder: (context, idx) {
+                final q = _questions[idx];
+                final isCurrent = idx == _currentIndex;
+                final isGraded = _isGraded(q.id);
+                final isAnswered = _isAnswered(q.id);
+                final isComplete = _isFullyCompleted(q.id);
+                final gradeValue = _grades[q.id];
+                final bool isDone = isElder ? isAnswered : isComplete;
+                final bool isPartial = !isDone && (isAnswered || isGraded);
+
+                final Color rowBg = isCurrent
+                    ? AppColors.primarySoft
+                    : isDone
+                        ? AppColors.lavenderBg
+                        : isPartial
+                            ? const Color(0xFFFEF3C7)
+                            : Colors.transparent;
+                final Color numberBg = isCurrent
+                    ? AppColors.primary
+                    : isDone
+                        ? AppColors.riskLow
+                        : isPartial
+                            ? AppColors.riskModerateBg
+                            : AppColors.lavenderBg;
+                final Color numberFg = (isCurrent || isDone)
+                    ? Colors.white
+                    : isPartial
+                        ? const Color(0xFFB45309)
+                        : AppColors.muted;
+                final Color labelColor = isCurrent
+                    ? AppColors.primary
+                    : isDone
+                        ? AppColors.navy
+                        : isPartial
+                            ? const Color(0xFF92400E)
+                            : AppColors.body;
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
                       onTap: () => _goToQuestion(idx),
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 2.5),
+                      borderRadius: BorderRadius.circular(12),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
-                          vertical: 7,
+                          vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: isCurrent
-                              ? AppColors.primarySoft
-                              : (isElder ? isAnswered : isComplete)
-                              ? AppColors.lavenderBg
-                              : (isAnswered || isGraded)
-                              ? const Color(0xFFFEF3C7)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
+                          color: rowBg,
+                          borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: isCurrent
-                                ? AppColors.primary
+                                ? AppColors.primary.withValues(alpha: 0.6)
                                 : Colors.transparent,
-                            width: 1,
+                            width: 1.2,
                           ),
                         ),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
+                            Container(
+                              width: 26,
+                              height: 26,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: numberBg,
+                                shape: BoxShape.circle,
+                              ),
+                              child: (isDone && !isCurrent)
+                                  ? const Icon(
+                                      LucideIcons.check,
+                                      size: 14,
+                                      color: Colors.white,
+                                    )
+                                  : Text(
+                                      '${q.id}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: numberFg,
+                                      ),
+                                    ),
+                            ),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                '${q.id}. ${q.category}',
+                                q.category,
                                 style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 13,
                                   fontWeight: isCurrent
                                       ? FontWeight.bold
                                       : FontWeight.w500,
-                                  color: isCurrent
-                                      ? AppColors.primary
-                                      : (isElder ? isAnswered : isComplete)
-                                      ? AppColors.navy
-                                      : (isAnswered || isGraded)
-                                      ? const Color(0xFF92400E)
-                                      : AppColors.muted,
+                                  color: labelColor,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            const SizedBox(width: 6),
                             if (isElder) ...[
                               if (isAnswered) ...[
                                 const Text(
                                   'Answer Saved',
                                   style: TextStyle(
-                                    fontSize: 9,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.w700,
                                     color: AppColors.riskLow,
                                   ),
-                                ),
-                                const SizedBox(width: 4),
-                                const Icon(
-                                  LucideIcons.checkCircle2,
-                                  size: 14,
-                                  color: AppColors.riskLow,
                                 ),
                               ] else ...[
                                 Icon(
                                   isCurrent
                                       ? LucideIcons.circleDot
                                       : LucideIcons.circle,
-                                  size: 13,
+                                  size: 14,
                                   color: isCurrent
                                       ? AppColors.primary
                                       : AppColors.lilac,
@@ -2364,12 +2928,12 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                               if (isComplete) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 1,
+                                    horizontal: 7,
+                                    vertical: 2,
                                   ),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
-                                    borderRadius: BorderRadius.circular(6),
+                                    borderRadius: BorderRadius.circular(8),
                                     border: Border.all(color: AppColors.lilac),
                                   ),
                                   child: Text(
@@ -2381,17 +2945,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 4),
-                                const Icon(
-                                  LucideIcons.checkCircle2,
-                                  size: 14,
-                                  color: AppColors.riskLow,
-                                ),
                               ] else if (isGraded && !isAnswered) ...[
                                 const Text(
                                   'Missing answer',
                                   style: TextStyle(
-                                    fontSize: 9,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.w600,
                                     color: Color(0xFFB45309),
                                   ),
@@ -2406,7 +2964,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                                 const Text(
                                   'Awaiting score',
                                   style: TextStyle(
-                                    fontSize: 9,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.w600,
                                     color: Color(0xFFB45309),
                                   ),
@@ -2422,7 +2980,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                                   isCurrent
                                       ? LucideIcons.circleDot
                                       : LucideIcons.circle,
-                                  size: 13,
+                                  size: 14,
                                   color: isCurrent
                                       ? AppColors.primary
                                       : AppColors.lilac,
@@ -2432,197 +2990,150 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           ],
                         ),
                       ),
-                    );
-                  },
-                ),
-              ),
-            ],
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
 
-        // 3. Clinical Scoring Rubric Guidance (or Elder Session Tips)
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
+  Widget _buildGuidanceCard(bool isElder) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.lavenderBg, Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.lilac),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildPanelHeader(
+            isElder ? LucideIcons.info : LucideIcons.helpCircle,
+            isElder ? 'Elder Assessment Guidance' : 'Clinical Evaluation Tips',
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    isElder ? LucideIcons.info : LucideIcons.helpCircle,
-                    size: 16,
+          const SizedBox(height: 10),
+          Text(
+            isElder
+                ? 'Take as much time as you need for each question. You can answer using the microphone or keyboard. Your care team will review your responses.'
+                : 'Guidance: ${_questions[_currentIndex].recommendedAnswerGuide}',
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: AppColors.body,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiMethodologyCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildPanelHeader(LucideIcons.cpu, 'AI Methodology & Model Metrics'),
+          const SizedBox(height: 10),
+          const Text(
+            'ACRF Base Weights: Mem 25% • Attn 20% • Orient 20% • Recall 20% • Reas 15%',
+            style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.lavenderBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.lilac),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'Trained Random Forest (Synthetic Benchmark):',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                     color: AppColors.primary,
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    isElder
-                        ? 'Elder Assessment Guidance'
-                        : 'Clinical Evaluation Tips',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.navy,
-                    ),
+                ),
+                SizedBox(height: 5),
+                Text(
+                  '• Synthetic Accuracy: 96.80% (95% CI: [95.85%, 97.70%])\n'
+                  '• Macro F1: 96.76% | Macro Recall: 96.87%\n'
+                  '• High-Risk Recall: 96.88% (Alert Threshold: P ≥ 0.48)',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.navy,
+                    height: 1.45,
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                isElder
-                    ? 'Take as much time as you need for each question. You can answer using the microphone or keyboard. Your care team will review your responses.'
-                    : 'Guidance: ${_questions[_currentIndex].recommendedAnswerGuide}',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.body,
-                  height: 1.4,
                 ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // AI Methodology & Synthetic Model Metrics Card
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: const [
-                  Icon(
-                    LucideIcons.cpu,
-                    size: 16,
-                    color: AppColors.primary,
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'AI Methodology & Model Metrics',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.navy,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'ACRF Base Weights: Mem 25% • Attn 20% • Orient 20% • Recall 20% • Reas 15%',
-                style: TextStyle(fontSize: 10, color: AppColors.muted, height: 1.3),
-              ),
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.lavenderBg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'Trained Random Forest (Synthetic Benchmark):',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '• Synthetic Accuracy: 96.80% (95% CI: [95.85%, 97.70%])\n'
-                      '• Macro F1: 96.76% | Macro Recall: 96.87%\n'
-                      '• High-Risk Recall: 96.88% (Alert Threshold: P ≥ 0.48)',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppColors.navy,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Notice: Verified on synthetic test residents. Non-clinical research metric; not a medical diagnosis.',
-                style: TextStyle(
-                  fontSize: 9,
-                  color: AppColors.muted,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // 4. End / Finish Assessment Button
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () => _showFinishConfirmationDialog(isElder),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: isElder ? AppColors.primary : AppColors.riskHigh,
-              side: BorderSide(
-                color: isElder ? AppColors.lilac : AppColors.riskHighBg,
-              ),
-              backgroundColor: isElder
-                  ? AppColors.primarySoft
-                  : AppColors.riskHighBg.withValues(alpha: 0.5),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            icon: Icon(
-              isElder ? LucideIcons.send : LucideIcons.alertOctagon,
-              size: 16,
-            ),
-            label: Text(
-              isElder
-                  ? (_answeredCount == _totalCount
-                      ? 'Submit for Caregiver Review'
-                      : 'End & Save Session')
-                  : 'End Assessment',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ],
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          const Text(
+            'Notice: Verified on synthetic test residents. Non-clinical research metric; not a medical diagnosis.',
+            style: TextStyle(
+              fontSize: 10,
+              color: AppColors.muted,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildStatItem(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: color,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSecondary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+              maxLines: 1,
+            ),
           ),
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 9, color: AppColors.muted),
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: AppColors.muted,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 
@@ -2797,99 +3308,6 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             ],
                           ),
                         ),
-                        if ((_customEducationYears ?? _resident?.educationYears) == null ||
-                            (_customAge ?? _resident?.age) == null) ...[
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFF93C5FD)),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: const [
-                                    Icon(
-                                      LucideIcons.sparkles,
-                                      size: 16,
-                                      color: Color(0xFF1D4ED8),
-                                    ),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      'Demographic Details for AI Prediction',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF1D4ED8),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                const Text(
-                                  'The 31-feature Random Forest model requires Education Years (and Age) for risk classification. If left blank, ACRF domain scores will still be calculated and saved without ML prediction.',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Color(0xFF1E40AF),
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                if ((_customAge ?? _resident?.age) == null) ...[
-                                  TextFormField(
-                                    initialValue: _customAge?.toString() ?? '',
-                                    keyboardType: TextInputType.number,
-                                    decoration: InputDecoration(
-                                      labelText: 'Resident Age (1-130)',
-                                      isDense: true,
-                                      filled: true,
-                                      fillColor: Colors.white,
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: const BorderSide(color: Color(0xFF93C5FD)),
-                                      ),
-                                    ),
-                                    onChanged: (val) {
-                                      final n = int.tryParse(val.trim());
-                                      if (n != null && n > 0 && n <= 130) {
-                                        _customAge = n;
-                                      } else if (val.trim().isEmpty) {
-                                        _customAge = null;
-                                      }
-                                    },
-                                  ),
-                                  const SizedBox(height: 8),
-                                ],
-                                if ((_customEducationYears ?? _resident?.educationYears) == null) ...[
-                                  TextFormField(
-                                    initialValue: _customEducationYears?.toString() ?? '',
-                                    keyboardType: TextInputType.number,
-                                    decoration: InputDecoration(
-                                      labelText: 'Education Years (0-40)',
-                                      isDense: true,
-                                      filled: true,
-                                      fillColor: Colors.white,
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: const BorderSide(color: Color(0xFF93C5FD)),
-                                      ),
-                                    ),
-                                    onChanged: (val) {
-                                      final n = int.tryParse(val.trim());
-                                      if (n != null && n >= 0 && n <= 40) {
-                                        _customEducationYears = n;
-                                      } else if (val.trim().isEmpty) {
-                                        _customEducationYears = null;
-                                      }
-                                    },
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ],
                       ],
                       if (_submitError != null) ...[
                         const SizedBox(height: 12),
@@ -3109,99 +3527,6 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           ],
                         ),
                       ),
-                      if ((_customEducationYears ?? _resident?.educationYears) == null ||
-                          (_customAge ?? _resident?.age) == null) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEFF6FF),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFF93C5FD)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: const [
-                                  Icon(
-                                    LucideIcons.sparkles,
-                                    size: 16,
-                                    color: Color(0xFF1D4ED8),
-                                  ),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'Demographic Details for AI Prediction',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF1D4ED8),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                'The 31-feature Random Forest model requires Education Years (and Age) for risk classification. If left blank, ACRF domain scores will still be calculated and saved without ML prediction.',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF1E40AF),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              if ((_customAge ?? _resident?.age) == null) ...[
-                                TextFormField(
-                                  initialValue: _customAge?.toString() ?? '',
-                                  keyboardType: TextInputType.number,
-                                  decoration: InputDecoration(
-                                    labelText: 'Resident Age (1-130)',
-                                    isDense: true,
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      borderSide: const BorderSide(color: Color(0xFF93C5FD)),
-                                    ),
-                                  ),
-                                  onChanged: (val) {
-                                    final n = int.tryParse(val.trim());
-                                    if (n != null && n > 0 && n <= 130) {
-                                      _customAge = n;
-                                    } else if (val.trim().isEmpty) {
-                                      _customAge = null;
-                                    }
-                                  },
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              if ((_customEducationYears ?? _resident?.educationYears) == null) ...[
-                                TextFormField(
-                                  initialValue: _customEducationYears?.toString() ?? '',
-                                  keyboardType: TextInputType.number,
-                                  decoration: InputDecoration(
-                                    labelText: 'Education Years (0-40)',
-                                    isDense: true,
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      borderSide: const BorderSide(color: Color(0xFF93C5FD)),
-                                    ),
-                                  ),
-                                  onChanged: (val) {
-                                    final n = int.tryParse(val.trim());
-                                    if (n != null && n >= 0 && n <= 40) {
-                                      _customEducationYears = n;
-                                    } else if (val.trim().isEmpty) {
-                                      _customEducationYears = null;
-                                    }
-                                  },
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
                     ],
                     if (_submitError != null) ...[
                       const SizedBox(height: 12),
