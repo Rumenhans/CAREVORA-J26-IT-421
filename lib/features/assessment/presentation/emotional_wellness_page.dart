@@ -70,7 +70,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   bool _speechEnabled = false;
 
   // Camera & Image state
-  String _currentFaceAsset = 'assets/images/landing/senior_happy_face.jpg';
+  String _currentFaceAsset = 'assets/images/landing/senior_neutral_calm_face.jpg';
   Uint8List? _capturedImageBytes;
   final ImagePicker _picker = ImagePicker();
 
@@ -2467,8 +2467,37 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 fit: StackFit.expand,
                 children: [
                   _capturedImageBytes != null
-                      ? Image.memory(_capturedImageBytes!, fit: BoxFit.cover)
-                      : Image.asset(_currentFaceAsset, fit: BoxFit.cover),
+                      ? Image.memory(
+                          _capturedImageBytes!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Image.asset(
+                            'assets/images/landing/senior_neutral_calm_face.jpg',
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Image.asset(
+                          _currentFaceAsset,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Image.asset(
+                              'assets/images/landing/senior_neutral_calm_face.jpg',
+                              fit: BoxFit.cover,
+                              errorBuilder: (ctx, err, st) {
+                                return Container(
+                                  color: const Color(0xFF1E293B),
+                                  child: const Center(
+                                    child: Icon(
+                                      LucideIcons.user,
+                                      size: 56,
+                                      color: Colors.white54,
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
 
                   // Overlay Face Tracking Box with green/purple corners
                   Center(

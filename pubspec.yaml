@@ -72,6 +72,11 @@ flutter:
 
   assets:
     - assets/images/landing/
+    - assets/images/landing/senior_neutral_calm_face.jpg
+    - assets/images/landing/senior_happy_face.jpg
+    - assets/images/landing/senior_sad_face.jpg
+    - assets/images/landing/senior_confused_face.jpg
+    - assets/images/landing/senior_fear_face.jpg
     - assets/images/auth/
 
   # An image asset can refer to one or more resolution-specific "variants", see
