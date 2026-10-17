@@ -612,7 +612,7 @@ public class CognitiveAssessmentService {
                 .reasoning(saved.getReasoningScore())
                 .acrfScore(aiResult.getAcrfScore())
                 .mlPrediction(saved.getMlPrediction())
-                .riskLevel(resolveRiskLevel(saved.getMlPrediction()))
+                .riskLevel(resolveRiskLevel(saved.getMlPrediction(), aiResult.getAcrfScore()))
                 .alertTriggered(saved.getAlertTriggered())
                 .categoryContributions(aiResult.getCategoryContributions())
                 .weightsApplied(aiResult.getWeightsApplied())
@@ -725,7 +725,7 @@ public class CognitiveAssessmentService {
                 .reasoning(c.getReasoningScore())
                 .acrfScore(c.getAcrfScore())
                 .mlPrediction(c.getMlPrediction())
-                .riskLevel(resolveRiskLevel(c.getMlPrediction()))
+                .riskLevel(resolveRiskLevel(c.getMlPrediction(), c.getAcrfScore()))
                 .alertTriggered(c.getAlertTriggered())
                 .categoryContributions(contributions)
                 .weightsApplied(ACRF_WEIGHTS)
@@ -807,15 +807,21 @@ public class CognitiveAssessmentService {
                 .build();
     }
 
-    private String resolveRiskLevel(String mlPrediction) {
-        if (mlPrediction == null || mlPrediction.isBlank() || "Not Available".equalsIgnoreCase(mlPrediction.trim())) {
-            return "Not Available";
+    private String resolveRiskLevel(String mlPrediction, Double acrfScore) {
+        if (mlPrediction != null && !mlPrediction.isBlank() && !"Not Available".equalsIgnoreCase(mlPrediction.trim()) && !"Prediction Unavailable".equalsIgnoreCase(mlPrediction.trim())) {
+            String p = mlPrediction.trim();
+            if (p.equalsIgnoreCase("Low") || p.equalsIgnoreCase("Low Risk")) return "Low Risk";
+            if (p.equalsIgnoreCase("Moderate") || p.equalsIgnoreCase("Moderate Risk")) return "Moderate Risk";
+            if (p.equalsIgnoreCase("High") || p.equalsIgnoreCase("High Risk")) return "High Risk";
+            return p;
         }
-        String p = mlPrediction.trim();
-        if (p.equalsIgnoreCase("Low") || p.equalsIgnoreCase("Low Risk")) return "Low Risk";
-        if (p.equalsIgnoreCase("Moderate") || p.equalsIgnoreCase("Moderate Risk")) return "Moderate Risk";
-        if (p.equalsIgnoreCase("High") || p.equalsIgnoreCase("High Risk")) return "High Risk";
-        return p;
+        if (acrfScore != null && !Double.isNaN(acrfScore)) {
+            double s = (acrfScore <= 1.0 && acrfScore > 0.0) ? acrfScore * 100.0 : acrfScore;
+            if (s >= 70.0) return "Low Risk";
+            if (s >= 50.0) return "Moderate Risk";
+            return "High Risk";
+        }
+        return "Not Available";
     }
 
     private CognitiveAssessmentResponse.CategoryContributionDto createContrib(String category, Double score, Double weight) {

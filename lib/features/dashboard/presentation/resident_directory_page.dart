@@ -1057,29 +1057,49 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
       final hasPrediction = (latestRecord.riskLevel != null &&
               latestRecord.riskLevel!.isNotEmpty &&
               latestRecord.riskLevel != 'Not Available' &&
-              latestRecord.riskLevel != 'Risk Level Not Available') ||
+              latestRecord.riskLevel != 'Risk Level Not Available' &&
+              latestRecord.riskLevel != 'Prediction Unavailable') ||
           (latestRecord.mlPrediction != null &&
-              latestRecord.mlPrediction!.isNotEmpty);
+              latestRecord.mlPrediction!.isNotEmpty &&
+              latestRecord.mlPrediction != 'Not Available' &&
+              latestRecord.mlPrediction != 'Risk Level Not Available' &&
+              latestRecord.mlPrediction != 'Prediction Unavailable');
 
-      if (latestRecord.status.toUpperCase() == 'COMPLETED_PREDICTION_UNAVAILABLE' ||
-          !hasPrediction) {
-        riskLevelDisplay = 'Risk Level Not Available';
-      } else if (latestRecord.riskLevel != null &&
-          latestRecord.riskLevel!.isNotEmpty &&
-          latestRecord.riskLevel != 'Not Available') {
-        riskLevelDisplay = latestRecord.riskLevel!;
+      if (hasPrediction &&
+          latestRecord.status.toUpperCase() != 'COMPLETED_PREDICTION_UNAVAILABLE') {
+        if (latestRecord.riskLevel != null &&
+            latestRecord.riskLevel!.isNotEmpty &&
+            latestRecord.riskLevel != 'Not Available' &&
+            latestRecord.riskLevel != 'Risk Level Not Available' &&
+            latestRecord.riskLevel != 'Prediction Unavailable') {
+          riskLevelDisplay = latestRecord.riskLevel!;
+        } else {
+          riskLevelDisplay = latestRecord.mlPrediction!;
+        }
+      } else if (latestRecord.acrfScore != null) {
+        final s = (latestRecord.acrfScore! <= 1.0 && latestRecord.acrfScore! > 0.0)
+            ? latestRecord.acrfScore! * 100.0
+            : latestRecord.acrfScore!;
+        if (s >= 70.0) {
+          riskLevelDisplay = 'Low Risk';
+        } else if (s >= 50.0) {
+          riskLevelDisplay = 'Moderate Risk';
+        } else {
+          riskLevelDisplay = 'High Risk';
+        }
       } else {
-        riskLevelDisplay = latestRecord.mlPrediction!;
+        riskLevelDisplay = 'Risk Level Not Available';
       }
 
-      if (latestRecord.status.toUpperCase() == 'COMPLETED_PREDICTION_UNAVAILABLE') {
-        statusDisplay = 'Completed (No ML)';
-        statusBg = const Color(0xFFDBEAFE);
-        statusColor = const Color(0xFF1D4ED8);
-      } else {
+      if (latestRecord.status.toUpperCase() == 'COMPLETED_PREDICTION_UNAVAILABLE' ||
+          latestRecord.status.toUpperCase() == 'COMPLETED') {
         statusDisplay = 'Completed';
         statusBg = const Color(0xFFDCFCE7);
         statusColor = const Color(0xFF15803D);
+      } else {
+        statusDisplay = latestRecord.status;
+        statusBg = const Color(0xFFDBEAFE);
+        statusColor = const Color(0xFF1D4ED8);
       }
 
       dateDisplay = latestRecord.createdAt != null
@@ -1702,18 +1722,35 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
                 final hasItemPrediction = (item.riskLevel != null &&
                         item.riskLevel!.isNotEmpty &&
                         item.riskLevel != 'Not Available' &&
-                        item.riskLevel != 'Risk Level Not Available') ||
-                    (item.mlPrediction != null && item.mlPrediction!.isNotEmpty);
+                        item.riskLevel != 'Risk Level Not Available' &&
+                        item.riskLevel != 'Prediction Unavailable') ||
+                    (item.mlPrediction != null &&
+                        item.mlPrediction!.isNotEmpty &&
+                        item.mlPrediction != 'Not Available' &&
+                        item.mlPrediction != 'Risk Level Not Available' &&
+                        item.mlPrediction != 'Prediction Unavailable');
 
                 final String riskLabel = isPending
                     ? 'Not Available'
-                    : (isCompletedNoMl || !hasItemPrediction
-                        ? 'Risk Level Not Available'
-                        : (item.riskLevel != null &&
+                    : (hasItemPrediction && !isCompletedNoMl
+                        ? (item.riskLevel != null &&
                                 item.riskLevel!.isNotEmpty &&
-                                item.riskLevel != 'Not Available'
+                                item.riskLevel != 'Not Available' &&
+                                item.riskLevel != 'Risk Level Not Available' &&
+                                item.riskLevel != 'Prediction Unavailable'
                             ? item.riskLevel!
-                            : item.mlPrediction!));
+                            : item.mlPrediction!)
+                        : (item.acrfScore != null
+                            ? ((item.acrfScore! <= 1.0 && item.acrfScore! > 0.0
+                                    ? item.acrfScore! * 100.0
+                                    : item.acrfScore!) >= 70.0
+                                ? 'Low Risk'
+                                : ((item.acrfScore! <= 1.0 && item.acrfScore! > 0.0
+                                        ? item.acrfScore! * 100.0
+                                        : item.acrfScore!) >= 50.0
+                                    ? 'Moderate Risk'
+                                    : 'High Risk'))
+                            : 'Risk Level Not Available'));
 
                 final bool isExpanded = _expandedHistoryIndex == index;
 

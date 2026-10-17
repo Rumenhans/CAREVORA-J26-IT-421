@@ -895,7 +895,9 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                             Text(
                               cog.mlAvailable
                                   ? '31-feature ML model prediction'
-                                  : 'Model prediction unavailable',
+                                  : (cog.actualRiskLevel != null
+                                      ? 'Score-based clinical risk tier'
+                                      : 'Model prediction unavailable'),
                               style: const TextStyle(fontSize: 11, color: AppColors.body),
                             ),
                           ],
@@ -1149,7 +1151,27 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
           final item = priorRecords[index];
           final date = _formatDate(item.createdAt);
           final accuracy = CarePlansService.formatTaskAccuracyScore(item.acrfScore);
-          final risk = item.riskLevel ?? item.mlPrediction ?? 'UNKNOWN';
+          String risk = item.riskLevel ?? item.mlPrediction ?? '';
+          if (risk.isEmpty ||
+              risk == 'UNKNOWN' ||
+              risk == 'Not Available' ||
+              risk == 'Risk Level Not Available' ||
+              risk == 'Prediction Unavailable') {
+            if (item.acrfScore != null) {
+              final s = (item.acrfScore! <= 1.0 && item.acrfScore! > 0.0)
+                  ? item.acrfScore! * 100.0
+                  : item.acrfScore!;
+              if (s >= 70.0) {
+                risk = 'LOW';
+              } else if (s >= 50.0) {
+                risk = 'MODERATE';
+              } else {
+                risk = 'HIGH';
+              }
+            } else {
+              risk = 'UNKNOWN';
+            }
+          }
 
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

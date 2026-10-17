@@ -353,7 +353,7 @@ void main() {
                 'id': 104,
                 'residentId': 4,
                 'residentName': 'Test Resident',
-                'acrfScore': 75.0,
+                'acrfScore': null,
                 'riskLevel': null,
                 'mlPrediction': null,
                 'mlAvailable': false,
@@ -767,9 +767,9 @@ void main() {
       expect(find.text('72.5%'), findsOneWidget);
       expect(find.text('N/A'), findsNothing);
 
-      // AI Risk Prediction must show Prediction Unavailable without inventing risk
-      expect(find.text('PREDICTION UNAVAILABLE'), findsAtLeastNWidgets(1));
-      expect(find.text('Prediction Unavailable Protocol'), findsOneWidget);
+      // Cognitive Risk Level must display LOW RISK evaluated from the 72.5% task accuracy score
+      expect(find.text('LOW RISK'), findsAtLeastNWidgets(1));
+      expect(find.text('Routine Care & Cognitive Stimulation'), findsOneWidget);
 
       // Domain scores from assessment #120 must be displayed accurately (50%, 100%, 75%)
       expect(find.text('50%', skipOffstage: false), findsAtLeastNWidgets(1));
@@ -819,7 +819,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('72.5%'), findsOneWidget);
-      expect(find.text('PREDICTION UNAVAILABLE'), findsAtLeastNWidgets(1));
+      expect(find.text('LOW RISK'), findsAtLeastNWidgets(1));
     });
 
     testWidgets('16. History list excludes currently displayed latest assessment and does not duplicate it', (tester) async {

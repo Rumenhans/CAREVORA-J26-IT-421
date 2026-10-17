@@ -80,28 +80,48 @@ class CognitiveCareRecommendation {
     required this.icon,
   });
 
-  /// Factory selecting recommendations based strictly on the actual AI-predicted risk level.
-  /// Task accuracy score is kept separate and does not override the AI risk category.
-  static CognitiveCareRecommendation forRisk(String? rawRisk, {bool mlAvailable = true}) {
-    if (!mlAvailable || rawRisk == null || rawRisk.trim().isEmpty) {
-      return const CognitiveCareRecommendation(
-        category: CognitiveRiskCategory.unavailable,
-        categoryLabel: 'PREDICTION UNAVAILABLE',
-        title: 'Prediction Unavailable Protocol',
-        summary: 'AI risk prediction could not be computed for this cognitive assessment record.',
-        actionItems: [
-          'Caregivers should rely on manual clinical review and monitor task accuracy percentage.',
-          'Review individual domain scores (Orientation, Memory, Attention, Recall, Reasoning) for localized deficits.',
-          'Ensure future sessions record response times to support AI evaluation.',
-          'Consult attending nursing lead if resident displays sudden behavioural changes.',
-        ],
-        badgeColor: AppColors.muted,
-        badgeBg: Color(0xFFF1F1F5),
-        icon: LucideIcons.helpCircle,
-      );
+  /// Factory selecting recommendations based on risk level or cognitive task accuracy score.
+  static CognitiveCareRecommendation forRisk(
+    String? rawRisk, {
+    bool mlAvailable = true,
+    double? score,
+  }) {
+    String? effectiveRisk = rawRisk;
+    if (effectiveRisk == null ||
+        effectiveRisk.trim().isEmpty ||
+        effectiveRisk == 'Not Available' ||
+        effectiveRisk == 'Risk Level Not Available' ||
+        effectiveRisk == 'Prediction Unavailable' ||
+        !mlAvailable) {
+      if (score != null) {
+        final s = (score <= 1.0 && score > 0.0) ? score * 100.0 : score;
+        if (s >= 70.0) {
+          effectiveRisk = 'LOW';
+        } else if (s >= 50.0) {
+          effectiveRisk = 'MODERATE';
+        } else {
+          effectiveRisk = 'HIGH';
+        }
+      } else if (!mlAvailable || effectiveRisk == null || effectiveRisk.trim().isEmpty) {
+        return const CognitiveCareRecommendation(
+          category: CognitiveRiskCategory.unavailable,
+          categoryLabel: 'PREDICTION UNAVAILABLE',
+          title: 'Prediction Unavailable Protocol',
+          summary: 'AI risk prediction could not be computed for this cognitive assessment record.',
+          actionItems: [
+            'Caregivers should rely on manual clinical review and monitor task accuracy percentage.',
+            'Review individual domain scores (Orientation, Memory, Attention, Recall, Reasoning) for localized deficits.',
+            'Ensure future sessions record response times to support AI evaluation.',
+            'Consult attending nursing lead if resident displays sudden behavioural changes.',
+          ],
+          badgeColor: AppColors.muted,
+          badgeBg: Color(0xFFF1F1F5),
+          icon: LucideIcons.helpCircle,
+        );
+      }
     }
 
-    final normalized = rawRisk.trim().toUpperCase();
+    final normalized = (effectiveRisk ?? '').trim().toUpperCase();
     if (normalized.contains('LOW')) {
       return const CognitiveCareRecommendation(
         category: CognitiveRiskCategory.low,
@@ -386,10 +406,25 @@ class CarePlansService {
           latest.mlPrediction != 'Risk Level Not Available' &&
           latest.mlPrediction != 'Prediction Unavailable') {
         actualRisk = latest.mlPrediction;
+      } else if (latest.acrfScore != null) {
+        final s = (latest.acrfScore! <= 1.0 && latest.acrfScore! > 0.0)
+            ? latest.acrfScore! * 100.0
+            : latest.acrfScore!;
+        if (s >= 70.0) {
+          actualRisk = 'Low Risk';
+        } else if (s >= 50.0) {
+          actualRisk = 'Moderate Risk';
+        } else {
+          actualRisk = 'High Risk';
+        }
       }
 
-      final bool mlAvail = latest.mlAvailable && actualRisk != null;
-      final rec = CognitiveCareRecommendation.forRisk(actualRisk, mlAvailable: mlAvail);
+      final bool mlAvail = actualRisk != null;
+      final rec = CognitiveCareRecommendation.forRisk(
+        actualRisk,
+        mlAvailable: mlAvail,
+        score: latest.acrfScore,
+      );
 
       return CarePlanCognitiveData(
         latestAssessment: latest,
@@ -397,7 +432,7 @@ class CarePlansService {
         recommendation: rec,
         taskAccuracyScore: latest.acrfScore,
         actualRiskLevel: actualRisk,
-        mlAvailable: mlAvail,
+        mlAvailable: latest.mlAvailable,
         assessmentDate: latest.createdAt,
       );
     } catch (e) {
