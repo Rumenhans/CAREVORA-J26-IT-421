@@ -123,6 +123,14 @@ class DesktopSidebar extends ConsumerWidget {
                     route: '/dashboard/social-audit',
                   ),
                 ],
+                if (authState.isElder) ...[
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.gamepad2,
+                    label: 'Memory Games',
+                    route: '/dashboard/memory-games',
+                  ),
+                ],
                 _buildNavItem(
                   context,
                   icon: LucideIcons.settings,

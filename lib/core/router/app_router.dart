@@ -9,6 +9,7 @@ import '../../features/dashboard/presentation/overview_page.dart';
 import '../../features/dashboard/presentation/resident_directory_page.dart';
 import '../../features/dashboard/presentation/generic_placeholder_tab.dart';
 import '../../features/dashboard/presentation/care_plans_page.dart';
+import '../../features/dashboard/presentation/memory_games_page.dart';
 import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
 import '../../features/doctor/presentation/pages/doctor_dashboard_page.dart';
 import '../../features/medicine/presentation/pages/live_medicine_board_page.dart';
@@ -136,6 +137,10 @@ class AppRouter {
               final residentId = state.pathParameters['id'] ?? '1';
               return ResidentSocialAuditDetailPage(residentId: residentId);
             },
+          ),
+          GoRoute(
+            path: '/dashboard/memory-games',
+            builder: (context, state) => const MemoryGamesPage(),
           ),
           GoRoute(
             path: '/dashboard/settings',
