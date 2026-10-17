@@ -739,6 +739,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               overallTrend: _currentResident.overallTrend,
               socialScore: audit.socialScore,
             );
+            final idx = _availableResidents.indexWhere((r) => r.id == _currentResident.id);
+            if (idx != -1) {
+              _availableResidents[idx] = _currentResident;
+            }
           }
           _isLoadingSocialAudit = false;
         });
@@ -2103,28 +2107,43 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       // Dropdown to switch residents seamlessly for staff
                       if (!authState.isElder && _availableResidents.length > 1)
                         DropdownButtonHideUnderline(
-                          child: DropdownButton<Resident>(
-                            value: _currentResident,
+                          child: DropdownButton<String>(
+                            value: _availableResidents.any((r) => r.id == _currentResident.id)
+                                ? _currentResident.id
+                                : (_availableResidents.isNotEmpty ? _availableResidents.first.id : null),
                             icon: const Icon(LucideIcons.chevronDown, size: 16, color: AppColors.primary),
                             dropdownColor: AppColors.card,
                             borderRadius: BorderRadius.circular(12),
-                            onChanged: (Resident? newRes) {
-                              if (newRes != null) {
+                            onChanged: (String? newResId) {
+                              if (newResId != null) {
+                                final selected = _availableResidents.firstWhere(
+                                  (r) => r.id == newResId,
+                                  orElse: () => _availableResidents.first,
+                                );
                                 setState(() {
-                                  _currentResident = newRes;
-                                  _loadResidentData(newRes.id);
+                                  _currentResident = selected;
+                                  _loadResidentData(selected.id);
                                 });
                               }
                             },
-                            items: _availableResidents.map((Resident r) {
-                              return DropdownMenuItem<Resident>(
-                                value: r,
-                                child: Text(
-                                  r.name,
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy),
-                                ),
-                              );
-                            }).toList(),
+                            items: () {
+                              final seen = <String>{};
+                              final uniqueResidents = <Resident>[];
+                              for (final r in _availableResidents) {
+                                if (seen.add(r.id)) {
+                                  uniqueResidents.add(r);
+                                }
+                              }
+                              return uniqueResidents.map((Resident r) {
+                                return DropdownMenuItem<String>(
+                                  value: r.id,
+                                  child: Text(
+                                    r.name,
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy),
+                                  ),
+                                );
+                              }).toList();
+                            }(),
                           ),
                         ),
                     ],
