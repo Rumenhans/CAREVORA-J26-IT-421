@@ -721,10 +721,9 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
 
     final latest = cog.latestAssessment!;
     final rec = cog.recommendation;
-    final accuracyStr = cog.taskAccuracyScore != null
-        ? '${cog.taskAccuracyScore!.toStringAsFixed(1)}%'
-        : 'N/A';
+    final accuracyStr = CarePlansService.formatTaskAccuracyScore(cog.taskAccuracyScore);
     final dateStr = _formatDate(cog.assessmentDate);
+    final priorRecords = _getPriorRecords(cog);
 
     return Container(
       width: double.infinity,
@@ -847,7 +846,10 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              cog.taskAccuracyScore != null && cog.taskAccuracyScore! >= 80.0
+                              cog.taskAccuracyScore != null &&
+                                      ((cog.taskAccuracyScore! <= 1.0 && cog.taskAccuracyScore! > 0.0)
+                                          ? cog.taskAccuracyScore! * 100.0 >= 80.0
+                                          : cog.taskAccuracyScore! >= 80.0)
                                   ? 'High task execution accuracy'
                                   : 'Moderate or partial task execution',
                               style: const TextStyle(fontSize: 11, color: AppColors.body),
@@ -893,7 +895,9 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                             Text(
                               cog.mlAvailable
                                   ? '31-feature ML model prediction'
-                                  : 'Model prediction unavailable',
+                                  : (cog.actualRiskLevel != null
+                                      ? 'Score-based clinical risk tier'
+                                      : 'Model prediction unavailable'),
                               style: const TextStyle(fontSize: 11, color: AppColors.body),
                             ),
                           ],
@@ -985,7 +989,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                 const SizedBox(height: 16),
 
                 // Previous Assessment History Toggle
-                if (cog.history.length > 1) ...[
+                if (priorRecords.isNotEmpty) ...[
                   InkWell(
                     onTap: () {
                       setState(() {
@@ -1004,7 +1008,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'Previous Assessment History (${cog.history.length - 1} prior records)',
+                            'Previous Assessment History (${priorRecords.length} prior records)',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -1017,7 +1021,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                   ),
                   if (_showCognitiveHistory) ...[
                     const SizedBox(height: 10),
-                    _buildCognitiveHistoryList(cog.history),
+                    _buildCognitiveHistoryList(priorRecords),
                   ],
                 ],
               ],
@@ -1114,10 +1118,24 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
     );
   }
 
-  Widget _buildCognitiveHistoryList(List<CognitiveSubmissionResult> history) {
-    // Skip the first record because it's already shown as the latest
-    final priorRecords = history.skip(1).toList();
+  List<CognitiveSubmissionResult> _getPriorRecords(CarePlanCognitiveData cog) {
+    final latest = cog.latestAssessment;
+    if (latest == null) return cog.history;
+    return cog.history.where((item) {
+      if (identical(item, latest)) return false;
+      if (latest.id > 0 && item.id > 0 && item.id == latest.id) return false;
+      if (latest.sessionId != null &&
+          latest.sessionId!.isNotEmpty &&
+          item.sessionId != null &&
+          item.sessionId!.isNotEmpty &&
+          item.sessionId == latest.sessionId) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
 
+  Widget _buildCognitiveHistoryList(List<CognitiveSubmissionResult> priorRecords) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceSecondary,
@@ -1132,8 +1150,28 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
         itemBuilder: (context, index) {
           final item = priorRecords[index];
           final date = _formatDate(item.createdAt);
-          final accuracy = item.acrfScore != null ? '${item.acrfScore!.toStringAsFixed(1)}%' : 'N/A';
-          final risk = item.riskLevel ?? item.mlPrediction ?? 'UNKNOWN';
+          final accuracy = CarePlansService.formatTaskAccuracyScore(item.acrfScore);
+          String risk = item.riskLevel ?? item.mlPrediction ?? '';
+          if (risk.isEmpty ||
+              risk == 'UNKNOWN' ||
+              risk == 'Not Available' ||
+              risk == 'Risk Level Not Available' ||
+              risk == 'Prediction Unavailable') {
+            if (item.acrfScore != null) {
+              final s = (item.acrfScore! <= 1.0 && item.acrfScore! > 0.0)
+                  ? item.acrfScore! * 100.0
+                  : item.acrfScore!;
+              if (s >= 70.0) {
+                risk = 'LOW';
+              } else if (s >= 50.0) {
+                risk = 'MODERATE';
+              } else {
+                risk = 'HIGH';
+              }
+            } else {
+              risk = 'UNKNOWN';
+            }
+          }
 
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
