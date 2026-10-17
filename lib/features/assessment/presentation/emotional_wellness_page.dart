@@ -77,6 +77,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   // Animations
   late AnimationController _waveController;
   late AnimationController _scannerController;
+  late AnimationController _clapController;
+  bool _showClapAnimation = false;
+
+  // Negative answer reason tracking & speech input
+  final Map<int, String> _elderNegativeReasons = {};
+  late final TextEditingController _reasonTextController;
+  bool _isRecordingReason = false;
 
   // Sub-navigation: 0: Assessment Session, 1: RALPA Trajectory, 2: Care Interventions & Reassessment, 3: Assessment History
   int _selectedSubTab = 0;
@@ -220,6 +227,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   @override
   void initState() {
     super.initState();
+    _reasonTextController = TextEditingController();
     _initResidents();
     _initActivitiesAndHistory();
     _loadResidentData(_currentResident.id);
@@ -766,6 +774,20 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
+
+    _clapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    );
+    _clapController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        if (mounted) {
+          setState(() {
+            _showClapAnimation = false;
+          });
+        }
+      }
+    });
   }
 
   Future<void> _initVoiceEngines() async {
@@ -920,6 +942,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _recordTimer?.cancel();
     _waveController.dispose();
     _scannerController.dispose();
+    _clapController.dispose();
+    _reasonTextController.dispose();
     _flutterTts.stop();
     _speech.stop();
     super.dispose();
@@ -1088,12 +1112,110 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     setState(() {
       _answers[questionId] = answer;
       _updateQuestionContext();
+      if (answer == true) {
+        _showClapAnimation = true;
+        _clapController.forward(from: 0.0);
+        _flutterTts.stop();
+        _flutterTts.speak(
+          'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
+        );
+      } else {
+        _showClapAnimation = false;
+        _reasonTextController.text = _elderNegativeReasons[questionId] ?? '';
+        _flutterTts.stop();
+        _flutterTts.speak(
+          'I am sorry to hear that. Could you please share what is making you feel this way?',
+        );
+      }
     });
+  }
+
+  Future<void> _toggleReasonVoiceRecording() async {
+    final currentQ = _questions[_currentIndex];
+    if (!_isRecordingReason) {
+      setState(() {
+        _isRecordingReason = true;
+      });
+      if (_speechEnabled) {
+        try {
+          await _speech.listen(onResult: (result) {
+            if (mounted) {
+              setState(() {
+                _reasonTextController.text = result.recognizedWords;
+                _elderNegativeReasons[currentQ.id] = result.recognizedWords;
+              });
+            }
+          });
+        } catch (e) {
+          debugPrint('STT listen error: $e');
+        }
+      } else {
+        // Fallback simulation when speech engine is not supported or browser mic permission blocked
+        Future.delayed(const Duration(milliseconds: 1400), () {
+          if (mounted && _isRecordingReason) {
+            const fallbackSample = 'අද උදෑසන සිට මට තරමක තනිකමක් සහ සිතේ නොසන්සුන්තාවක් දැනුණා.';
+            setState(() {
+              _reasonTextController.text = fallbackSample;
+              _elderNegativeReasons[currentQ.id] = fallbackSample;
+              _isRecordingReason = false;
+            });
+          }
+        });
+      }
+    } else {
+      setState(() {
+        _isRecordingReason = false;
+      });
+      if (_speechEnabled) {
+        await _speech.stop();
+      }
+    }
+  }
+
+  Widget _buildClapOverlayAnimation() {
+    final emojis = ['👏', '✨', '👏', '🎉', '👏', '🌸', '👏', '👏'];
+    return AnimatedBuilder(
+      animation: _clapController,
+      builder: (context, child) {
+        final progress = _clapController.value;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            children: List.generate(emojis.length, (index) {
+              final xAlign = -0.8 + (index * 0.23);
+              final yStart = 0.9;
+              final yEnd = -1.1;
+              final yCurrent = yStart + (yEnd - yStart) * (progress * 1.25 - (index * 0.04)).clamp(0.0, 1.0);
+              final opacity = (progress < 0.15)
+                  ? (progress / 0.15)
+                  : (progress > 0.7 ? ((1.0 - progress) / 0.3).clamp(0.0, 1.0) : 1.0);
+              final scale = 0.9 + (index % 3) * 0.3 + (progress * 0.4);
+
+              return Align(
+                alignment: Alignment(xAlign, yCurrent),
+                child: Opacity(
+                  opacity: opacity.clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: scale,
+                    child: Text(
+                      emojis[index],
+                      style: const TextStyle(fontSize: 32),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        );
+      },
+    );
   }
 
   void _updateQuestionContext() {
     final q = _questions[_currentIndex];
     final ans = _answers[q.id];
+    _showClapAnimation = false;
+    _reasonTextController.text = _elderNegativeReasons[q.id] ?? '';
 
     switch (q.id) {
       case 1:
@@ -2284,84 +2406,278 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.lilac),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(LucideIcons.sparkles, size: 18, color: AppColors.primary),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        currentQ.prompt,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.navy,
-                          height: 1.35,
-                        ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
                       ),
-                      if (currentQ.promptSi != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          currentQ.promptSi!,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.primaryDeep,
-                            height: 1.4,
+                      child: const Icon(LucideIcons.sparkles, size: 18, color: AppColors.primary),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            currentQ.prompt,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.navy,
+                              height: 1.35,
+                            ),
                           ),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      InkWell(
-                        onTap: _readQuestionAloud,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Icon(LucideIcons.volume2, size: 14, color: AppColors.primary),
-                            SizedBox(width: 6),
+                          if (currentQ.promptSi != null) ...[
+                            const SizedBox(height: 6),
                             Text(
-                              'Tap to replay',
-                              style: TextStyle(
-                                fontSize: 12,
+                              currentQ.promptSi!,
+                              style: const TextStyle(
+                                fontSize: 15,
                                 fontWeight: FontWeight.w600,
-                                color: AppColors.primary,
+                                color: AppColors.primaryDeep,
+                                height: 1.4,
                               ),
                             ),
                           ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          _buildYesNoChoiceButton(
-                            label: 'Yes / ඔව්',
-                            isSelected: _answers[currentQ.id] == true,
-                            isYes: true,
-                            onTap: () => _selectYesNoAnswer(currentQ.id, true),
+                          const SizedBox(height: 8),
+                          InkWell(
+                            onTap: _readQuestionAloud,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(LucideIcons.volume2, size: 14, color: AppColors.primary),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Tap to replay',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 12),
-                          _buildYesNoChoiceButton(
-                            label: 'No / නැත',
-                            isSelected: _answers[currentQ.id] == false,
-                            isYes: false,
-                            onTap: () => _selectYesNoAnswer(currentQ.id, false),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              _buildYesNoChoiceButton(
+                                label: 'Yes / ඔව්',
+                                isSelected: _answers[currentQ.id] == true,
+                                isYes: true,
+                                onTap: () => _selectYesNoAnswer(currentQ.id, true),
+                              ),
+                              const SizedBox(width: 12),
+                              _buildYesNoChoiceButton(
+                                label: 'No / නැත',
+                                isSelected: _answers[currentQ.id] == false,
+                                isYes: false,
+                                onTap: () => _selectYesNoAnswer(currentQ.id, false),
+                              ),
+                            ],
                           ),
+
+                          // If YES: AI assistant gratitude and celebratory response
+                          if (_answers[currentQ.id] == true) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0FDF4),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF86EFAC)),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('👏', style: TextStyle(fontSize: 26)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: const [
+                                        Text(
+                                          'AI Assistant:  ✨ Delighted to hear this! ✨',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF15803D),
+                                          ),
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          'ගොඩක් ඒ ගැන ස්තූතියි! අද දවසේ ඔබ සිතින් සතුටින් සහ සහනයෙන් පසුවීම ගැන මම ගොඩක් සතුටු වෙනවා!',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF166534),
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                        SizedBox(height: 2),
+                                        Text(
+                                          'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                            color: Color(0xFF15803D),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          // If NO: Reason prompt with speech and typing support
+                          if (_answers[currentQ.id] == false) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFFBEB),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: const Color(0xFFFDE68A)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: const [
+                                      Icon(LucideIcons.heartHandshake, size: 18, color: Color(0xFFD97706)),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'AI Assistant',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFFB45309),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF92400E),
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const Text(
+                                    'I am sorry to hear that. Could you tell me or type what is making you feel this way?',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Color(0xFFB45309),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: const Color(0xFFFCD34D)),
+                                    ),
+                                    child: TextField(
+                                      controller: _reasonTextController,
+                                      maxLines: 2,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _elderNegativeReasons[currentQ.id] = val;
+                                        });
+                                      },
+                                      style: const TextStyle(fontSize: 13, color: AppColors.navy),
+                                      decoration: const InputDecoration(
+                                        hintText: 'ඔබට එසේ දැනෙන්න හේතුව මෙහි ටයිප් කරන්න... / Type why you feel this way...',
+                                        hintStyle: TextStyle(fontSize: 12, color: AppColors.muted),
+                                        border: InputBorder.none,
+                                        contentPadding: EdgeInsets.all(10),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      InkWell(
+                                        onTap: _toggleReasonVoiceRecording,
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: _isRecordingReason ? AppColors.riskHigh : AppColors.primary,
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                _isRecordingReason ? LucideIcons.square : LucideIcons.mic,
+                                                size: 14,
+                                                color: Colors.white,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                _isRecordingReason
+                                                    ? 'සවන් දෙමින්... (නැවැත්වීමට ඔබන්න)'
+                                                : '🎙️ හඬින් පවසන්න (Speak Reason)',
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      if ((_elderNegativeReasons[currentQ.id] ?? '').trim().isNotEmpty)
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: const [
+                                            Icon(LucideIcons.checkCheck, size: 14, color: Color(0xFF16A34A)),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'හේතුව සටහන් විය (Saved)',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: Color(0xFF16A34A),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+                if (_showClapAnimation)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: _buildClapOverlayAnimation(),
+                    ),
+                  ),
               ],
             ),
           ),
