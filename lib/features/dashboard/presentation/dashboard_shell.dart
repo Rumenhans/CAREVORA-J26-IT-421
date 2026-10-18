@@ -6,6 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/desktop_sidebar.dart';
 import '../../../shared/widgets/mobile_bottom_nav.dart';
+import '../../../data/mock/mock_carevora_data.dart';
 
 class DashboardShell extends StatelessWidget {
   final Widget child;
@@ -165,10 +166,10 @@ class DashboardShell extends StatelessWidget {
                         color: AppColors.riskHigh,
                         shape: BoxShape.circle,
                       ),
-                      child: const Center(
+                      child: Center(
                         child: Text(
-                          '3',
-                          style: TextStyle(
+                          '${MockCarevoraData.alerts.length}',
+                          style: const TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,

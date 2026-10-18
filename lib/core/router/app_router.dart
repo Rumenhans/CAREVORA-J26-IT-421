@@ -8,6 +8,7 @@ import '../../features/dashboard/presentation/dashboard_shell.dart';
 import '../../features/dashboard/presentation/overview_page.dart';
 import '../../features/dashboard/presentation/resident_directory_page.dart';
 import '../../features/dashboard/presentation/generic_placeholder_tab.dart';
+import '../../features/dashboard/presentation/alerts_notifications_page.dart';
 import '../../features/dashboard/presentation/care_plans_page.dart';
 import '../../features/dashboard/presentation/memory_games_page.dart';
 import '../../features/admin/presentation/pages/admin_dashboard_page.dart';
@@ -93,11 +94,7 @@ class AppRouter {
           ),
           GoRoute(
             path: '/dashboard/alerts',
-            builder: (context, state) => const GenericPlaceholderTab(
-              title: 'Alerts & Clinical Notifications',
-              description: 'Automated AI multimodal risk detections and care reminders',
-              icon: LucideIcons.bell,
-            ),
+            builder: (context, state) => const AlertsNotificationsPage(),
           ),
           GoRoute(
             path: '/dashboard/reports',
