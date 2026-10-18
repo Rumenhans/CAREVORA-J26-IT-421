@@ -17,8 +17,8 @@ import '../application/facial_emotion_ai_service.dart';
 import '../application/automatic_facial_capture_service.dart';
 import '../application/emotional_assessment_service.dart';
 import '../application/social_audit_service.dart';
-import 'widgets/caregiver_social_audit_dialog.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../../core/services/audio_player_service.dart';
 
 class EmotionalWellnessPage extends ConsumerStatefulWidget {
   final String? initialResidentId;
@@ -92,7 +92,20 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   int _songPlaybackSeconds = 0;
   static const int _musicTotalDurationSeconds = 300; // At least 5 minutes (300 seconds)
   Timer? _songTimer;
+  int _conversationSeconds = 0;
+  static const int _conversationTotalSeconds = 15; // 15-second soothing conversation
+  Timer? _conversationTimer;
   bool _caregiverNotified = false;
+
+  static const Map<String, String> _songAudioPaths = {
+    'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)': 'audio/pirith.mp3',
+    'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව': 'audio/amaradeva.mp3',
+    'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)': 'audio/sunil_edirisinghe.mp3',
+    'වික්ටර් රත්නායක - සිත නිවන සෙවන (Victor Ratnayake)': 'audio/victor_ratnayake.mp3',
+    'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)': 'audio/nanda_malini.mp3',
+    'සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute)': 'audio/bamboo_flute.mp3',
+    'සොබාදහමේ සන්සුන් නාදය (Peaceful Nature Streams)': 'audio/nature_stream.mp3',
+  };
 
   // Sub-navigation: 0: Assessment Session, 1: RALPA Trajectory, 2: Care Interventions & Reassessment, 3: Assessment History
   int _selectedSubTab = 0;
@@ -950,10 +963,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _facialCaptureService.dispose();
     _recordTimer?.cancel();
     _songTimer?.cancel();
+    _conversationTimer?.cancel();
     _waveController.dispose();
     _scannerController.dispose();
     _clapController.dispose();
     _reasonTextController.dispose();
+    AudioPlayerService.instance.stop();
     _flutterTts.stop();
     _speech.stop();
     super.dispose();
@@ -1198,6 +1213,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         lower.contains('කැක්කුම') ||
         lower.contains('උණ')) {
       _selectUnwellPath();
+    } else if (lower.contains('katha') ||
+        lower.contains('talk') ||
+        lower.contains('chat') ||
+        lower.contains('speak') ||
+        lower.contains('කතා')) {
+      _startAiConversationIntervention();
     } else if (lower.contains('nidahasa') ||
         lower.contains('quiet') ||
         lower.contains('peace') ||
@@ -1267,7 +1288,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       }
     });
     _flutterTts.stop();
-    _flutterTts.speak('Playing $songTitle to help soothe and relax your mind.');
+    final audioPath = _songAudioPaths[songTitle] ?? 'audio/pirith.mp3';
+    AudioPlayerService.instance.play(audioPath, onEnded: () {
+      if (mounted && _isPlayingMusic) {
+        _finishMusicIntervention();
+      }
+    });
   }
 
   void _toggleMusicPlayback() {
@@ -1276,7 +1302,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     });
     if (!_isPlayingMusic) {
       _songTimer?.cancel();
+      AudioPlayerService.instance.pause();
     } else {
+      AudioPlayerService.instance.resume();
       _songTimer = Timer.periodic(const Duration(seconds: 1), (t) {
         if (mounted) {
           setState(() {
@@ -1292,6 +1320,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   void _finishMusicIntervention() {
     _songTimer?.cancel();
+    AudioPlayerService.instance.stop();
     setState(() {
       _isPlayingMusic = false;
       _interventionStage = 6;
@@ -1301,7 +1330,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   }
 
   void _startBookIntervention() {
+    AudioPlayerService.instance.stop();
     setState(() {
+      _isPlayingMusic = false;
       _interventionStage = 5;
     });
     _flutterTts.stop();
@@ -1314,6 +1345,40 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     });
     _flutterTts.stop();
     _flutterTts.speak('Now that you have rested and read, are you feeling more peaceful and in good spirits?');
+  }
+
+  void _startAiConversationIntervention() {
+    setState(() {
+      _interventionStage = 8;
+      _conversationSeconds = 0;
+      _elderNegativeReasons[_questions[_currentIndex].id] = 'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+      _reasonTextController.text = 'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+    });
+    _conversationTimer?.cancel();
+    _conversationTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (mounted) {
+        setState(() {
+          _conversationSeconds++;
+        });
+        if (_conversationSeconds >= _conversationTotalSeconds) {
+          _finishAiConversationIntervention();
+        }
+      }
+    });
+    _flutterTts.stop();
+    _flutterTts.speak(
+      'You are never alone. I am always right here with you to listen and support you. '
+      'Please take a deep gentle breath and let your heart rest peacefully. You are deeply cherished.',
+    );
+  }
+
+  void _finishAiConversationIntervention() {
+    _conversationTimer?.cancel();
+    setState(() {
+      _interventionStage = 6;
+    });
+    _flutterTts.stop();
+    _flutterTts.speak('I hope speaking together brought peace to your heart. Are you feeling more comfortable and in good spirits now?');
   }
 
   void _handlePostInterventionAnswer(bool feelBetter) {
@@ -1931,6 +1996,166 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           ),
         );
 
+      case 8:
+        final progress = (_conversationSeconds / _conversationTotalSeconds).clamp(0.0, 1.0);
+        final currentPhase = _conversationSeconds < 6 ? 0 : (_conversationSeconds < 11 ? 1 : 2);
+        final messages = [
+          {
+            'title': '🌸 ඔබ කිසිවිටෙකත් තනිවී නැහැ',
+            'body': 'ඔබ අපට ඉතාමත් ආදරණීය, ගෞරවනීය කෙනෙක්. ඔබේ සිතේ ඇති කරදර හෝ තනිකම මට ඕනෑම වෙලාවක පවසන්න. මම නිරතුරුවම ඔබ සමඟ ඉන්නවා.',
+            'en': 'You are never alone. You are deeply loved and cherished. I am always right here with you.',
+            'badge': 'සවන් දෙමින් (Listening with Care)',
+          },
+          {
+            'title': '🌿 සිත සහ සිරුර සැහැල්ලු කරගන්න',
+            'body': 'හෙමින් ගැඹුරු හුස්මක් ගෙන සිතේ ඇති බර නිදහස් කරන්න. ඔබ ජීවිතයේ ගෙවූ අත්දැකීම් සහ ආදරය අපට මහත් ආශිර්වාදයක්. සිත සන්සුන් කරගන්න...',
+            'en': 'Take a gentle breath and relax. Your lifetime of wisdom and love is a blessing to us. Be at peace...',
+            'badge': 'සිත සන්සුන් කිරීම (Soothing Mind)',
+          },
+          {
+            'title': '☀️ සියල්ල සතුටින් යහපත් වනු ඇත',
+            'body': 'අද දිනය සහ ඉදිරි සෑම මොහොතක්ම ඔබට සැනසීමෙන් පිරී යනු ඇත. ඔබේ මුවඟට සිනහවක් සහ හදවතට සැනසීමක් උදා වේවා!',
+            'en': 'Everything will turn out well. May your heart be filled with tranquility, comfort and smiles!',
+            'badge': 'ආශිර්වාදය (Heartfelt Blessing)',
+          },
+        ];
+        final currentMsg = messages[currentPhase];
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0FDF4),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(LucideIcons.messageCircleHeart, size: 20, color: Color(0xFF15803D)),
+                      SizedBox(width: 8),
+                      Text(
+                        'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDCFCE7),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF86EFAC)),
+                    ),
+                    child: Text(
+                      '⏱️ 0:${_conversationSeconds.toString().padLeft(2, '0')} / 0:15',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 5,
+                  backgroundColor: const Color(0xFFDCFCE7),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF16A34A)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF16A34A).withValues(alpha: 0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFDCFCE7),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(LucideIcons.bot, size: 16, color: Color(0xFF15803D)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          currentMsg['title']!,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF14532D)),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            currentMsg['badge']!,
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      currentMsg['body']!,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF166534), height: 1.4),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      currentMsg['en']!,
+                      style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFF15803D)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'AI සහායක ඔබ වෙනුවෙන් සවන් දෙමින් කතාබහ කරයි...',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF166534)),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _finishAiConversationIntervention,
+                    icon: const Icon(LucideIcons.heartHandshake, size: 16),
+                    label: const Text(
+                      '✨ සිත සන්සුන් විය (Feeling Soothed)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF16A34A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
       default:
         return Container(
           padding: const EdgeInsets.all(14),
@@ -2042,11 +2267,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 runSpacing: 8,
                 children: [
                   ActionChip(
-                    avatar: const Text('🤒'),
-                    label: const Text('මට අසනීපයි / ඇඟට අමාරුයි (Feeling sick/unwell)'),
+                    avatar: const Text('💬'),
+                    label: const Text('ඔබ මාත් එක්ක කතා කරන්න කැමතිද? (Talk with me)'),
                     backgroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFFFDBA74)),
-                    onPressed: _selectUnwellPath,
+                    side: const BorderSide(color: Color(0xFF93C5FD)),
+                    onPressed: _startAiConversationIntervention,
                   ),
                   ActionChip(
                     avatar: const Text('🌿'),
@@ -2110,6 +2335,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _interventionStage = 0;
     _isPlayingMusic = false;
     _songTimer?.cancel();
+    AudioPlayerService.instance.stop();
     _caregiverNotified = false;
 
     switch (q.id) {
