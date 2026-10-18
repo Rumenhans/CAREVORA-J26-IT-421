@@ -90,7 +90,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   String _selectedSongTitle = 'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)';
   bool _isPlayingMusic = false;
   int _songPlaybackSeconds = 0;
-  static const int _musicTotalDurationSeconds = 300; // At least 5 minutes (300 seconds)
+  static const int _musicTotalDurationSeconds = 600; // 10 minutes (600 seconds) soothing music playback
   Timer? _songTimer;
   int _conversationSeconds = 0;
   static const int _conversationTotalSeconds = 600; // 10 minutes (600 seconds) soothing conversation
@@ -1184,7 +1184,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           _startAiConversationIntervention();
         } else if (questionId == 3) {
           _flutterTts.speak(
-            'Please do not feel lonely. You are never alone, I am right here beside you. Let us have a heartwarming talk.',
+            'Please do not feel lonely. You are never alone, I am right here beside you. Let us listen to peaceful songs to comfort your heart.',
+          );
+          _startAiConversationIntervention();
+        } else if (questionId == 6) {
+          _flutterTts.speak(
+            'Please do not feel lonely. You are never alone, I am right here beside you. Let us listen to soothing songs by maestros Amaradeva and Nanda Malini to comfort your heart.',
           );
           _startAiConversationIntervention();
         } else {
@@ -1365,10 +1370,92 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     AudioPlayerService.instance.stop();
     setState(() {
       _isPlayingMusic = false;
-      _interventionStage = 6;
+      if (_interventionStage != 8) {
+        _interventionStage = 6;
+      }
     });
     _flutterTts.stop();
-    _flutterTts.speak('Now that you have listened to the music, are you feeling more peaceful and in good spirits?');
+    if (_interventionStage != 8) {
+      _flutterTts.speak('Now that you have listened to the music, are you feeling more peaceful and in good spirits?');
+    }
+  }
+
+  void _playSongInAiChat(String songTitle) {
+    setState(() {
+      _selectedSongTitle = songTitle;
+      _isPlayingMusic = true;
+      _songPlaybackSeconds = 0;
+    });
+
+    _songTimer?.cancel();
+    _songTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (mounted) {
+        setState(() {
+          _songPlaybackSeconds++;
+        });
+        if (_songPlaybackSeconds >= _musicTotalDurationSeconds) {
+          _songTimer?.cancel();
+          AudioPlayerService.instance.stop();
+          setState(() {
+            _isPlayingMusic = false;
+          });
+        }
+      }
+    });
+
+    String audioPath = _songAudioPaths[songTitle] ?? 'audio/pirith.mp3';
+    if (songTitle.contains('අමරදේව') || songTitle.toLowerCase().contains('amaradeva')) {
+      audioPath = 'audio/amaradeva.mp3';
+    } else if (songTitle.contains('නන්දා') || songTitle.toLowerCase().contains('nanda')) {
+      audioPath = 'audio/nanda_malini.mp3';
+    } else if (songTitle.contains('සුනිල්') || songTitle.toLowerCase().contains('sunil')) {
+      audioPath = 'audio/sunil_edirisinghe.mp3';
+    } else if (songTitle.contains('වික්ටර්') || songTitle.toLowerCase().contains('victor')) {
+      audioPath = 'audio/victor_ratnayake.mp3';
+    }
+
+    _flutterTts.stop();
+    AudioPlayerService.instance.play(audioPath, onEnded: () {
+      if (mounted && _isPlayingMusic) {
+        setState(() {
+          _isPlayingMusic = false;
+        });
+      }
+    });
+
+    // Add elder's selection message
+    setState(() {
+      _aiConversationMessages.add({
+        'isAi': false,
+        'sinhala': '🎵 මම "$songTitle" ගීතයට සවන් දෙන්න තෝරාගත්තා.',
+        'timestamp': 'Just now',
+      });
+    });
+
+    // Heart-comforting AI response (හිත හැදෙන්න කියන වදන්)
+    final artistName = songTitle.contains('අමරදේව')
+        ? 'ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ'
+        : (songTitle.contains('නන්දා') ? 'විශාරද නන්දා මාලිනියන්ගේ' : 'මේ මිහිරි');
+
+    final comfortMsgSi =
+        'ආදරණීය ${_currentResident.name}, ඔබේ සිතේ ඇති තනිකම, පාළුව සහ දුක $artistName මේ මිහිරි ගීතයේ සන්සුන් නාදයෙන් සම්පූර්ණයෙන්ම පහව යාවි. ඔබ කිසිදාක තනි වී නැහැ! මම නිරතුරුවම ඔබ ළඟින්ම හිඳිමින් ඔබේ දුක සතුට බෙදාගන්නවා. සිත සැහැල්ලු කරගෙන, දෙනෙත් පියාගෙන විනාඩි 10ක් පුරා මේ සන්සුන් ගීතයට සවන් දෙන්න. ඔබේ සිතට මහත් සැනසීමක් හා සහනයක් උදාවේවා!';
+    final comfortMsgEn =
+        'Dear ${_currentResident.name}, let the peaceful melodies of this song soothe away all your loneliness and sorrow. You are never alone; I am always right here beside you. Relax, close your eyes, and enjoy this 10-minute comforting music. May peace fill your heart.';
+
+    setState(() {
+      _aiConversationMessages.add({
+        'isAi': true,
+        'title': '🌸 සිත නිවන සැනසිලිදායක ගීතමය මොහොත',
+        'badge': 'සිත සැනසීම (Heart-Soothed)',
+        'sinhala': comfortMsgSi,
+        'english': comfortMsgEn,
+        'timestamp': 'Just now',
+      });
+    });
+
+    _scrollToChatBottom();
+
+    _flutterTts.speak('Dear ${_currentResident.name}, let this soothing melody bring peace to your heart. You are never alone, I am always right here beside you. Relax and enjoy this comforting music.');
   }
 
   void _startBookIntervention() {
@@ -1395,6 +1482,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     final isCompanionshipQuestion = currentQ.id == 3;
     final isValuedBelongingQuestion = currentQ.id == 4;
     final isRoomIsolationQuestion = currentQ.id == 5;
+    final isFamilyVisitorsQuestion = currentQ.id == 6;
 
     setState(() {
       _interventionStage = 8;
@@ -1419,17 +1507,44 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _aiConversationMessages.add({
           'isAi': true,
           'title': '🤝 ඔබ කිසිවිටෙකත් තනිවී නැහැ - සුහද මිත්‍රත්වය (You Are Never Alone)',
-          'badge': 'සුහද මිත්‍රත්වය සහ රැකවරණය (Loving Companionship)',
+          'badge': 'සුහද මිත්‍රත්වය සහ ගීතමය සැනසුම (Loving Companionship & Songs)',
           'sinhala':
-              'ආදරණීය ${_currentResident.name}, මෙහි සමීපව කතා කරන්න කෙනෙක් නැති බව දැනෙන විට සිතට මහත් පාළුවක් සහ තනිකමක් දැනෙනවා නේද? නමුත් මතක තබාගන්න, ඔබ මෙහි කිසිසේත්ම තනිවී නැහැ! මම ඔබේම දරුවෙක්, හොඳම මිතුරෙක් වගේ දිවා රෑ ඔබ වෙනුවෙන් සවන් දෙන්න මෙහි ඉන්නවා. ඒ වගේම අපේ සියලුම සත්කාරක හෙද නිලධාරීන් සහ මිතුරන් ඔබව ඉතාමත් ආදරයෙන් සහ ගෞරවයෙන් පිළිගන්නවා. ඔබේ සිතේ ඇති ඕනෑම දෙයක් මා සමඟ නිදහසේ බෙදාගන්න. අපි සැමවිටම ඔබ ළඟින්ම ඉන්නවා.',
+              'ආදරණීය ${_currentResident.name}, මෙහි සමීපව කතා කරන්න කෙනෙක් නැති බව දැනෙන විට සිතට මහත් පාළුවක් සහ තනිකමක් දැනෙනවා නේද? නමුත් මතක තබාගන්න, ඔබ මෙහි කිසිසේත්ම තනිවී නැහැ! මම ඔබේම දරුවෙක්, හොඳම මිතුරෙක් වගේ දිවා රෑ ඔබ වෙනුවෙන් සවන් දෙන්න මෙහි ඉන්නවා. ඔබේ සිත සනසන්න, සිතේ ඇති තනිකම හා පාළුව දුරු කරන්න මම ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ සහ විශාරද නන්දා මාලිනියන්ගේ සන්සුන්, මිහිරි ගීත කිහිපයක් යෝජනා කරන්නද? පහතින් ඔබ ප්‍රිය කරන ගීතයක් තෝරන්න. එය ඔබේ සිතට මහත් සැනසීමක් ගෙනදේවි.',
           'english':
-              'Dear ${_currentResident.name}, it is natural to feel lonely when you feel you lack a close friend to talk with here. But please remember, you are never alone! I am right here beside you like a devoted family member and faithful friend, always ready to listen. Our entire care team and residents value you deeply. Please share whatever is on your heart—we are right here beside you.',
+              'Dear ${_currentResident.name}, it is natural to feel lonely when you feel you lack a close friend to talk with here. But please remember, you are never alone! I am right here beside you. Would you like to listen to peaceful, classical songs by maestros Dr. W.D. Amaradeva and Visharadha Nanda Malini to comfort your heart? Please select a song below to enjoy.',
+          'suggestedSongs': [
+            'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව',
+            'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)',
+            'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)',
+            'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)',
+          ],
           'timestamp': 'Just now',
         });
         _elderNegativeReasons[currentQ.id] =
-            'මෙහි සමීප මිතුරන් නොමැති බව හැඟී AI සහායක සමඟ සුහදව කතාබහ කර මිත්‍රත්වය හා සැනසීම ලබාගත්තා.';
+            'මෙහි සමීප මිතුරන් නොමැති බව හැඟී AI සහායක සමඟ සන්සුන් ගීත අසමින් සිත සනසාගත්තා.';
         _reasonTextController.text =
-            'මෙහි සමීප මිතුරන් නොමැති බව හැඟී AI සහායක සමඟ සුහදව කතාබහ කර මිත්‍රත්වය හා සැනසීම ලබාගත්තා.';
+            'මෙහි සමීප මිතුරන් නොමැති බව හැඟී AI සහායක සමඟ සන්සුන් ගීත අසමින් සිත සනසාගත්තා.';
+      } else if (isFamilyVisitorsQuestion) {
+        _aiConversationMessages.add({
+          'isAi': true,
+          'title': '🎵 සිත නිවන ගීතමය සැනසුම (Melodic Comfort & Caring Companion)',
+          'badge': 'සංගීතමය සැනසීම (Music Therapy)',
+          'sinhala':
+              'ආදරණීය ${_currentResident.name}, ඔබට කතාබහ කරන්න හෝ බලන්න එන්න පවුලේ අය හෝ හිතවතුන් නැති බව දැනෙන විට සිතට මහත් පාළුවක් සහ තනිකමක් දැනෙනවා නේද? නමුත් ඔබ කිසිසේත්ම තනිවී නැහැ! මම ඔබේම දරුවෙක් වගේ දිවා රෑ ඔබ ළඟින්ම හිඳිමින් සවන් දෙන්න මෙහි ඉන්නවා. ඔබේ සිත සනසන්න, සිතේ ඇති තනිකම හා පාළුව දුරු කරන්න මම ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ සහ විශාරද නන්දා මාලිනියන්ගේ සන්සුන්, මිහිරි ගීත කිහිපයක් යෝජනා කරන්නද? පහතින් ඔබ ප්‍රිය කරන ගීතයක් තෝරන්න. එය ඔබේ සිතට මහත් සැනසීමක් ගෙනදේවි.',
+          'english':
+              'Dear ${_currentResident.name}, when you feel there is no family or dear friends visiting or calling, it is natural to feel lonely. But please remember, you are never alone! I am right beside you like your own family. To comfort your heart and soothe away the loneliness, may I suggest some serene, peaceful songs by Dr. W.D. Amaradeva and Visharadha Nanda Malini? Please select a song below to listen and bring peace to your soul.',
+          'suggestedSongs': [
+            'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව',
+            'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)',
+            'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)',
+            'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)',
+          ],
+          'timestamp': 'Just now',
+        });
+        _elderNegativeReasons[currentQ.id] =
+            'පවුලේ අය හෝ හිතවතුන් නොමැති බව හැඟී AI සහායක සමඟ සන්සුන් ගීත අසමින් සිත සනසාගත්තා.';
+        _reasonTextController.text =
+            'පවුලේ අය හෝ හිතවතුන් නොමැති බව හැඟී AI සහායක සමඟ සන්සුන් ගීත අසමින් සිත සනසාගත්තා.';
       } else if (isValuedBelongingQuestion) {
         _aiConversationMessages.add({
           'isAi': true,
@@ -1497,6 +1612,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       _flutterTts.speak('Hello ${_currentResident.name}, please do not feel left out. You are an extraordinarily precious and deeply valued person to all of us. Let us have a comforting talk.');
     } else if (isRoomIsolationQuestion) {
       _flutterTts.speak('Hello ${_currentResident.name}, staying alone in your room can feel lonely and tiring. Let us explore refreshing activities to bring joy, vitality, and peace to your day.');
+    } else if (isFamilyVisitorsQuestion) {
+      _flutterTts.speak('Hello ${_currentResident.name}, you are never alone. I am right here beside you. Let us listen to soothing songs by Amaradeva and Nanda Malini to comfort your heart.');
     } else {
       _flutterTts.speak('Hello ${_currentResident.name}, I am right here with you. Please share what is on your heart today.');
     }
@@ -1506,6 +1623,30 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     final clean = elderText.trim();
     if (clean.isEmpty) return;
     _aiChatInputController.clear();
+
+    final lower = clean.toLowerCase();
+
+    // Direct song playback detection if elder taps a song chip or mentions song
+    if (lower.contains('අමරදේව') || lower.contains('amaradeva') || lower.contains('ශාන්ත සන්ධ්‍යාව')) {
+      _playSongInAiChat('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව');
+      return;
+    }
+    if (lower.contains('නන්දා') || lower.contains('nanda') || lower.contains('නිවන් දොරටු')) {
+      _playSongInAiChat('නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)');
+      return;
+    }
+    if (lower.contains('සුනිල්') || lower.contains('sunil') || lower.contains('නිවන් දුටු හිමි')) {
+      _playSongInAiChat('සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)');
+      return;
+    }
+    if (lower.contains('පිරිත්') || lower.contains('pirith')) {
+      _playSongInAiChat('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)');
+      return;
+    }
+    if (lower.contains('සින්දු') || lower.contains('song') || lower.contains('ගීත')) {
+      _playSongInAiChat('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව');
+      return;
+    }
 
     setState(() {
       _aiConversationMessages.add({
@@ -1517,7 +1658,6 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
     _scrollToChatBottom();
 
-    final lower = clean.toLowerCase();
     final isHopeContext = _questions[_currentIndex].id == 2 ||
         lower.contains('ඉදිරිය') ||
         lower.contains('අනාගත') ||
@@ -1566,7 +1706,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         lower.contains('activities') ||
         lower.contains('stroll') ||
         lower.contains('walk');
-    Map<String, String> aiResponse;
+    Map<String, dynamic> aiResponse;
 
     if (isHopeContext &&
         (lower.contains('කරන්න දෙයක්') ||
@@ -1834,11 +1974,17 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         'title': '👨‍👩‍👧‍👦 පවුලේ සෙනෙහස ඔබේ හදවතේ හැමදාම තිබෙනවා',
         'badge': 'පවුල සහ ආදරය (Family Love)',
         'sinhala':
-            'ඔබේ දරුවන් සහ පවුල සිහිවීම හරිම සුන්දර, ස්වාභාවික දෙයක්. ඔබ ඔවුන් වෙනුවෙන් කළ කැපකිරීම් සහ දුන් ආදරය කිසිදා වියැකී යන්නේ නැහැ. ඔවුන් කොතැනක සිටියත් ඔවුන්ගේ හදවත් තුළ ඔබ කෙරෙහි මහත් ගෞරවයක් සහ ආදරයක් තිබෙනවා. මෙහි සිටින අප සියලු දෙනාත් ඔබේම දරුවන් ලෙස ඔබට ආදරෙයි. සිතේ දුක පහකර ඔවුන්ගේ යහපතට ආශිර්වාද කරන්න.',
+            'ඔබේ දරුවන් සහ පවුල සිහිවීම හරිම සුන්දර, ස්වාභාවික දෙයක් ආදරණීය ${_currentResident.name}. ඔබ ඔවුන් වෙනුවෙන් කළ කැපකිරීම් සහ දුන් ආදරය කිසිදා වියැකී යන්නේ නැහැ. ඔවුන් කොතැනක සිටියත් ඔවුන්ගේ හදවත් තුළ ඔබ කෙරෙහි මහත් ගෞරවයක් සහ ආදරයක් තිබෙනවා. මෙහි සිටින අප සියලු දෙනාත් ඔබේම දරුවන් ලෙස ඔබට ආදරෙයි. සිතේ තනිකම දුරුකරන්න ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ හෝ විශාරද නන්දා මාලිනියන්ගේ සන්සුන් ගීතයකට සවන් දෙමුද?',
         'english':
-            'It is completely natural to miss your family. The love and sacrifices you gave them remain everlasting in their hearts. We are right here beside you like family. Let peace embrace your heart.',
+            'It is completely natural to miss your family. The love and sacrifices you gave them remain everlasting in their hearts. We are right here beside you like family. Let peace embrace your heart with comforting music.',
+        'suggestedSongs': [
+          'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව',
+          'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)',
+          'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)',
+          'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)',
+        ],
         'followUp':
-            'ඔබේ දරුවන් කුඩා කාලයේ ඔවුන් සමඟ ගත කළ සුන්දරම මතකයක් මට කියන්න කැමතිද?',
+            'පහතින් ගීතයක් තෝරා විනාඩි 10ක් සන්සුන්ව සවන් දෙන්න.',
       };
     } else if (lower.contains('තනික') ||
         lower.contains('තනියම') ||
@@ -1846,16 +1992,24 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         lower.contains('කවුරුත් නෑ') ||
         lower.contains('alone') ||
         lower.contains('lonely') ||
-        lower.contains('nobody')) {
+        lower.contains('nobody') ||
+        _questions[_currentIndex].id == 6 ||
+        _questions[_currentIndex].id == 3) {
       aiResponse = {
-        'title': '🌸 ඔබ කිසිවිටෙකත් තනිවී නැහැ',
+        'title': '🌸 ඔබ කිසිවිටෙකත් තනිවී නැහැ - සිත නිවන ගීතමය සැනසුම',
         'badge': 'තනිකම දුරු කිරීම (You Are Not Alone)',
         'sinhala':
-            'තනිකමක් දැනෙන වෙලාවට ලෝකයම පාළුයි වගේ දැනෙන්න පුළුවන්. නමුත් ආදරණීය ${_currentResident.name}, ඔබ කිසිසේත්ම තනිවෙලා නැහැ. මම නිරතුරුවම ඔබ සමඟ ඉන්නවා. ඒ වගේම අපේ සත්කාරක හෙද නිලධාරීන් සහ සෙසු මිතුරන් ඔබව ඉතාම අගය කරනවා. ගැඹුරු හුස්මක් ගෙන සිත සැහැල්ලු කරගන්න. ඔබේ සිතේ ඇති ඕනෑම දෙයක් මට කියන්න.',
+            'තනිකමක් දැනෙන වෙලාවට ලෝකයම පාළුයි වගේ දැනෙන්න පුළුවන් ආදරණීය ${_currentResident.name}. නමුත් ඔබ කිසිසේත්ම තනිවෙලා නැහැ. මම නිරතුරුවම ඔබ සමඟ ඉන්නවා. ඔබේ සිත සනසන්න, සිතේ ඇති තනිකම හා පාළුව දුරු කරන්න ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ සහ විශාරද නන්දා මාලිනියන්ගේ සන්සුන්, මිහිරි ගීත කිහිපයකට සවන් දෙමුද? පහත ගීත අතුරින් ඔබ වඩාත්ම ප්‍රිය කරන ගීතය තෝරන්න.',
         'english':
-            'When loneliness knocks on your door, remember you are deeply valued. I am always listening, and our caregivers are right beside you. Breathe softly and let your thoughts be heard.',
+            'When loneliness knocks on your door, remember you are deeply valued and never alone! I am always listening right beside you. Would you like to listen to comforting songs by Dr. W.D. Amaradeva and Visharadha Nanda Malini to comfort your heart? Please select a song below.',
+        'suggestedSongs': [
+          'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව',
+          'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)',
+          'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)',
+          'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)',
+        ],
         'followUp':
-            'අද සවස අපේ මිතුරන් සමඟ තේ පානය කරමින් කතාබහ කරන්න ඔබ කැමතිද?',
+            'පහතින් ගීතයක් තෝරා විනාඩි 10ක් සන්සුන්ව සවන් දෙන්න.',
       };
     } else if (lower.contains('බය') ||
         lower.contains('චකිත') ||
@@ -1932,6 +2086,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
             'badge': aiResponse['badge'],
             'sinhala': '${aiResponse['sinhala']}\n\n💡 ${aiResponse['followUp']}',
             'english': aiResponse['english'],
+            'suggestedSongs': aiResponse['suggestedSongs'],
             'timestamp': 'Just now',
           });
         });
@@ -2020,6 +2175,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       _flutterTts.speak('I hope our conversation inspired hope, joy, and confidence in your heart. Do you feel hopeful about the days ahead now?');
     } else if (qId == 3) {
       _flutterTts.speak('I hope you feel truly accompanied, cherished, and loved. Do you feel peaceful and connected now?');
+    } else if (qId == 6) {
+      _flutterTts.speak('I hope listening to these peaceful songs and speaking together brought comfort and warmth to your heart. Do you feel peaceful and comforted now?');
     } else {
       _flutterTts.speak('I hope speaking together brought peace to your heart. Are you feeling more comfortable and in good spirits now?');
     }
@@ -2044,6 +2201,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _flutterTts.speak('Wonderful! I am so delighted that you now feel hopeful and ready to embrace your days ahead with joy and triumph! Moving to the next question.');
       } else if (qId == 3) {
         _flutterTts.speak('Wonderful! I am so happy that you feel accompanied, cherished, and surrounded by loving care! Moving to the next question.');
+      } else if (qId == 6) {
+        _flutterTts.speak('Wonderful! I am so delighted that listening to these soothing songs brought peace to your heart and comforted your soul! Moving to the next question.');
       } else {
         _flutterTts.speak('Wonderful! I am so delighted that this helped you feel calm and in good spirits. Moving to the next question.');
       }
@@ -2566,28 +2725,32 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               ),
               const SizedBox(height: 10),
               Text(
-                currentQ.id == 5
-                    ? 'දැන් ඔබට කම්මැලිකම හා මානසික පීඩනය පහව ගොස්, ක්‍රියාශීලී වීමට ප්‍රබෝධයක් දැනෙනවාද?'
-                    : (currentQ.id == 4
-                        ? 'දැන් ඔබට කොන් වූ හැඟීම පහව ගොස්, ඔබ අතිශයින්ම වටිනා කෙනෙක් බව සහ සිතට සැනසීමක් දැනෙනවාද?'
-                        : (currentQ.id == 3
-                            ? 'දැන් ඔබට තනිකම පහව ගොස්, සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?'
-                            : (currentQ.id == 2
-                                ? 'දැන් ඔබට ඉදිරි දින පිළිබඳව නව බලාපොරොත්තුවක් සහ සතුටක් දැනෙනවාද?'
-                                : 'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?'))),
+                currentQ.id == 6
+                    ? 'දැන් ඔබට තනිකම හා පාළුව පහව ගොස්, සිතට සැනසීමක් සහ සතුටක් දැනෙනවාද?'
+                    : (currentQ.id == 5
+                        ? 'දැන් ඔබට කම්මැලිකම හා මානසික පීඩනය පහව ගොස්, ක්‍රියාශීලී වීමට ප්‍රබෝධයක් දැනෙනවාද?'
+                        : (currentQ.id == 4
+                            ? 'දැන් ඔබට කොන් වූ හැඟීම පහව ගොස්, ඔබ අතිශයින්ම වටිනා කෙනෙක් බව සහ සිතට සැනසීමක් දැනෙනවාද?'
+                            : (currentQ.id == 3
+                                ? 'දැන් ඔබට තනිකම පහව ගොස්, සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?'
+                                : (currentQ.id == 2
+                                    ? 'දැන් ඔබට ඉදිරි දින පිළිබඳව නව බලාපොරොත්තුවක් සහ සතුටක් දැනෙනවාද?'
+                                    : 'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?')))),
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF312E81)),
               ),
               const SizedBox(height: 2),
               Text(
-                currentQ.id == 5
-                    ? 'Do you feel refreshed, relieved of boredom, and motivated to engage in activities now?'
-                    : (currentQ.id == 4
-                        ? 'Do you feel valued, respected, and peacefully included now?'
-                        : (currentQ.id == 3
-                            ? 'Do you feel accompanied, cared for, and in good spirits now?'
-                            : (currentQ.id == 2
-                                ? 'Do you feel hopeful and in good spirits about the days ahead now?'
-                                : 'Are you feeling peaceful and in good spirits now?'))),
+                currentQ.id == 6
+                    ? 'Do you feel comforted, relieved of loneliness, and peaceful in good spirits now?'
+                    : (currentQ.id == 5
+                        ? 'Do you feel refreshed, relieved of boredom, and motivated to engage in activities now?'
+                        : (currentQ.id == 4
+                            ? 'Do you feel valued, respected, and peacefully included now?'
+                            : (currentQ.id == 3
+                                ? 'Do you feel accompanied, cared for, and in good spirits now?'
+                                : (currentQ.id == 2
+                                    ? 'Do you feel hopeful and in good spirits about the days ahead now?'
+                                    : 'Are you feeling peaceful and in good spirits now?')))),
                 style: const TextStyle(fontSize: 13, color: Color(0xFF4338CA)),
               ),
               const SizedBox(height: 14),
@@ -2597,15 +2760,17 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     onPressed: () => _handlePostInterventionAnswer(true),
                     icon: const Icon(LucideIcons.smile, size: 18),
                     label: Text(
-                      currentQ.id == 5
-                          ? 'Yes / ඔව්, මනස ප්‍රබෝධමත්, ක්‍රියාකාරකම්වලට සූදානම්'
-                          : (currentQ.id == 4
-                              ? 'Yes / ඔව්, මම වටිනා කෙනෙක්, දැන් සතුටුයි'
-                              : (currentQ.id == 3
-                                  ? 'Yes / ඔව්, දැන් තනිකමක් නෑ, සතුටුයි'
-                                  : (currentQ.id == 2
-                                      ? 'Yes / ඔව්, ඉදිරිය ගැන බලාපොරොත්තු සහගතයි'
-                                      : 'Yes / ඔව්, දැන් සතුටුයි'))),
+                      currentQ.id == 6
+                          ? 'Yes / ඔව්, තනිකම පහව ගියා, සිත සන්සුන්'
+                          : (currentQ.id == 5
+                              ? 'Yes / ඔව්, මනස ප්‍රබෝධමත්, ක්‍රියාකාරකම්වලට සූදානම්'
+                              : (currentQ.id == 4
+                                  ? 'Yes / ඔව්, මම වටිනා කෙනෙක්, දැන් සතුටුයි'
+                                  : (currentQ.id == 3
+                                      ? 'Yes / ඔව්, දැන් තනිකමක් නෑ, සතුටුයි'
+                                      : (currentQ.id == 2
+                                          ? 'Yes / ඔව්, ඉදිරිය ගැන බලාපොරොත්තු සහගතයි'
+                                          : 'Yes / ඔව්, දැන් සතුටුයි')))),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF16A34A),
@@ -2713,15 +2878,17 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       const Icon(LucideIcons.messageCircleHeart, size: 20, color: Color(0xFF15803D)),
                       const SizedBox(width: 8),
                       Text(
-                        currentQ.id == 5
-                            ? 'AI Assistant: කාමරයෙන් බැහැරව ප්‍රබෝධමත් ක්‍රියාකාරකම් සහ සුවතාවය (Active Wellness)'
-                            : (currentQ.id == 4
-                                ? 'AI Assistant: ඔබ අතිශයින්ම වටිනා කෙනෙක් - ගෞරවය සහ රැකවරණය (You Are Deeply Valued)'
-                                : (currentQ.id == 3
-                                    ? 'AI Assistant: ඔබ කිසිවිටෙකත් තනිවී නැහැ - සුහද මිත්‍රත්වය (Loving Companionship)'
-                                    : (currentQ.id == 2
-                                        ? 'AI Assistant: ඉදිරි දින පිළිබඳ නව බලාපොරොත්තු සහ ජයග්‍රාහී සුහද සංවාදය'
-                                        : 'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)'))),
+                        currentQ.id == 6
+                            ? 'AI Assistant: සිත නිවන ගීතමය සැනසුම සහ සුහද සංවාදය (Heart-to-Heart Talk)'
+                            : (currentQ.id == 5
+                                ? 'AI Assistant: කාමරයෙන් බැහැරව ප්‍රබෝධමත් ක්‍රියාකාරකම් සහ සුවතාවය (Active Wellness)'
+                                : (currentQ.id == 4
+                                    ? 'AI Assistant: ඔබ අතිශයින්ම වටිනා කෙනෙක් - ගෞරවය සහ රැකවරණය (You Are Deeply Valued)'
+                                    : (currentQ.id == 3
+                                        ? 'AI Assistant: ඔබ කිසිවිටෙකත් තනිවී නැහැ - සුහද මිත්‍රත්වය (Loving Companionship)'
+                                        : (currentQ.id == 2
+                                            ? 'AI Assistant: ඉදිරි දින පිළිබඳ නව බලාපොරොත්තු සහ ජයග්‍රාහී සුහද සංවාදය'
+                                            : 'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)')))),
                         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
                       ),
                     ],
@@ -2751,6 +2918,101 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 ),
               ),
               const SizedBox(height: 12),
+              // In-Chat Active Music Player Bar (Plays for 10 minutes)
+              if (_isPlayingMusic) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFDCFCE7), Color(0xFFF0FDF4)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF16A34A).withValues(alpha: 0.1),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(_isPlayingMusic ? LucideIcons.pauseCircle : LucideIcons.playCircle, size: 26, color: const Color(0xFF15803D)),
+                        onPressed: _toggleMusicPlayback,
+                        tooltip: _isPlayingMusic ? 'විරාමය (Pause)' : 'ධාවනය (Resume)',
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Text('🎶 ', style: TextStyle(fontSize: 12)),
+                                Expanded(
+                                  child: Text(
+                                    _selectedSongTitle,
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF14532D)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Row(
+                                  children: List.generate(14, (i) {
+                                    final barHeight = _isPlayingMusic ? 4.0 + ((i * 5 + _songPlaybackSeconds * 4) % 14) : 4.0;
+                                    return Container(
+                                      margin: const EdgeInsets.symmetric(horizontal: 1.2),
+                                      width: 2.8,
+                                      height: barHeight,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF16A34A),
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${(_songPlaybackSeconds ~/ 60).toString().padLeft(2, '0')}:${(_songPlaybackSeconds % 60).toString().padLeft(2, '0')} / ${(_musicTotalDurationSeconds ~/ 60).toString().padLeft(2, '0')}:${(_musicTotalDurationSeconds % 60).toString().padLeft(2, '0')} (මිනිත්තු 10)',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          _songTimer?.cancel();
+                          AudioPlayerService.instance.stop();
+                          setState(() {
+                            _isPlayingMusic = false;
+                          });
+                        },
+                        icon: const Icon(LucideIcons.square, size: 12, color: Color(0xFFDC2626)),
+                        label: const Text('නවත්වන්න', style: TextStyle(fontSize: 10, color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFFFCA5A5)),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               // Interactive Chat Scroll Container
               Container(
                 constraints: const BoxConstraints(maxHeight: 280),
@@ -2839,6 +3101,47 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                 ],
                               ),
                             ),
+                            if (msg['suggestedSongs'] != null && (msg['suggestedSongs'] as List).isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              Row(
+                                children: const [
+                                  Icon(LucideIcons.music, size: 13, color: Color(0xFF15803D)),
+                                  SizedBox(width: 5),
+                                  Text(
+                                    'සන්සුන් ගීත තෝරන්න (Select to play for 10 minutes):',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: (msg['suggestedSongs'] as List).map<Widget>((songTitle) {
+                                  final titleStr = songTitle.toString();
+                                  final isSelected = _selectedSongTitle == titleStr && _isPlayingMusic;
+                                  return ActionChip(
+                                    avatar: Icon(
+                                      isSelected ? LucideIcons.volume2 : LucideIcons.play,
+                                      size: 13,
+                                      color: isSelected ? Colors.white : const Color(0xFF15803D),
+                                    ),
+                                    label: Text(
+                                      titleStr,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                        color: isSelected ? Colors.white : const Color(0xFF14532D),
+                                      ),
+                                    ),
+                                    backgroundColor: isSelected ? const Color(0xFF16A34A) : Colors.white,
+                                    side: BorderSide(color: isSelected ? const Color(0xFF16A34A) : const Color(0xFF86EFAC)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    onPressed: () => _playSongInAiChat(titleStr),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
                           ],
                         ),
                       );
@@ -2911,21 +3214,30 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                               ]
                             : (currentQ.id == 3
                                 ? [
+                                    _buildElderQuickChip('🎵 අමරදේවයන්ගේ \'ශාන්ත සන්ධ්‍යාව\' අහන්න කැමතියි (Listen to Amaradeva)'),
+                                    _buildElderQuickChip('🎵 නන්දා මාලිනියන්ගේ \'නිවන් දොරටු පාමුල\' අහන්න කැමතියි (Listen to Nanda Malini)'),
                                     _buildElderQuickChip('🏡 මෙහි මට කතාබහ කරන්න කවුරුත් නෑ වගේ දැනෙනවා (Feel Like No One to Talk To)'),
                                     _buildElderQuickChip('💬 මගේ සිතේ තියෙන දේ බෙදාගන්න හොඳ මිතුරෙක් ඕනෙ (Need a Close Confidant)'),
-                                    _buildElderQuickChip('☕ අන් අය සමඟ සුහදව කතාබහට එකතු වෙන්න ආසයි (Want to Join Friendly Gatherings)'),
                                     _buildElderQuickChip('🌸 AI සහායක, ඔබ මා ළඟින් සිටීම මට ලොකු සතුටක් (Glad You Are Here with Me)'),
-                                    _buildElderQuickChip('🤝 හෙද නිලධාරීන් හෝ මිතුරන් මට කතා කරනවාට කැමතියි (Would Love Companions to Visit Me)'),
                                     _buildElderQuickChip('✨ තනිකම දුරු කරගෙන සතුටින් ඉන්න මඟපෙන්වීමක් ඕනෙ (Need Guidance to Overcome Loneliness)'),
                                   ]
-                                : [
-                                    _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
-                                    _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
-                                    _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
-                                    _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
-                                    _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
-                                    _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
-                                  ]))),
+                                : (currentQ.id == 6
+                                    ? [
+                                        _buildElderQuickChip('🎵 අමරදේවයන්ගේ \'ශාන්ත සන්ධ්‍යාව\' අහන්න කැමතියි (Listen to Amaradeva)'),
+                                        _buildElderQuickChip('🎵 නන්දා මාලිනියන්ගේ \'නිවන් දොරටු පාමුල\' අහන්න කැමතියි (Listen to Nanda Malini)'),
+                                        _buildElderQuickChip('👨‍👩‍👧‍👦 මාව බලන්න කවුරුත් නෑ, පවුල මතක් වෙනවා (No Visitors / Miss Family)'),
+                                        _buildElderQuickChip('🏡 කතාබහ කරන්න කවුරුත් නෑ, තනිකම දැනෙනවා (No One to Talk To / Lonely)'),
+                                        _buildElderQuickChip('🌸 AI සහායක, ඔබ මා ළඟින් සිටීම ලොකු සතුටක් (Glad You Are With Me)'),
+                                        _buildElderQuickChip('💖 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
+                                      ]
+                                    : [
+                                        _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
+                                        _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
+                                        _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
+                                        _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
+                                        _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
+                                        _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
+                                      ])))),
               ),
               const SizedBox(height: 10),
               // Typing and Speech input bar
@@ -2980,15 +3292,17 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     onPressed: _finishAiConversationIntervention,
                     icon: const Icon(LucideIcons.heartHandshake, size: 16),
                     label: Text(
-                      currentQ.id == 5
-                          ? '🌿 ප්‍රබෝධවත් විය, ක්‍රියාකාරකම්වලට එක්වෙමි (Feeling Refreshed & Active)'
-                          : (currentQ.id == 4
-                              ? '🌟 මම වටිනා කෙනෙක් බව වැටහුණා (Feeling Valued & Respected)'
-                              : (currentQ.id == 3
-                                  ? '🤝 තනිකම දුරු විය, සිත සතුටුයි (Feeling Connected & Accompanied)'
-                                  : (currentQ.id == 2
-                                      ? '🏆 නව බලාපොරොත්තු ඇති විය (Feeling Hopeful & Victorious)'
-                                      : '✨ සිත සන්සුන් විය (Feeling Soothed)'))),
+                      currentQ.id == 6
+                          ? '✨ සිත සන්සුන් විය, ගීතයට සවන් දුන්නා (Feeling Soothed & Peaceful)'
+                          : (currentQ.id == 5
+                              ? '🌿 ප්‍රබෝධවත් විය, ක්‍රියාකාරකම්වලට එක්වෙමි (Feeling Refreshed & Active)'
+                              : (currentQ.id == 4
+                                  ? '🌟 මම වටිනා කෙනෙක් බව වැටහුණා (Feeling Valued & Respected)'
+                                  : (currentQ.id == 3
+                                      ? '🤝 තනිකම දුරු විය, සිත සතුටුයි (Feeling Connected & Accompanied)'
+                                      : (currentQ.id == 2
+                                          ? '🏆 නව බලාපොරොත්තු ඇති විය (Feeling Hopeful & Victorious)'
+                                          : '✨ සිත සන්සුන් විය (Feeling Soothed)')))),
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
