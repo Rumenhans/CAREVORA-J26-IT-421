@@ -16,6 +16,7 @@ class CognitiveQuestionItem {
   final String category;
   final String domain; // memory, attention, orientation, recall, reasoning
   final String prompt;
+  final String promptSinhala; // Sinhala translation of the prompt (display only)
   final String aiTip;
   final String recommendedAnswerGuide;
 
@@ -24,6 +25,7 @@ class CognitiveQuestionItem {
     required this.category,
     required this.domain,
     required this.prompt,
+    this.promptSinhala = '',
     required this.aiTip,
     required this.recommendedAnswerGuide,
   });
@@ -73,6 +75,7 @@ class CognitiveScoring {
       category: 'Orientation',
       domain: 'orientation',
       prompt: 'What day is it today?',
+      promptSinhala: 'අද මොන දවසද?',
       aiTip: 'Temporal orientation. Accept day of the week (e.g. Monday).',
       recommendedAnswerGuide: 'Correct day of the week.',
     ),
@@ -81,6 +84,7 @@ class CognitiveScoring {
       category: 'Orientation',
       domain: 'orientation',
       prompt: 'What year is this?',
+      promptSinhala: 'මේ මොන අවුරුද්දද?',
       aiTip: 'Calendar awareness. Accept current four-digit year.',
       recommendedAnswerGuide: 'Current year (e.g., 2026).',
     ),
@@ -89,6 +93,7 @@ class CognitiveScoring {
       category: 'Immediate Memory',
       domain: 'memory',
       prompt: 'Repeat these words: Sun, Book, Tree.',
+      promptSinhala: 'මෙම වචන නැවත කියන්න: Sun (ඉර), Book (පොත), Tree (ගස).',
       aiTip: 'Immediate verbal registration of three common targets.',
       recommendedAnswerGuide:
           'Score 1.0 if all 3 repeated, 0.5 for 1-2 words, 0.0 for none.',
@@ -98,6 +103,7 @@ class CognitiveScoring {
       category: 'Immediate Memory',
       domain: 'memory',
       prompt: 'Say those three words once more.',
+      promptSinhala: 'ඒ වචන තුන තවත් වරක් කියන්න.',
       aiTip: 'Reinforces memory encoding prior to delayed recall.',
       recommendedAnswerGuide:
           'Score 1.0 if all 3 repeated, 0.5 for 1-2 words, 0.0 for none.',
@@ -107,6 +113,7 @@ class CognitiveScoring {
       category: 'Attention & Math',
       domain: 'attention',
       prompt: 'What is 2 plus 3?',
+      promptSinhala: '2 යි 3 යි එකතු කළාම කීයද?',
       aiTip: 'Simple mental addition. Evaluates focus and basic arithmetic.',
       recommendedAnswerGuide: '5 (Five).',
     ),
@@ -115,6 +122,7 @@ class CognitiveScoring {
       category: 'Attention & Number',
       domain: 'attention',
       prompt: 'Which is bigger: 3 or 8?',
+      promptSinhala: '3 සහ 8 අතරින් විශාල අංකය කුමක්ද?',
       aiTip: 'Magnitude discrimination and focused attention.',
       recommendedAnswerGuide: '8 (Eight).',
     ),
@@ -123,6 +131,7 @@ class CognitiveScoring {
       category: 'Delayed Recall',
       domain: 'recall',
       prompt: 'What were the three words from earlier?',
+      promptSinhala: 'කලින් කියපු වචන තුන මොනවාද?',
       aiTip: 'Spontaneous delayed recall for: Sun, Book, Tree.',
       recommendedAnswerGuide:
           'Score 1.0 if all 3 recalled, 0.5 for 1-2 words, 0.0 for none.',
@@ -132,6 +141,7 @@ class CognitiveScoring {
       category: 'Delayed Recall',
       domain: 'recall',
       prompt: 'Did you hear the word Sun earlier?',
+      promptSinhala: 'කලින් Sun (ඉර) කියන වචනය ඔබට ඇසුණාද?',
       aiTip: 'Cued recognition memory.',
       recommendedAnswerGuide: "'Yes'.",
     ),
@@ -140,6 +150,7 @@ class CognitiveScoring {
       category: 'Practical Reasoning',
       domain: 'reasoning',
       prompt: 'What do you use to tell the time?',
+      promptSinhala: 'වේලාව බලාගන්න ඔබ භාවිතා කරන්නේ මොනවාද?',
       aiTip: 'Practical reasoning and tool identification. Accepts clock, watch, or equivalent.',
       recommendedAnswerGuide: "'Clock', 'Watch', 'Wall clock', or 'Wristwatch'.",
     ),
@@ -148,6 +159,7 @@ class CognitiveScoring {
       category: 'Abstract Reasoning',
       domain: 'reasoning',
       prompt: 'Are an apple and an orange both fruits?',
+      promptSinhala: 'ඇපල් සහ දොඩම් යන දෙකම පලතුරුද?',
       aiTip: 'Semantic categorization and conceptual reasoning.',
       recommendedAnswerGuide: "'Yes' (or 'Both fruits').",
     ),
