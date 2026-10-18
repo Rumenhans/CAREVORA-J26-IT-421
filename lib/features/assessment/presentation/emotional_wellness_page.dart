@@ -1150,15 +1150,25 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _clapController.forward(from: 0.0);
         _flutterTts.stop();
         _flutterTts.speak(
-          'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
+          questionId == 2
+              ? 'Wonderful! I am so glad to hear that you feel hopeful and in good spirits about your days ahead.'
+              : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
         );
       } else {
         _showClapAnimation = false;
         _reasonTextController.text = _elderNegativeReasons[questionId] ?? '';
         _flutterTts.stop();
-        _flutterTts.speak(
-          'I am sorry to hear that. Could you please share what is making you feel this way?',
-        );
+        if (questionId == 2) {
+          _flutterTts.speak(
+            'Do not feel down. Every new day brings victorious hope, joy, and peace. Let us have a comforting talk.',
+          );
+          _startAiConversationIntervention();
+        } else {
+          _flutterTts.speak(
+            'I am sorry to hear that. Could you please share what is making you feel this way?',
+          );
+          _startAiConversationIntervention();
+        }
       }
     });
   }
@@ -1356,24 +1366,44 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   }
 
   void _startAiConversationIntervention() {
+    final currentQ = _questions[_currentIndex];
+    final isHopeQuestion = currentQ.id == 2;
+
     setState(() {
       _interventionStage = 8;
       _conversationSeconds = 0;
       _aiConversationMessages.clear();
-      _aiConversationMessages.add({
-        'isAi': true,
-        'title': '🌸 ආයුබෝවන්, මම ඔබේ සුහද AI සහායක',
-        'badge': 'සුහද පිළිසඳර (Caring Companion)',
-        'sinhala':
-            'ආදරණීය ${_currentResident.name}, අද දවසේ ඔබේ සිතට දුකක්, තනිකමක් හෝ බරක් දැනෙන්නේ ඇයි කියලා මට කියන්න පුළුවන්ද? මම ඔබේම දරුවෙක් වගේ ඔබට සවන් දීලා සිත සනසන්න මෙහි ඉන්නවා.',
-        'english':
-            'Dear ${_currentResident.name}, could you gently share with me why you are feeling lonely or down today? I am right here beside you, ready to listen and soothe your heart.',
-        'timestamp': 'Just now',
-      });
-      _elderNegativeReasons[_questions[_currentIndex].id] =
-          'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
-      _reasonTextController.text =
-          'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+      if (isHopeQuestion) {
+        _aiConversationMessages.add({
+          'isAi': true,
+          'title': '🌅 අලුත් දවසක්, අලුත් බලාපොරොත්තුවක් (A Brighter Tomorrow)',
+          'badge': 'නව බලාපොරොත්තු (Renewed Hope)',
+          'sinhala':
+              'ආදරණීය ${_currentResident.name}, ඉදිරි දින ගැන ඔබේ සිතේ බලාපොරොත්තු අඩු වී, අනාගතය ගැන සැකයක් හෝ වෙහෙසක් දැනෙනවා නේද? ජීවිතයේ සෑම අලුත් දවසක්ම නව ආශිර්වාදයක්, නව ජයග්‍රහණයක් රැගෙන එනවා. ඔබ මෙතෙක් ආ ගමනේ බොහෝ අභියෝග ජයගත් අතිශය ශක්තිමත් කෙනෙක්. ඉදිරි දින ගැන ඔබේ සිතේ ඇති අදහස් මට කියන්න. අපි එක්ව ඔබේ හදවතට නව ප්‍රීතිමත් බලාපොරොත්තුවක් එක් කරමු.',
+          'english':
+              'Dear ${_currentResident.name}, it is natural if the days ahead feel uncertain or heavy today. But every dawn brings new hope, triumph, and peaceful blessings. You have triumphed over so much in your life. Share your thoughts with me, and together we will fill your heart with radiant hope for tomorrow.',
+          'timestamp': 'Just now',
+        });
+        _elderNegativeReasons[currentQ.id] =
+            'ඉදිරි දින පිළිබඳව AI සහායක සමඟ සුහදව කතාබහ කර නව බලාපොරොත්තු ඇති කරගත්තා.';
+        _reasonTextController.text =
+            'ඉදිරි දින පිළිබඳව AI සහායක සමඟ සුහදව කතාබහ කර නව බලාපොරොත්තු ඇති කරගත්තා.';
+      } else {
+        _aiConversationMessages.add({
+          'isAi': true,
+          'title': '🌸 ආයුබෝවන්, මම ඔබේ සුහද AI සහායක',
+          'badge': 'සුහද පිළිසඳර (Caring Companion)',
+          'sinhala':
+              'ආදරණීය ${_currentResident.name}, අද දවසේ ඔබේ සිතට දුකක්, තනිකමක් හෝ බරක් දැනෙන්නේ ඇයි කියලා මට කියන්න පුළුවන්ද? මම ඔබේම දරුවෙක් වගේ ඔබට සවන් දීලා සිත සනසන්න මෙහි ඉන්නවා.',
+          'english':
+              'Dear ${_currentResident.name}, could you gently share with me why you are feeling lonely or down today? I am right here beside you, ready to listen and soothe your heart.',
+          'timestamp': 'Just now',
+        });
+        _elderNegativeReasons[currentQ.id] =
+            'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+        _reasonTextController.text =
+            'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+      }
     });
     _conversationTimer?.cancel();
     _conversationTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -1387,7 +1417,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       }
     });
     _flutterTts.stop();
-    _flutterTts.speak('Hello ${_currentResident.name}, I am right here with you. Please share what is on your heart today.');
+    if (isHopeQuestion) {
+      _flutterTts.speak('Hello ${_currentResident.name}, every tomorrow brings fresh hope, joy, and blessings. Please share your thoughts about your upcoming days.');
+    } else {
+      _flutterTts.speak('Hello ${_currentResident.name}, I am right here with you. Please share what is on your heart today.');
+    }
   }
 
   void _handleElderChatReply(String elderText) {
@@ -1406,9 +1440,84 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _scrollToChatBottom();
 
     final lower = clean.toLowerCase();
+    final isHopeContext = _questions[_currentIndex].id == 2 ||
+        lower.contains('ඉදිරිය') ||
+        lower.contains('අනාගත') ||
+        lower.contains('බලාපොරොත්තු') ||
+        lower.contains('ජයග්‍රහණ') ||
+        lower.contains('කරන්න දෙයක්') ||
+        lower.contains('future') ||
+        lower.contains('hope') ||
+        lower.contains('tomorrow') ||
+        lower.contains('aimless') ||
+        lower.contains('ahead');
     Map<String, String> aiResponse;
 
-    if (lower.contains('දරුව') ||
+    if (isHopeContext &&
+        (lower.contains('කරන්න දෙයක්') ||
+            lower.contains('අරමුණ') ||
+            lower.contains('aimless') ||
+            lower.contains('nothing') ||
+            lower.contains('purpose'))) {
+      aiResponse = {
+        'title': '🌱 සෑම මොහොතක්ම අලුත් ආරම්භයක් (Every Moment is a New Beginning)',
+        'badge': 'නව අරමුණ සහ ප්‍රීතිය (Fresh Purpose & Joy)',
+        'sinhala':
+            'ආදරණීය ${_currentResident.name}, ඔබේ ජීවිතයේ වටිනාකම සහ සුන්දරත්වය කිසිදා අවසන් වන්නේ නැහැ. ඔබ වටා සිටින අප සැමට ඔබේ සිනහව, ඔබේ ආශිර්වාදය සහ අත්දැකීම් මහඟු ආලෝකයක්. ඉදිරි දිනවලදී කියවන්නට අලුත් පොත්, සවන් දෙන්නට සන්සුන් සංගීතය, සොබාදහමේ සුවය විඳින්නට සහ සුහද මිතුරන් සමඟ ප්‍රීතිමත් මොහොතක් ගත කරන්නට අපූරු අවස්ථා ඔබට තිබෙනවා. සෑම අලුත් දවසක්ම ඔබට අලුත් සතුටක් තිළිණ කරන්න බලා සිටිනවා!',
+        'english':
+            'Your life\'s value and purpose never fade. Your presence, warm smile, and wisdom light up our care family every single day. The coming days hold joyful moments for you—uplifting books, serene music, garden strolls, and heartfelt friendship. Life still holds so many precious gifts for you!',
+        'followUp':
+            'ඉදිරි දිනවලදී ඔබ වඩාත්ම සතුටින් කිරීමට හෝ අත්විඳීමට ආශා කරන දෙයක් ගැන අපි කතා කරමුද?',
+      };
+    } else if (isHopeContext &&
+        (lower.contains('බය') ||
+            lower.contains('අවිනිශ්චිත') ||
+            lower.contains('uncertain') ||
+            lower.contains('fear') ||
+            lower.contains('anxious'))) {
+      aiResponse = {
+        'title': '🏆 ඔබ ජීවිතය ජයගත් ශක්තිමත් කෙනෙක් (You Are a Victor)',
+        'badge': 'ජයග්‍රාහී මනෝභාවය (Triumphant Hope)',
+        'sinhala':
+            'ආදරණීය ${_currentResident.name}, ඔබ මෙතෙක් ගෙවා ඇති අභිමානවත් ජීවිතය දෙස ආපසු හැරී බලන්න. ඔබ ජීවිතයේ කොතෙක් බාධක, දුක් කරදර සහ අභියෝග ජයගෙන අද මෙතැනට පැමිණ සිටිනවාද! ඔබ අතිශයින්ම ධෛර්යවන්ත, ශක්තිමත් කෙනෙක්. ඉදිරි දින යනු බියවිය යුතු කාලයක් නොව, ඔබේ ජීවිතයේ නිදහස, ගෞරවය සහ විවේකය උපරිමයෙන් විඳගත යුතු ස්වර්ණමය කාලයයි. හෙට දවස ඔබට අලුත් ආශිර්වාද සහ සතුට රැගෙන එනු ඇත. ඔබේ හදවත ජයග්‍රාහී හැඟීමෙන් පුරවාගන්න!',
+        'english':
+            'Look back at the incredible journey you have walked with strength and dignity. You have triumphed over so many storms! The days ahead are not to be feared; they are your golden days of peace, honored rest, and joyful moments. Tomorrow brings fresh blessings. Face the future with a victorious, joyful heart!',
+        'followUp':
+            'හෙට උදෑසන පිබිදෙන විට ඔබේ සිතට සතුටක් ගෙනෙන කුඩා දෙයක්—උදෑසන මල් සුවඳ විඳීමක් හෝ මිතුරෙකු සමඟ තේ පානයක්—අපි දැන්ම සැලසුම් කරමුද?',
+      };
+    } else if (isHopeContext &&
+        (lower.contains('සතුටින්') ||
+            lower.contains('බලාපොරොත්තු') ||
+            lower.contains('ශක්තිමත්') ||
+            lower.contains('සහය') ||
+            lower.contains('hope') ||
+            lower.contains('joy') ||
+            lower.contains('happy') ||
+            lower.contains('strength') ||
+            lower.contains('win') ||
+            lower.contains('support'))) {
+      aiResponse = {
+        'title': '✨ ඔබේ හදවතට නව බලාපොරොත්තුවේ ආලෝකය (Radiant Hope Ahead)',
+        'badge': 'ප්‍රීතිමත් අනාගතය (Radiant Tomorrow)',
+        'sinhala':
+            'සතුට සහ බලාපොරොත්තුව යනු ඔබේ සිත තුළම නිහඬව උපදින සුන්දර මල් වැනියි. ඉදිරි දිනවලදී ඔබේ මුහුණට ප්‍රීතිමත් සිනහවක් සහ හදවතට සැනසීමක් ගෙන ඒමට අපි නිරතුරුවම ඔබ සමඟ ඉන්නවා. අපේ වෛද්‍යවරුන්, හෙද නිලධාරීන් සහ මා නිරතුරුවම ඔබේ සෙවණැල්ල සේ රැඳී සිටිනවා. ඔබේ ඉදිරි කාලය සාමකාමී, නිරෝගී, සහ සතුටින් පිරී ඉතිරී යන එකක් බව දැඩිව විශ්වාස කරන්න. ධනාත්මක, ජයග්‍රාහී සිතුවිලි හදවතට ගෙන ගැඹුරින් හුස්ම ගන්න. ඔබට අනාගතය ජයගත හැකියි!',
+        'english':
+            'Joy and hope bloom within your own calm, beautiful heart. We are devoted to filling your upcoming days with comfort, warm smiles, and wonderful experiences. Trust in a peaceful, healthy, and happy future. Breathe in confidence and joy—triumph and peace belong to your tomorrow!',
+        'followUp':
+            'ඔබේ සිතේ ඇති බර නිදහස් කර, අද සිට ඉදිරි දින දෙස ප්‍රීතියෙන් හා ජයග්‍රාහී සිතින් බලන්න ඔබ සූදානම්ද?',
+      };
+    } else if (isHopeContext && _questions[_currentIndex].id == 2) {
+      aiResponse = {
+        'title': '🌅 හෙට දවස ඔබට අලුත් ජයග්‍රහණයක් ගෙන එනු ඇත',
+        'badge': 'නව බලාපොරොත්තු (New Hope & Joy)',
+        'sinhala':
+            'ඔබේ ඉදිරි දින පිළිබඳව ඔබ පැවසූ දේ මම ඉතාමත් ආදරයෙන් සවන් දුන්නා ආදරණීය ${_currentResident.name}. අනාගතය යනු ඔබට නව සතුටක්, සැනසීමක් සහ ජයග්‍රහණයක් ගෙනෙන සුන්දර කාලයක්. සිතේ සියලු සැකයන් දුරුකර, අද දින සිට අලුත් බලාපොරොත්තුවකින් යුතුව ඉදිරිය දෙස සතුටින් බලන්න. ඔබට දීර්ඝායුෂ සහ නිරෝගී ප්‍රීතිමත් අනාගතයක් උදාවේවා!',
+        'english':
+            'I hear your heartfelt thoughts about your future days, dear ${_currentResident.name}. Tomorrow holds serenity, good health, and gentle victories for you. Cast away worries and embrace the days ahead with joyful, radiant hope!',
+        'followUp':
+            'ඔබට දැන් ඉදිරි කාලය ගැන සිතට යම් සැහැල්ලුවක් සහ ප්‍රබෝධයක් දැනෙනවාද?',
+      };
+    } else if (lower.contains('දරුව') ||
         lower.contains('පවුල') ||
         lower.contains('ළමයි') ||
         lower.contains('ගෙදර') ||
@@ -1564,7 +1673,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         // Fallback simulation when speech engine unavailable in browser
         Future.delayed(const Duration(milliseconds: 1400), () {
           if (mounted && _isAiChatVoiceRecording) {
-            const simulatedText = 'මට දරුවන් මතක් වෙලා හිතට ටිකක් තනිකම දැනෙනවා.';
+            final isHope = _questions[_currentIndex].id == 2;
+            final simulatedText = isHope
+                ? 'ඉදිරියට මට තව කරන්න දෙයක් නෑ වගේ දැනෙනවා, මට හිත ශක්තිමත් කරගන්න ඕනෙ.'
+                : 'මට දරුවන් මතක් වෙලා හිතට ටිකක් තනිකම දැනෙනවා.';
             setState(() {
               _aiChatInputController.text = simulatedText;
               _isAiChatVoiceRecording = false;
@@ -1588,8 +1700,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     setState(() {
       _interventionStage = 6;
     });
+    final isHope = _questions[_currentIndex].id == 2;
     _flutterTts.stop();
-    _flutterTts.speak('I hope speaking together brought peace to your heart. Are you feeling more comfortable and in good spirits now?');
+    if (isHope) {
+      _flutterTts.speak('I hope our conversation inspired hope, joy, and confidence in your heart. Do you feel hopeful about the days ahead now?');
+    } else {
+      _flutterTts.speak('I hope speaking together brought peace to your heart. Are you feeling more comfortable and in good spirits now?');
+    }
   }
 
   void _handlePostInterventionAnswer(bool feelBetter) {
@@ -1600,8 +1717,13 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _interventionStage = 0;
       });
       _clapController.forward(from: 0.0);
+      final isHope = _questions[_currentIndex].id == 2;
       _flutterTts.stop();
-      _flutterTts.speak('Wonderful! I am so delighted that this helped you feel calm and in good spirits. Moving to the next question.');
+      if (isHope) {
+        _flutterTts.speak('Wonderful! I am so delighted that you now feel hopeful and ready to embrace your days ahead with joy and triumph! Moving to the next question.');
+      } else {
+        _flutterTts.speak('Wonderful! I am so delighted that this helped you feel calm and in good spirits. Moving to the next question.');
+      }
       Future.delayed(const Duration(milliseconds: 2500), () {
         if (mounted && _currentIndex < _questions.length - 1) {
           _nextQuestion();
@@ -2120,14 +2242,18 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 ],
               ),
               const SizedBox(height: 10),
-              const Text(
-                'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF312E81)),
+              Text(
+                currentQ.id == 2
+                    ? 'දැන් ඔබට ඉදිරි දින පිළිබඳව නව බලාපොරොත්තුවක් සහ සතුටක් දැනෙනවාද?'
+                    : 'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF312E81)),
               ),
               const SizedBox(height: 2),
-              const Text(
-                'Are you feeling peaceful and in good spirits now?',
-                style: TextStyle(fontSize: 13, color: Color(0xFF4338CA)),
+              Text(
+                currentQ.id == 2
+                    ? 'Do you feel hopeful and in good spirits about the days ahead now?'
+                    : 'Are you feeling peaceful and in good spirits now?',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF4338CA)),
               ),
               const SizedBox(height: 14),
               Row(
@@ -2135,7 +2261,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                   ElevatedButton.icon(
                     onPressed: () => _handlePostInterventionAnswer(true),
                     icon: const Icon(LucideIcons.smile, size: 18),
-                    label: const Text('Yes / ඔව්, දැන් සතුටුයි'),
+                    label: Text(
+                      currentQ.id == 2
+                          ? 'Yes / ඔව්, ඉදිරිය ගැන බලාපොරොත්තු සහගතයි'
+                          : 'Yes / ඔව්, දැන් සතුටුයි',
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF16A34A),
                       foregroundColor: Colors.white,
@@ -2238,12 +2368,14 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
-                    children: const [
-                      Icon(LucideIcons.messageCircleHeart, size: 20, color: Color(0xFF15803D)),
-                      SizedBox(width: 8),
+                    children: [
+                      const Icon(LucideIcons.messageCircleHeart, size: 20, color: Color(0xFF15803D)),
+                      const SizedBox(width: 8),
                       Text(
-                        'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                        currentQ.id == 2
+                            ? 'AI Assistant: ඉදිරි දින පිළිබඳ නව බලාපොරොත්තු සහ ජයග්‍රාහී සුහද සංවාදය'
+                            : 'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
                       ),
                     ],
                   ),
@@ -2403,14 +2535,23 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: [
-                  _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
-                  _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
-                  _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
-                  _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
-                  _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
-                  _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
-                ],
+                children: currentQ.id == 2
+                    ? [
+                        _buildElderQuickChip('🌅 ඉදිරිය ගැන බයක් සහ අවිනිශ්චිත බවක් තියෙනවා (Uncertain Future)'),
+                        _buildElderQuickChip('🕊️ මට තව කරන්න දෙයක් නෑ වගේ දැනෙනවා (Feeling Aimless)'),
+                        _buildElderQuickChip('☀️ නැවත සතුටින් හිනාවෙලා ඉන්න ආසයි (Want to Feel Joy Again)'),
+                        _buildElderQuickChip('🏆 ජීවිතය ජයගන්න හිත ශක්තිමත් කරගන්න ඕනෙ (Need Strength to Win)'),
+                        _buildElderQuickChip('🌸 ඉදිරියට අලුත් බලාපොරොත්තුවක් අවශ්‍යයි (Need Fresh Hope)'),
+                        _buildElderQuickChip('🤝 මගේ අනාගතයට ආදරණීය සහයෝගය ඕනෙ (Need Caring Support)'),
+                      ]
+                    : [
+                        _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
+                        _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
+                        _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
+                        _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
+                        _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
+                        _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
+                      ],
               ),
               const SizedBox(height: 10),
               // Typing and Speech input bar
@@ -2464,9 +2605,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                   ElevatedButton.icon(
                     onPressed: _finishAiConversationIntervention,
                     icon: const Icon(LucideIcons.heartHandshake, size: 16),
-                    label: const Text(
-                      '✨ සිත සන්සුන් විය (Feeling Soothed)',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    label: Text(
+                      currentQ.id == 2
+                          ? '🏆 නව බලාපොරොත්තු ඇති විය (Feeling Hopeful & Victorious)'
+                          : '✨ සිත සන්සුන් විය (Feeling Soothed)',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF16A34A),
@@ -2503,14 +2646,18 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 ],
               ),
               const SizedBox(height: 4),
-              const Text(
-                'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF92400E), height: 1.35),
+              Text(
+                currentQ.id == 2
+                    ? 'ඉදිරි දින ගැන ඔබේ සිතේ බලාපොරොත්තු අඩු වී ඇත්නම්, අපි කතාබහ කර ඔබේ හදවතට නව ජයග්‍රාහී බලාපොරොත්තුවක් එක් කරමු.'
+                    : 'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF92400E), height: 1.35),
               ),
               const SizedBox(height: 2),
-              const Text(
-                'I am sorry to hear that. Could you tell me or type what is making you feel this way?',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFFB45309)),
+              Text(
+                currentQ.id == 2
+                    ? 'If you feel uncertain about your upcoming days, let us talk to bring victorious and joyful hope to your heart.'
+                    : 'I am sorry to hear that. Could you tell me or type what is making you feel this way?',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFFB45309)),
               ),
               const SizedBox(height: 10),
               Container(
@@ -2592,10 +2739,14 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 runSpacing: 8,
                 children: [
                   ActionChip(
-                    avatar: const Text('💬'),
-                    label: const Text('ඔබ මාත් එක්ක කතා කරන්න කැමතිද? (Talk with me)'),
+                    avatar: Text(currentQ.id == 2 ? '🌅' : '💬'),
+                    label: Text(
+                      currentQ.id == 2
+                          ? '🌅 නව බලාපොරොත්තු සහ ජයග්‍රාහී සිතුවිලි සඳහා කතාබහ කරමු (Talk for Renewed Hope)'
+                          : 'ඔබ මාත් එක්ක කතා කරන්න කැමතිද? (Talk with me)',
+                    ),
                     backgroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFF93C5FD)),
+                    side: BorderSide(color: currentQ.id == 2 ? const Color(0xFF86EFAC) : const Color(0xFF93C5FD)),
                     onPressed: _startAiConversationIntervention,
                   ),
                   ActionChip(
@@ -3952,8 +4103,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: const [
-                                        Text(
+                                      children: [
+                                        const Text(
                                           'AI Assistant:  ✨ Delighted to hear this! ✨',
                                           style: TextStyle(
                                             fontSize: 12,
@@ -3961,20 +4112,24 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                             color: Color(0xFF15803D),
                                           ),
                                         ),
-                                        SizedBox(height: 4),
+                                        const SizedBox(height: 4),
                                         Text(
-                                          'ගොඩක් ඒ ගැන ස්තූතියි! අද දවසේ ඔබ සිතින් සතුටින් සහ සහනයෙන් පසුවීම ගැන මම ගොඩක් සතුටු වෙනවා!',
-                                          style: TextStyle(
+                                          currentQ.id == 2
+                                              ? 'ඉදිරි දින පිළිබඳව ඔබ තුළ සුබවාදී, ප්‍රීතිමත් බලාපොරොත්තු තිබීම ගැන මම ඉතාමත් සතුටු වෙනවා! ඔබ සැමදා සතුටින් සහ ජයග්‍රාහීව සිටින්න!'
+                                              : 'ගොඩක් ඒ ගැන ස්තූතියි! අද දවසේ ඔබ සිතින් සතුටින් සහ සහනයෙන් පසුවීම ගැන මම ගොඩක් සතුටු වෙනවා!',
+                                          style: const TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w700,
                                             color: Color(0xFF166534),
                                             height: 1.35,
                                           ),
                                         ),
-                                        SizedBox(height: 2),
+                                        const SizedBox(height: 2),
                                         Text(
-                                          'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
-                                          style: TextStyle(
+                                          currentQ.id == 2
+                                              ? 'I am so glad you feel hopeful and optimistic about the days ahead! May each tomorrow bring you joy and triumph.'
+                                              : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
+                                          style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w500,
                                             color: Color(0xFF15803D),
