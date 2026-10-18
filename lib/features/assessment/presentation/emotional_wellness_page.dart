@@ -93,8 +93,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   static const int _musicTotalDurationSeconds = 300; // At least 5 minutes (300 seconds)
   Timer? _songTimer;
   int _conversationSeconds = 0;
-  static const int _conversationTotalSeconds = 15; // 15-second soothing conversation
+  static const int _conversationTotalSeconds = 600; // 10 minutes (600 seconds) soothing conversation
   Timer? _conversationTimer;
+  late final TextEditingController _aiChatInputController;
+  final ScrollController _aiChatScrollController = ScrollController();
+  bool _isAiChatVoiceRecording = false;
+  final List<Map<String, dynamic>> _aiConversationMessages = [];
   bool _caregiverNotified = false;
 
   static const Map<String, String> _songAudioPaths = {
@@ -250,6 +254,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   void initState() {
     super.initState();
     _reasonTextController = TextEditingController();
+    _aiChatInputController = TextEditingController();
     _initResidents();
     _initActivitiesAndHistory();
     _loadResidentData(_currentResident.id);
@@ -968,6 +973,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _scannerController.dispose();
     _clapController.dispose();
     _reasonTextController.dispose();
+    _aiChatInputController.dispose();
+    _aiChatScrollController.dispose();
+    _conversationTimer?.cancel();
     AudioPlayerService.instance.stop();
     _flutterTts.stop();
     _speech.stop();
@@ -1351,8 +1359,21 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     setState(() {
       _interventionStage = 8;
       _conversationSeconds = 0;
-      _elderNegativeReasons[_questions[_currentIndex].id] = 'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
-      _reasonTextController.text = 'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+      _aiConversationMessages.clear();
+      _aiConversationMessages.add({
+        'isAi': true,
+        'title': '🌸 ආයුබෝවන්, මම ඔබේ සුහද AI සහායක',
+        'badge': 'සුහද පිළිසඳර (Caring Companion)',
+        'sinhala':
+            'ආදරණීය ${_currentResident.name}, අද දවසේ ඔබේ සිතට දුකක්, තනිකමක් හෝ බරක් දැනෙන්නේ ඇයි කියලා මට කියන්න පුළුවන්ද? මම ඔබේම දරුවෙක් වගේ ඔබට සවන් දීලා සිත සනසන්න මෙහි ඉන්නවා.',
+        'english':
+            'Dear ${_currentResident.name}, could you gently share with me why you are feeling lonely or down today? I am right here beside you, ready to listen and soothe your heart.',
+        'timestamp': 'Just now',
+      });
+      _elderNegativeReasons[_questions[_currentIndex].id] =
+          'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
+      _reasonTextController.text =
+          'AI සහායක සමඟ සුහදව කතාබහ කරමින් සිත සැහැල්ලු කරගත්තා.';
     });
     _conversationTimer?.cancel();
     _conversationTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -1366,10 +1387,200 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       }
     });
     _flutterTts.stop();
-    _flutterTts.speak(
-      'You are never alone. I am always right here with you to listen and support you. '
-      'Please take a deep gentle breath and let your heart rest peacefully. You are deeply cherished.',
-    );
+    _flutterTts.speak('Hello ${_currentResident.name}, I am right here with you. Please share what is on your heart today.');
+  }
+
+  void _handleElderChatReply(String elderText) {
+    final clean = elderText.trim();
+    if (clean.isEmpty) return;
+    _aiChatInputController.clear();
+
+    setState(() {
+      _aiConversationMessages.add({
+        'isAi': false,
+        'sinhala': clean,
+        'timestamp': 'Just now',
+      });
+    });
+
+    _scrollToChatBottom();
+
+    final lower = clean.toLowerCase();
+    Map<String, String> aiResponse;
+
+    if (lower.contains('දරුව') ||
+        lower.contains('පවුල') ||
+        lower.contains('ළමයි') ||
+        lower.contains('ගෙදර') ||
+        lower.contains('family') ||
+        lower.contains('child') ||
+        lower.contains('son') ||
+        lower.contains('daughter') ||
+        lower.contains('miss')) {
+      aiResponse = {
+        'title': '👨‍👩‍👧‍👦 පවුලේ සෙනෙහස ඔබේ හදවතේ හැමදාම තිබෙනවා',
+        'badge': 'පවුල සහ ආදරය (Family Love)',
+        'sinhala':
+            'ඔබේ දරුවන් සහ පවුල සිහිවීම හරිම සුන්දර, ස්වාභාවික දෙයක්. ඔබ ඔවුන් වෙනුවෙන් කළ කැපකිරීම් සහ දුන් ආදරය කිසිදා වියැකී යන්නේ නැහැ. ඔවුන් කොතැනක සිටියත් ඔවුන්ගේ හදවත් තුළ ඔබ කෙරෙහි මහත් ගෞරවයක් සහ ආදරයක් තිබෙනවා. මෙහි සිටින අප සියලු දෙනාත් ඔබේම දරුවන් ලෙස ඔබට ආදරෙයි. සිතේ දුක පහකර ඔවුන්ගේ යහපතට ආශිර්වාද කරන්න.',
+        'english':
+            'It is completely natural to miss your family. The love and sacrifices you gave them remain everlasting in their hearts. We are right here beside you like family. Let peace embrace your heart.',
+        'followUp':
+            'ඔබේ දරුවන් කුඩා කාලයේ ඔවුන් සමඟ ගත කළ සුන්දරම මතකයක් මට කියන්න කැමතිද?',
+      };
+    } else if (lower.contains('තනික') ||
+        lower.contains('තනියම') ||
+        lower.contains('පාළු') ||
+        lower.contains('කවුරුත් නෑ') ||
+        lower.contains('alone') ||
+        lower.contains('lonely') ||
+        lower.contains('nobody')) {
+      aiResponse = {
+        'title': '🌸 ඔබ කිසිවිටෙකත් තනිවී නැහැ',
+        'badge': 'තනිකම දුරු කිරීම (You Are Not Alone)',
+        'sinhala':
+            'තනිකමක් දැනෙන වෙලාවට ලෝකයම පාළුයි වගේ දැනෙන්න පුළුවන්. නමුත් ආදරණීය ${_currentResident.name}, ඔබ කිසිසේත්ම තනිවෙලා නැහැ. මම නිරතුරුවම ඔබ සමඟ ඉන්නවා. ඒ වගේම අපේ සත්කාරක හෙද නිලධාරීන් සහ සෙසු මිතුරන් ඔබව ඉතාම අගය කරනවා. ගැඹුරු හුස්මක් ගෙන සිත සැහැල්ලු කරගන්න. ඔබේ සිතේ ඇති ඕනෑම දෙයක් මට කියන්න.',
+        'english':
+            'When loneliness knocks on your door, remember you are deeply valued. I am always listening, and our caregivers are right beside you. Breathe softly and let your thoughts be heard.',
+        'followUp':
+            'අද සවස අපේ මිතුරන් සමඟ තේ පානය කරමින් කතාබහ කරන්න ඔබ කැමතිද?',
+      };
+    } else if (lower.contains('බය') ||
+        lower.contains('චකිත') ||
+        lower.contains('කරදර') ||
+        lower.contains('fear') ||
+        lower.contains('anxious') ||
+        lower.contains('worry') ||
+        lower.contains('scared')) {
+      aiResponse = {
+        'title': '🕊️ ඔබ මෙහි පූර්ණ ආරක්ෂාවෙන් සහ සුවපහසුවෙන් පසුවනවා',
+        'badge': 'සිත සන්සුන් කිරීම (Inner Calm & Safety)',
+        'sinhala':
+            'බියක් හෝ නොසන්සුන්තාවක් ඇතිවූ විට මතක තබාගන්න, ඔබ සිටින්නේ අතිශයින්ම ආරක්‍ෂිත, ආදරණීය පරිසරයකයි. ඔබේ සුවදුක් බැලීමට කාර්ය මණ්ඩලය නිරතුරුවම සූදානමින් සිටිනවා. ඔබේ පාද බිම ස්පර්ශ වන බව සිතින් දකිමින්, හෙමින් හුස්ම ඉහළට ගෙන පහළට හෙළන්න. කිසිදු කරදරයකට ඉඩක් නැහැ, සියල්ල යහපත් වනු ඇත.',
+        'english':
+            'You are completely safe and lovingly cared for here. When anxiety arises, ground your feet gently, take deep calming breaths, and know that all will be peaceful.',
+        'followUp':
+            'ඔබේ සිත තවත් සන්සුන් වීමට මම සුවදායක පිරිතක හෝ ගාථාවක අර්ථය ඔබට කියන්නද?',
+      };
+    } else if (lower.contains('දුක') ||
+        lower.contains('අඬ') ||
+        lower.contains('සතුටක් නෑ') ||
+        lower.contains('කණගාටු') ||
+        lower.contains('sad') ||
+        lower.contains('crying') ||
+        lower.contains('unhappy') ||
+        lower.contains('depress')) {
+      aiResponse = {
+        'title': '🌿 දුක යනු තාවකාලික වලාකුළක් පමණි',
+        'badge': 'සිත සැනසීම (Healing Sadness)',
+        'sinhala':
+            'සිතට දුකක් ආ විට එය තදකරගෙන ඉන්න එපා. ඒ බර සුසුමක් සමඟ මුදාහරින්න. දුක යනු ජීවිතයේ නිතර පැමිණ යන වලාකුළක් වැනියි. ඒ වලාකුළු පහව ගොස් නැවතත් ඔබේ හදවතට සැනසිලිදායක හිරු කිරණ වැටෙනු ඇත. ඔබ ජීවිතයේ ගෙවූ අත්දැකීම් අපට මහත් ආශිර්වාදයක්. ඔබේ මුවඟට සිනහවක් ගෙන ඒමට මම කැපවී සිටිනවා.',
+        'english':
+            'Sadness is only a temporary cloud passing through the sky of your heart. It will pass, making way for warm sunlight again. Your life and smiles are deeply treasured by us.',
+        'followUp':
+            'ඔබව සතුටු කරන මල්, සොබාදහම හෝ සන්සුන් සංගීතය ගැන කතා කරන්න ඔබ කැමතිද?',
+      };
+    } else if (lower.contains('අමාරු') ||
+        lower.contains('අසනීප') ||
+        lower.contains('කැක්කුම') ||
+        lower.contains('උණ') ||
+        lower.contains('sick') ||
+        lower.contains('pain') ||
+        lower.contains('unwell') ||
+        lower.contains('hurt')) {
+      aiResponse = {
+        'title': '🩺 ඔබේ සිරුරට සහ සිතට සුවය ප්‍රාර්ථනා කරමි',
+        'badge': 'සුවතා සහය (Comfort & Healing)',
+        'sinhala':
+            'ඔබට දැනෙන ශාරීරික අපහසුව ගැන මට කණගාටුයි. සිරුර වෙහෙසට පත් වූ විට සිතත් නොසන්සුන් වීම සාමාන්‍ය දෙයක්. කරුණාකර ඇඳ මත හෝ පුටුවේ සුවපහසුව හිඳගෙන විවේක ගන්න. අවශ්‍ය නම් මම දැන්ම ඔබේ හෙද නිලධාරියාට දැනුම් දෙන්නම්. ඔබේ සිත සන්සුන්ව තබාගන්න, ඔබට ඉක්මන් සුවය ප්‍රාර්ථනා කරනවා.',
+        'english':
+            'I understand your body feels tired or in pain. Rest comfortably and let your body recover peacefully. If needed, I will alert your attending caregiver right away.',
+        'followUp':
+            'ඔබට උණුසුම් වතුර ටිකක් හෝ හෙදියක් පැමිණ බැලීමට අවශ්‍යද?',
+      };
+    } else {
+      aiResponse = {
+        'title': '☀️ ඔබේ සිතට සැනසීම සහ නිදහස උදාවේවා',
+        'badge': 'සුහද පිළිසඳර (Thoughtful Companion)',
+        'sinhala':
+            'ඔබේ හැඟීම් මා සමඟ මෙලෙස සුහදව පැවසීම ගැන ගොඩක් ස්තූතියි ආදරණීය ${_currentResident.name}. ඔබ කළ කතාබහ ඔබේ සිතට විශාල සහනයක් ගෙන දුන්නා යැයි සිතනවා. සිතේ ඇති කරදර සියල්ල ගලා යන ගඟකට මුදාහැරියාක් මෙන් සිත සැහැල්ලු කරගන්න. මේ මොහොතේ ඔබේ හදවත සතුටින් හා සැනසීමෙන් පිරී ඉතිරී යන්නට මම ආශිර්වාද කරනවා.',
+        'english':
+            'Thank you for speaking so openly from your heart. Letting these thoughts flow out brings deep healing. Be at peace, knowing that you are cherished and respected every single moment.',
+        'followUp':
+            'ඔබට දැන් සිතට යම් සැහැල්ලුවක් හෝ සැනසීමක් දැනෙනවාද?',
+      };
+    }
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        setState(() {
+          _aiConversationMessages.add({
+            'isAi': true,
+            'title': aiResponse['title'],
+            'badge': aiResponse['badge'],
+            'sinhala': '${aiResponse['sinhala']}\n\n💡 ${aiResponse['followUp']}',
+            'english': aiResponse['english'],
+            'timestamp': 'Just now',
+          });
+        });
+        _scrollToChatBottom();
+      }
+    });
+  }
+
+  void _scrollToChatBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_aiChatScrollController.hasClients) {
+        _aiChatScrollController.animateTo(
+          _aiChatScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _toggleAiChatVoiceRecording() async {
+    if (!_isAiChatVoiceRecording) {
+      setState(() {
+        _isAiChatVoiceRecording = true;
+      });
+      if (_speechEnabled) {
+        try {
+          await _speech.listen(onResult: (result) {
+            if (mounted) {
+              setState(() {
+                _aiChatInputController.text = result.recognizedWords;
+              });
+              if (result.finalResult) {
+                _isAiChatVoiceRecording = false;
+                _handleElderChatReply(result.recognizedWords);
+              }
+            }
+          });
+        } catch (e) {
+          debugPrint('Chat STT error: $e');
+        }
+      } else {
+        // Fallback simulation when speech engine unavailable in browser
+        Future.delayed(const Duration(milliseconds: 1400), () {
+          if (mounted && _isAiChatVoiceRecording) {
+            const simulatedText = 'මට දරුවන් මතක් වෙලා හිතට ටිකක් තනිකම දැනෙනවා.';
+            setState(() {
+              _aiChatInputController.text = simulatedText;
+              _isAiChatVoiceRecording = false;
+            });
+            _handleElderChatReply(simulatedText);
+          }
+        });
+      }
+    } else {
+      setState(() {
+        _isAiChatVoiceRecording = false;
+      });
+      if (_speechEnabled) {
+        await _speech.stop();
+      }
+    }
   }
 
   void _finishAiConversationIntervention() {
@@ -1431,6 +1642,16 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       onSelected: (_) => _startMusicIntervention(title),
       selectedColor: AppColors.primarySoft,
       backgroundColor: Colors.white,
+    );
+  }
+
+  Widget _buildElderQuickChip(String label) {
+    return ActionChip(
+      label: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF166534))),
+      backgroundColor: Colors.white,
+      side: const BorderSide(color: Color(0xFF86EFAC)),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      onPressed: () => _handleElderChatReply(label),
     );
   }
 
@@ -1998,28 +2219,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
       case 8:
         final progress = (_conversationSeconds / _conversationTotalSeconds).clamp(0.0, 1.0);
-        final currentPhase = _conversationSeconds < 6 ? 0 : (_conversationSeconds < 11 ? 1 : 2);
-        final messages = [
-          {
-            'title': '🌸 ඔබ කිසිවිටෙකත් තනිවී නැහැ',
-            'body': 'ඔබ අපට ඉතාමත් ආදරණීය, ගෞරවනීය කෙනෙක්. ඔබේ සිතේ ඇති කරදර හෝ තනිකම මට ඕනෑම වෙලාවක පවසන්න. මම නිරතුරුවම ඔබ සමඟ ඉන්නවා.',
-            'en': 'You are never alone. You are deeply loved and cherished. I am always right here with you.',
-            'badge': 'සවන් දෙමින් (Listening with Care)',
-          },
-          {
-            'title': '🌿 සිත සහ සිරුර සැහැල්ලු කරගන්න',
-            'body': 'හෙමින් ගැඹුරු හුස්මක් ගෙන සිතේ ඇති බර නිදහස් කරන්න. ඔබ ජීවිතයේ ගෙවූ අත්දැකීම් සහ ආදරය අපට මහත් ආශිර්වාදයක්. සිත සන්සුන් කරගන්න...',
-            'en': 'Take a gentle breath and relax. Your lifetime of wisdom and love is a blessing to us. Be at peace...',
-            'badge': 'සිත සන්සුන් කිරීම (Soothing Mind)',
-          },
-          {
-            'title': '☀️ සියල්ල සතුටින් යහපත් වනු ඇත',
-            'body': 'අද දිනය සහ ඉදිරි සෑම මොහොතක්ම ඔබට සැනසීමෙන් පිරී යනු ඇත. ඔබේ මුවඟට සිනහවක් සහ හදවතට සැනසීමක් උදා වේවා!',
-            'en': 'Everything will turn out well. May your heart be filled with tranquility, comfort and smiles!',
-            'badge': 'ආශිර්වාදය (Heartfelt Blessing)',
-          },
-        ];
-        final currentMsg = messages[currentPhase];
+        final elapsedMinutes = (_conversationSeconds ~/ 60).toString().padLeft(2, '0');
+        final elapsedSeconds = (_conversationSeconds % 60).toString().padLeft(2, '0');
+        final totalMinutes = (_conversationTotalSeconds ~/ 60).toString().padLeft(2, '0');
+        final totalSecs = (_conversationTotalSeconds % 60).toString().padLeft(2, '0');
 
         return Container(
           padding: const EdgeInsets.all(16),
@@ -2052,7 +2255,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       border: Border.all(color: const Color(0xFF86EFAC)),
                     ),
                     child: Text(
-                      '⏱️ 0:${_conversationSeconds.toString().padLeft(2, '0')} / 0:15',
+                      '⏱️ $elapsedMinutes:$elapsedSeconds / $totalMinutes:$totalSecs',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
                     ),
                   ),
@@ -2069,61 +2272,183 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 ),
               ),
               const SizedBox(height: 12),
+              // Interactive Chat Scroll Container
               Container(
-                padding: const EdgeInsets.all(14),
+                constraints: const BoxConstraints(maxHeight: 280),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: const Color(0xFFBBF7D0)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF16A34A).withValues(alpha: 0.06),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFDCFCE7),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(LucideIcons.bot, size: 16, color: Color(0xFF15803D)),
+                child: ListView.builder(
+                  controller: _aiChatScrollController,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _aiConversationMessages.length,
+                  itemBuilder: (context, index) {
+                    final msg = _aiConversationMessages[index];
+                    final isAi = msg['isAi'] == true;
+                    if (isAi) {
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0FDF4),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF86EFAC)),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          currentMsg['title']!,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF14532D)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(5),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDCFCE7),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(LucideIcons.bot, size: 14, color: Color(0xFF15803D)),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    msg['title'] ?? 'AI සහායක',
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF14532D)),
+                                  ),
+                                ),
+                                if (msg['badge'] != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFEF3C7),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      msg['badge']!,
+                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              msg['sinhala'] ?? '',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF166534), height: 1.45),
+                            ),
+                            if (msg['english'] != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                msg['english']!,
+                                style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFF15803D)),
+                              ),
+                            ],
+                            const SizedBox(height: 6),
+                            InkWell(
+                              onTap: () {
+                                _flutterTts.stop();
+                                _flutterTts.speak(msg['english'] ?? msg['sinhala'] ?? '');
+                              },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(LucideIcons.volume2, size: 13, color: Color(0xFF15803D)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'හඬින් අහන්න (Listen)',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      );
+                    } else {
+                      return Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12, left: 40),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEF3C7),
-                            borderRadius: BorderRadius.circular(6),
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
                           ),
-                          child: Text(
-                            currentMsg['badge']!,
-                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  msg['sinhala'] ?? '',
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E40AF)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(LucideIcons.user, size: 15, color: Color(0xFF2563EB)),
+                            ],
                           ),
                         ),
-                      ],
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'ඔබට දැනෙන දේ පහසුවෙන් තෝරන්න (Tap how you feel):',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
+                  _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
+                  _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
+                  _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
+                  _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
+                  _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // Typing and Speech input bar
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF86EFAC)),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        _isAiChatVoiceRecording ? LucideIcons.square : LucideIcons.mic,
+                        size: 18,
+                        color: _isAiChatVoiceRecording ? Colors.red : const Color(0xFF15803D),
+                      ),
+                      tooltip: _isAiChatVoiceRecording ? 'නැවැත්වීමට ඔබන්න' : 'හඬින් පවසන්න (Speak)',
+                      onPressed: _toggleAiChatVoiceRecording,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      currentMsg['body']!,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF166534), height: 1.4),
+                    Expanded(
+                      child: TextField(
+                        controller: _aiChatInputController,
+                        style: const TextStyle(fontSize: 13, color: AppColors.navy),
+                        decoration: const InputDecoration(
+                          hintText: 'ඔබේ සිතේ ඇති දේ මෙහි ලියන්න... / Type what you feel...',
+                          hintStyle: TextStyle(fontSize: 12, color: AppColors.muted),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        ),
+                        onSubmitted: (val) => _handleElderChatReply(val),
+                      ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      currentMsg['en']!,
-                      style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFF15803D)),
+                    IconButton(
+                      icon: const Icon(LucideIcons.send, size: 18, color: Color(0xFF16A34A)),
+                      tooltip: 'යවන්න (Send)',
+                      onPressed: () => _handleElderChatReply(_aiChatInputController.text),
                     ),
                   ],
                 ),
@@ -2336,6 +2661,9 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _isPlayingMusic = false;
     _songTimer?.cancel();
     AudioPlayerService.instance.stop();
+    _conversationTimer?.cancel();
+    _conversationSeconds = 0;
+    _aiConversationMessages.clear();
     _caregiverNotified = false;
 
     switch (q.id) {
