@@ -2214,9 +2214,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     } else {
       setState(() {
         _interventionStage = 7;
+        _caregiverNotified = false;
       });
       _flutterTts.stop();
-      _flutterTts.speak('Did this not help you feel better? Would you like me to send a caregiver to come sit and talk with you?');
+      _flutterTts.speak('Your feelings are deeply important to us. Would you like me to notify your caregiver to come assist and comfort you? Please tap the button below.');
     }
   }
 
@@ -2224,18 +2225,55 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     setState(() {
       _caregiverNotified = true;
     });
+
+    final currentQ = _questions[_currentIndex];
+    final roomNumber = _currentResident.roomNo.isNotEmpty ? _currentResident.roomNo : '101';
+    final elderName = _currentResident.name.isNotEmpty ? _currentResident.name : 'Senior Resident';
+
+    // Insert rich, prioritized alert for the assigned caregiver
     MockCarevoraData.alerts.insert(
       0,
       AlertItem(
-        id: 'ALT-${DateTime.now().millisecondsSinceEpoch}',
-        title: 'Caregiver Companionship Request: ${_currentResident.name}',
-        description: 'Resident in Room ${_currentResident.roomNo} feels persistent low mood and requested personal companion support.',
-        severity: 'Moderate',
+        id: 'ALT-EMO-${DateTime.now().millisecondsSinceEpoch}',
+        title: '🚨 Caregiver Alert: $elderName (Room $roomNumber)',
+        description:
+            'Resident $elderName in Room $roomNumber expressed distress / persistent low mood during assessment question "${currentQ.prompt}". The resident requested immediate caregiver presence ("Caregiver ට මේ ගැන දන්වන්න ඕනේ").',
+        severity: 'High',
         timestamp: 'Just now',
+        residentName: elderName,
+        roomNo: roomNumber,
+        residentAge: _currentResident.age,
+        residentGender: _currentResident.gender,
+        currentStatus: 'Caregiver Attention Requested',
+        cognitiveScore: _currentResident.cognitiveScore,
       ),
     );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(LucideIcons.bellRing, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Caregiver ට මේ ගැන සාර්ථකව දැනුම් දෙන ලදී! ($elderName - Room $roomNumber)',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF15803D),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+
     _flutterTts.stop();
-    _flutterTts.speak('Your caregiver has been notified to come spend some comforting time with you. Please take it easy.');
+    _flutterTts.speak('Your caregiver has been notified. They are coming to Room $roomNumber to assist and comfort you shortly.');
   }
 
   Widget _buildSongChip(String title) {
@@ -2798,54 +2836,154 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         );
 
       case 7:
+        final roomNumber = _currentResident.roomNo.isNotEmpty ? _currentResident.roomNo : '101';
+        final elderName = _currentResident.name.isNotEmpty ? _currentResident.name : 'Senior Resident';
+
         return Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             color: const Color(0xFFFEF2F2),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFCA5A5)),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFFCA5A5), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFDC2626).withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                children: const [
-                  Icon(LucideIcons.heartPulse, size: 20, color: Color(0xFFDC2626)),
-                  SizedBox(width: 8),
-                  Text(
-                    'AI Caregiver Dispatch Assistance',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'ඔබට මේ දේවලින් සිතට සැනසීමක් ලැබුණේ නැද්ද? අපි රැකවරණ නිලධාරියෙකු (Caregiver) ඔබ ළඟට එවන්නද?',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF991B1B), height: 1.35),
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                'Did this not help you feel better? Would you like me to send a caregiver to come sit and talk with you?',
-                style: TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
-              ),
-              const SizedBox(height: 14),
-              Row(
                 children: [
-                  ElevatedButton.icon(
-                    onPressed: _callCaregiverForCompanionship,
-                    icon: const Icon(LucideIcons.bellRing, size: 16),
-                    label: Text(_caregiverNotified ? '✓ Caregiver කැඳවන ලදී' : '🚨 ඔව්, රැකවරණ නිලධාරියෙකු කැඳවන්න'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFDC2626),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(LucideIcons.bellRing, size: 18, color: Color(0xFFDC2626)),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'AI Caregiver Dispatch Assistance • රැකවරණ නිලධාරී දැනුම්දීම',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
+                  if (_caregiverNotified)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.circleCheck, size: 14, color: Color(0xFF16A34A)),
+                          SizedBox(width: 4),
+                          Text(
+                            'දැනුම් දෙන ලදී (Notified)',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'ඔබට තවමත් සිතට සැනසීමක් හෝ සතුටක් දැනෙන්නේ නැද්ද? රැකවරණ නිලධාරියාට (Caregiver) මේ ගැන දැනුම් දෙන්න අවශ්‍යද?',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF991B1B), height: 1.35),
+              ),
+              const SizedBox(height: 3),
+              const Text(
+                'Are you still not feeling at ease? Would you like to notify your assigned caregiver to come assist and comfort you?',
+                style: TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+              ),
+              const SizedBox(height: 16),
+
+              if (_caregiverNotified) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0FDF4),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF86EFAC)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(LucideIcons.circleCheck, color: Color(0xFF16A34A), size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '✓ $elderName වෙනුවෙන් Caregiver ට මේ ගැන සාර්ථකව දැනුම් දුන්නා!',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF166534)),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'අදාළ හෙද/රැකවරණ නිලධාරියා (Nurse Seetha N. / RN) මොහොතකින් කාමර අංක $roomNumber වෙත පැමිණෙනු ඇත.',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF15803D)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              Wrap(
+                spacing: 12,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _caregiverNotified ? null : _callCaregiverForCompanionship,
+                    icon: Icon(
+                      _caregiverNotified ? LucideIcons.circleCheck : LucideIcons.bellRing,
+                      size: 18,
+                    ),
+                    label: Text(
+                      _caregiverNotified
+                          ? '✓ Caregiver ට දැනුම් දෙන ලදී'
+                          : '🚨 Caregiver ට මේ ගැන දන්වන්න ඕනේ',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _caregiverNotified ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                      disabledBackgroundColor: const Color(0xFF16A34A),
+                      foregroundColor: Colors.white,
+                      disabledForegroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: _caregiverNotified ? 0 : 2,
+                    ),
+                  ),
+                  ElevatedButton.icon(
                     onPressed: _nextQuestion,
-                    child: const Text('ඊළඟ ප්‍රශ්නයට යන්න (Next)'),
+                    icon: const Icon(LucideIcons.arrowRight, size: 16),
+                    label: const Text(
+                      'ඊළඟ ප්‍රශ්නයට යන්න (Next Question)',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _caregiverNotified ? AppColors.primary : Colors.white,
+                      foregroundColor: _caregiverNotified ? Colors.white : const Color(0xFF374151),
+                      side: BorderSide(
+                        color: _caregiverNotified ? AppColors.primary : const Color(0xFFD1D5DB),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
                   ),
                 ],
               ),
