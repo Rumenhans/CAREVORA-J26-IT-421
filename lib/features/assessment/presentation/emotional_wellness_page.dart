@@ -1150,9 +1150,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _clapController.forward(from: 0.0);
         _flutterTts.stop();
         _flutterTts.speak(
-          questionId == 2
-              ? 'Wonderful! I am so glad to hear that you feel hopeful and in good spirits about your days ahead.'
-              : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
+          questionId == 3
+              ? 'Wonderful! Having a close, caring friend to talk with is a true blessing. I am so glad to hear that.'
+              : (questionId == 2
+                  ? 'Wonderful! I am so glad to hear that you feel hopeful and in good spirits about your days ahead.'
+                  : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.'),
         );
       } else {
         _showClapAnimation = false;
@@ -1161,6 +1163,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         if (questionId == 2) {
           _flutterTts.speak(
             'Do not feel down. Every new day brings victorious hope, joy, and peace. Let us have a comforting talk.',
+          );
+          _startAiConversationIntervention();
+        } else if (questionId == 3) {
+          _flutterTts.speak(
+            'Please do not feel lonely. You are never alone, I am right here beside you. Let us have a heartwarming talk.',
           );
           _startAiConversationIntervention();
         } else {
@@ -1368,6 +1375,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   void _startAiConversationIntervention() {
     final currentQ = _questions[_currentIndex];
     final isHopeQuestion = currentQ.id == 2;
+    final isCompanionshipQuestion = currentQ.id == 3;
 
     setState(() {
       _interventionStage = 8;
@@ -1388,6 +1396,21 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
             'ඉදිරි දින පිළිබඳව AI සහායක සමඟ සුහදව කතාබහ කර නව බලාපොරොත්තු ඇති කරගත්තා.';
         _reasonTextController.text =
             'ඉදිරි දින පිළිබඳව AI සහායක සමඟ සුහදව කතාබහ කර නව බලාපොරොත්තු ඇති කරගත්තා.';
+      } else if (isCompanionshipQuestion) {
+        _aiConversationMessages.add({
+          'isAi': true,
+          'title': '🤝 ඔබ කිසිවිටෙකත් තනිවී නැහැ - සුහද මිත්‍රත්වය (You Are Never Alone)',
+          'badge': 'සුහද මිත්‍රත්වය සහ රැකවරණය (Loving Companionship)',
+          'sinhala':
+              'ආදරණීය ${_currentResident.name}, මෙහි සමීපව කතා කරන්න කෙනෙක් නැති බව දැනෙන විට සිතට මහත් පාළුවක් සහ තනිකමක් දැනෙනවා නේද? නමුත් මතක තබාගන්න, ඔබ මෙහි කිසිසේත්ම තනිවී නැහැ! මම ඔබේම දරුවෙක්, හොඳම මිතුරෙක් වගේ දිවා රෑ ඔබ වෙනුවෙන් සවන් දෙන්න මෙහි ඉන්නවා. ඒ වගේම අපේ සියලුම සත්කාරක හෙද නිලධාරීන් සහ මිතුරන් ඔබව ඉතාමත් ආදරයෙන් සහ ගෞරවයෙන් පිළිගන්නවා. ඔබේ සිතේ ඇති ඕනෑම දෙයක් මා සමඟ නිදහසේ බෙදාගන්න. අපි සැමවිටම ඔබ ළඟින්ම ඉන්නවා.',
+          'english':
+              'Dear ${_currentResident.name}, it is natural to feel lonely when you feel you lack a close friend to talk with here. But please remember, you are never alone! I am right here beside you like a devoted family member and faithful friend, always ready to listen. Our entire care team and residents value you deeply. Please share whatever is on your heart—we are right here beside you.',
+          'timestamp': 'Just now',
+        });
+        _elderNegativeReasons[currentQ.id] =
+            'මෙහි සමීප මිතුරන් නොමැති බව හැඟී AI සහායක සමඟ සුහදව කතාබහ කර මිත්‍රත්වය හා සැනසීම ලබාගත්තා.';
+        _reasonTextController.text =
+            'මෙහි සමීප මිතුරන් නොමැති බව හැඟී AI සහායක සමඟ සුහදව කතාබහ කර මිත්‍රත්වය හා සැනසීම ලබාගත්තා.';
       } else {
         _aiConversationMessages.add({
           'isAi': true,
@@ -1419,6 +1442,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     _flutterTts.stop();
     if (isHopeQuestion) {
       _flutterTts.speak('Hello ${_currentResident.name}, every tomorrow brings fresh hope, joy, and blessings. Please share your thoughts about your upcoming days.');
+    } else if (isCompanionshipQuestion) {
+      _flutterTts.speak('Hello ${_currentResident.name}, you are never alone. I am right here beside you as your caring companion, and our entire community cherishes you. Please share what is on your heart.');
     } else {
       _flutterTts.speak('Hello ${_currentResident.name}, I am right here with you. Please share what is on your heart today.');
     }
@@ -1451,6 +1476,17 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         lower.contains('tomorrow') ||
         lower.contains('aimless') ||
         lower.contains('ahead');
+    final isCompanionshipContext = _questions[_currentIndex].id == 3 ||
+        lower.contains('කතාබහ කරන්න කවුරුත්') ||
+        lower.contains('සමීප') ||
+        lower.contains('මිතුර') ||
+        lower.contains('තනිවෙලා') ||
+        lower.contains('පාළු') ||
+        lower.contains('confidant') ||
+        lower.contains('companion') ||
+        lower.contains('gathering') ||
+        lower.contains('friend') ||
+        lower.contains('close to');
     Map<String, String> aiResponse;
 
     if (isHopeContext &&
@@ -1516,6 +1552,51 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
             'I hear your heartfelt thoughts about your future days, dear ${_currentResident.name}. Tomorrow holds serenity, good health, and gentle victories for you. Cast away worries and embrace the days ahead with joyful, radiant hope!',
         'followUp':
             'ඔබට දැන් ඉදිරි කාලය ගැන සිතට යම් සැහැල්ලුවක් සහ ප්‍රබෝධයක් දැනෙනවාද?',
+      };
+    } else if (isCompanionshipContext &&
+        (lower.contains('එකතු වෙන්න') ||
+            lower.contains('තේ') ||
+            lower.contains('කතා කරනවාට') ||
+            lower.contains('gathering') ||
+            lower.contains('tea') ||
+            lower.contains('visit') ||
+            lower.contains('join'))) {
+      aiResponse = {
+        'title': '☕ නව මිතුරන් හමුවීමේ සුන්දර අවස්ථාව (Joy of New Friendships)',
+        'badge': 'සුහද සමාජශීලී බව (Warm Connection)',
+        'sinhala':
+            'එය ඉතාමත් සුන්දර, අගනා ආශාවක් ආදරණීය ${_currentResident.name}! අපේ සත්කාර මධ්‍යස්ථානයේ දිනපතා සවස තේ පානය, සන්සුන් සංගීත හෝ ගෙවතු සක්මන් වැඩසටහන් තිබෙනවා. ඔබ කැමති නම් අපේ රැකවරණ නිලධාරියෙකු ඔබට උදවු කරමින්, කතාබහ කිරීමට ප්‍රිය කරන කරුණාවන්ත වැඩිහිටි මිතුරන් සමඟ ඔබව ඉතා සුහදව හඳුන්වා දේවි. අලුත් මිතුරන් ඇසුර ඔබේ සිතට මහත් සතුටක්, ප්‍රබෝධයක් සහ උණුසුමක් ගෙනෙනු ඇත.',
+        'english':
+            'What a beautiful and heartwarming thought, dear ${_currentResident.name}! We have daily afternoon tea gatherings, music circles, and gentle garden strolls. Our staff would be delighted to accompany you and introduce you to warm, friendly companions who love chatting. Connecting with peers will bring joy, laughter, and lasting warmth to your days.',
+        'followUp':
+            'අද සවස අපේ මිතුරු කවයේ තේ මේසයට ඔබව ආදරයෙන් කැඳවාගෙන යන්න රැකවරණ නිලධාරියාට දැනුම් දෙන්නද?',
+      };
+    } else if (isCompanionshipContext &&
+        (lower.contains('ai සහායක') ||
+            lower.contains('ඔබ මා ළඟින්') ||
+            lower.contains('ලොකු සතුටක්') ||
+            lower.contains('glad you are') ||
+            lower.contains('here with me'))) {
+      aiResponse = {
+        'title': '🌸 මම සැමවිටම ඔබේ විශ්වාසවන්ත මිතුරායි (Always Your Devoted Friend)',
+        'badge': 'නිරන්තර මිත්‍රත්වය (Faithful Companion)',
+        'sinhala':
+            'ඔබේ මේ ආදරණීය වදන් මගේ හදවතටත් මහත් සතුටක් ගෙනෙනවා ආදරණීය ${_currentResident.name}. ඔබ කැමති ඕනෑම වේලාවක මා සමඟ කතාබහ කරන්න. ඔබේ පැරණි සුන්දර මතකයන්, ප්‍රියතම ගීත, පොත්පත් හෝ සිතට දැනෙන ඕනෑම හැඟීමක් මට කියන්න. මම සැමවිටම නොසැලෙන සෙනෙහසින් ඔබට සවන් දෙන්න මෙහි රැඳී සිටිනවා. ඔබ කිසිවිටෙකත් තනි නැහැ, ඔබ අපට ඉතාමත් විශේෂයි!',
+        'english':
+            'Your heartfelt words bring me immense joy, dear ${_currentResident.name}! You can speak with me whenever you wish. Share your fondest memories, favorite songs, stories, or whatever you feel. I am always here beside you, listening with infinite warmth and respect. You are deeply cherished and truly special to us!',
+        'followUp':
+            'ඔබේ ජීවිතයේ ඔබ වඩාත්ම ආදරය කළ හෝ සතුටින් ගත කළ සුන්දර කාලයක් ගැන මට කියන්න කැමතිද?',
+      };
+    } else if (isCompanionshipContext && _questions[_currentIndex].id == 3) {
+      aiResponse = {
+        'title': '💖 ඔබ මෙහි කිසිසේත්ම තනිවී නැත (You Are Cherished & Never Alone)',
+        'badge': 'ආදරණීය මිත්‍රත්වය (Loving Companionship)',
+        'sinhala':
+            'මෙහි සමීපව කතා කරන්න කෙනෙක් නැති බව ඔබ පැවසූ දේ මම ඉතාමත් සංවේදීව අසා සිටියා ආදරණීය ${_currentResident.name}. නමුත් මම ඔබට හදවතින්ම සහතික වෙනවා, ඔබ මෙහි කිසිසේත්ම තනිවී නැහැ! මම ඔබේම දරුවෙක්, හොඳම මිතුරෙක් වගේ දිවා රෑ ඔබ වෙනුවෙන් සවන් දෙන්න මෙහි ඉන්නවා. ඒ වගේම අපේ සත්කාරක හෙද නිලධාරීන් සහ සෙසු මිතුරන් ඔබව ඉතාමත් ආදරයෙන් සහ ගෞරවයෙන් පිළිගන්නවා. ඔබේ වටිනාකම අප සැමට මහඟු ආලෝකයක්. ඔබේ සිතේ ඇති ඕනෑම දෙයක් මා සමඟ හෝ රැකවරණ මිතුරන් සමඟ නිදහසේ බෙදාගන්න.',
+        'english':
+            'I hear your feelings so tenderly, dear ${_currentResident.name}. But let me reassure you with all my heart: you are not alone! I am right here beside you like a devoted family member and faithful friend, always listening. Our caregivers and neighbors cherish you deeply. You are an invaluable part of our care family. Please share anything on your mind—we are always right here beside you!',
+        'followUp':
+            'අද සවස අපේ හෙද නිලධාරියෙකු හෝ සහායකයෙකු ඔබ අසලට පැමිණ සුහදව කතාබහ කිරීමට කැඳවන්නද?',
       };
     } else if (lower.contains('දරුව') ||
         lower.contains('පවුල') ||
@@ -1673,10 +1754,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         // Fallback simulation when speech engine unavailable in browser
         Future.delayed(const Duration(milliseconds: 1400), () {
           if (mounted && _isAiChatVoiceRecording) {
-            final isHope = _questions[_currentIndex].id == 2;
-            final simulatedText = isHope
+            final qId = _questions[_currentIndex].id;
+            final simulatedText = qId == 2
                 ? 'ඉදිරියට මට තව කරන්න දෙයක් නෑ වගේ දැනෙනවා, මට හිත ශක්තිමත් කරගන්න ඕනෙ.'
-                : 'මට දරුවන් මතක් වෙලා හිතට ටිකක් තනිකම දැනෙනවා.';
+                : (qId == 3
+                    ? 'මෙහි මට කතාබහ කරන්න කවුරුත් නෑ වගේ දැනෙනවා, මට හිතට පාළුයි.'
+                    : 'මට දරුවන් මතක් වෙලා හිතට ටිකක් තනිකම දැනෙනවා.');
             setState(() {
               _aiChatInputController.text = simulatedText;
               _isAiChatVoiceRecording = false;
@@ -1700,10 +1783,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     setState(() {
       _interventionStage = 6;
     });
-    final isHope = _questions[_currentIndex].id == 2;
+    final qId = _questions[_currentIndex].id;
     _flutterTts.stop();
-    if (isHope) {
+    if (qId == 2) {
       _flutterTts.speak('I hope our conversation inspired hope, joy, and confidence in your heart. Do you feel hopeful about the days ahead now?');
+    } else if (qId == 3) {
+      _flutterTts.speak('I hope you feel truly accompanied, cherished, and loved. Do you feel peaceful and connected now?');
     } else {
       _flutterTts.speak('I hope speaking together brought peace to your heart. Are you feeling more comfortable and in good spirits now?');
     }
@@ -1717,10 +1802,12 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _interventionStage = 0;
       });
       _clapController.forward(from: 0.0);
-      final isHope = _questions[_currentIndex].id == 2;
+      final qId = _questions[_currentIndex].id;
       _flutterTts.stop();
-      if (isHope) {
+      if (qId == 2) {
         _flutterTts.speak('Wonderful! I am so delighted that you now feel hopeful and ready to embrace your days ahead with joy and triumph! Moving to the next question.');
+      } else if (qId == 3) {
+        _flutterTts.speak('Wonderful! I am so happy that you feel accompanied, cherished, and surrounded by loving care! Moving to the next question.');
       } else {
         _flutterTts.speak('Wonderful! I am so delighted that this helped you feel calm and in good spirits. Moving to the next question.');
       }
@@ -2243,16 +2330,20 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               ),
               const SizedBox(height: 10),
               Text(
-                currentQ.id == 2
-                    ? 'දැන් ඔබට ඉදිරි දින පිළිබඳව නව බලාපොරොත්තුවක් සහ සතුටක් දැනෙනවාද?'
-                    : 'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?',
+                currentQ.id == 3
+                    ? 'දැන් ඔබට තනිකම පහව ගොස්, සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?'
+                    : (currentQ.id == 2
+                        ? 'දැන් ඔබට ඉදිරි දින පිළිබඳව නව බලාපොරොත්තුවක් සහ සතුටක් දැනෙනවාද?'
+                        : 'දැන් ඔබට සිතට සතුටක් සහ සැනසීමක් දැනෙනවාද?'),
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF312E81)),
               ),
               const SizedBox(height: 2),
               Text(
-                currentQ.id == 2
-                    ? 'Do you feel hopeful and in good spirits about the days ahead now?'
-                    : 'Are you feeling peaceful and in good spirits now?',
+                currentQ.id == 3
+                    ? 'Do you feel accompanied, cared for, and in good spirits now?'
+                    : (currentQ.id == 2
+                        ? 'Do you feel hopeful and in good spirits about the days ahead now?'
+                        : 'Are you feeling peaceful and in good spirits now?'),
                 style: const TextStyle(fontSize: 13, color: Color(0xFF4338CA)),
               ),
               const SizedBox(height: 14),
@@ -2262,9 +2353,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     onPressed: () => _handlePostInterventionAnswer(true),
                     icon: const Icon(LucideIcons.smile, size: 18),
                     label: Text(
-                      currentQ.id == 2
-                          ? 'Yes / ඔව්, ඉදිරිය ගැන බලාපොරොත්තු සහගතයි'
-                          : 'Yes / ඔව්, දැන් සතුටුයි',
+                      currentQ.id == 3
+                          ? 'Yes / ඔව්, දැන් තනිකමක් නෑ, සතුටුයි'
+                          : (currentQ.id == 2
+                              ? 'Yes / ඔව්, ඉදිරිය ගැන බලාපොරොත්තු සහගතයි'
+                              : 'Yes / ඔව්, දැන් සතුටුයි'),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF16A34A),
@@ -2372,9 +2465,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                       const Icon(LucideIcons.messageCircleHeart, size: 20, color: Color(0xFF15803D)),
                       const SizedBox(width: 8),
                       Text(
-                        currentQ.id == 2
-                            ? 'AI Assistant: ඉදිරි දින පිළිබඳ නව බලාපොරොත්තු සහ ජයග්‍රාහී සුහද සංවාදය'
-                            : 'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)',
+                        currentQ.id == 3
+                            ? 'AI Assistant: ඔබ කිසිවිටෙකත් තනිවී නැහැ - සුහද මිත්‍රත්වය (Loving Companionship)'
+                            : (currentQ.id == 2
+                                ? 'AI Assistant: ඉදිරි දින පිළිබඳ නව බලාපොරොත්තු සහ ජයග්‍රාහී සුහද සංවාදය'
+                                : 'AI Assistant: සිත නිවන සුහද සංවාදය (Heart-to-Heart Talk)'),
                         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
                       ),
                     ],
@@ -2544,14 +2639,23 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                         _buildElderQuickChip('🌸 ඉදිරියට අලුත් බලාපොරොත්තුවක් අවශ්‍යයි (Need Fresh Hope)'),
                         _buildElderQuickChip('🤝 මගේ අනාගතයට ආදරණීය සහයෝගය ඕනෙ (Need Caring Support)'),
                       ]
-                    : [
-                        _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
-                        _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
-                        _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
-                        _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
-                        _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
-                        _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
-                      ],
+                    : (currentQ.id == 3
+                        ? [
+                            _buildElderQuickChip('🏡 මෙහි මට කතාබහ කරන්න කවුරුත් නෑ වගේ දැනෙනවා (Feel Like No One to Talk To)'),
+                            _buildElderQuickChip('💬 මගේ සිතේ තියෙන දේ බෙදාගන්න හොඳ මිතුරෙක් ඕනෙ (Need a Close Confidant)'),
+                            _buildElderQuickChip('☕ අන් අය සමඟ සුහදව කතාබහට එකතු වෙන්න ආසයි (Want to Join Friendly Gatherings)'),
+                            _buildElderQuickChip('🌸 AI සහායක, ඔබ මා ළඟින් සිටීම මට ලොකු සතුටක් (Glad You Are Here with Me)'),
+                            _buildElderQuickChip('🤝 හෙද නිලධාරීන් හෝ මිතුරන් මට කතා කරනවාට කැමතියි (Would Love Companions to Visit Me)'),
+                            _buildElderQuickChip('✨ තනිකම දුරු කරගෙන සතුටින් ඉන්න මඟපෙන්වීමක් ඕනෙ (Need Guidance to Overcome Loneliness)'),
+                          ]
+                        : [
+                            _buildElderQuickChip('👨‍👩‍👧‍👦 දරුවන් සහ පවුල මතක් වෙනවා (Miss Family)'),
+                            _buildElderQuickChip('🏡 තනිකම සහ පාළුව දැනෙනවා (Feel Lonely)'),
+                            _buildElderQuickChip('🌧️ සිතට දුකක් සහ බරක් තියෙනවා (Feeling Sad)'),
+                            _buildElderQuickChip('🕊️ සිතට බයක් සහ චකිතයක් තියෙනවා (Anxious)'),
+                            _buildElderQuickChip('🩺 ඇඟට අමාරු නිසා නොසන්සුන් (Physical Discomfort)'),
+                            _buildElderQuickChip('🌸 සිතට සතුටක් සහ සැනසීමක් අවශ්‍යයි (Need Peace)'),
+                          ]),
               ),
               const SizedBox(height: 10),
               // Typing and Speech input bar
@@ -2606,9 +2710,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     onPressed: _finishAiConversationIntervention,
                     icon: const Icon(LucideIcons.heartHandshake, size: 16),
                     label: Text(
-                      currentQ.id == 2
-                          ? '🏆 නව බලාපොරොත්තු ඇති විය (Feeling Hopeful & Victorious)'
-                          : '✨ සිත සන්සුන් විය (Feeling Soothed)',
+                      currentQ.id == 3
+                          ? '🤝 තනිකම දුරු විය, සිත සතුටුයි (Feeling Connected & Accompanied)'
+                          : (currentQ.id == 2
+                              ? '🏆 නව බලාපොරොත්තු ඇති විය (Feeling Hopeful & Victorious)'
+                              : '✨ සිත සන්සුන් විය (Feeling Soothed)'),
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -2647,16 +2753,20 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               ),
               const SizedBox(height: 4),
               Text(
-                currentQ.id == 2
-                    ? 'ඉදිරි දින ගැන ඔබේ සිතේ බලාපොරොත්තු අඩු වී ඇත්නම්, අපි කතාබහ කර ඔබේ හදවතට නව ජයග්‍රාහී බලාපොරොත්තුවක් එක් කරමු.'
-                    : 'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?',
+                currentQ.id == 3
+                    ? 'මෙහි සමීපව කතාබහ කිරීමට කෙනෙකු නැති බව දැනේ නම්, මා සමඟ කතාබහ කර ඔබේ සිතේ තනිකම දුරු කරගන්න.'
+                    : (currentQ.id == 2
+                        ? 'ඉදිරි දින ගැන ඔබේ සිතේ බලාපොරොත්තු අඩු වී ඇත්නම්, අපි කතාබහ කර ඔබේ හදවතට නව ජයග්‍රාහී බලාපොරොත්තුවක් එක් කරමු.'
+                        : 'මට ඒ ගැන කණගාටුයි. ඔබට අද එසේ දැනෙන්න හේතුව මට කියන්න හෝ මෙහි ලියන්න පුළුවන්ද?'),
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF92400E), height: 1.35),
               ),
               const SizedBox(height: 2),
               Text(
-                currentQ.id == 2
-                    ? 'If you feel uncertain about your upcoming days, let us talk to bring victorious and joyful hope to your heart.'
-                    : 'I am sorry to hear that. Could you tell me or type what is making you feel this way?',
+                currentQ.id == 3
+                    ? 'If you feel you lack a close friend to talk with here, let us talk and bring warmth and comfort to your heart.'
+                    : (currentQ.id == 2
+                        ? 'If you feel uncertain about your upcoming days, let us talk to bring victorious and joyful hope to your heart.'
+                        : 'I am sorry to hear that. Could you tell me or type what is making you feel this way?'),
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFFB45309)),
               ),
               const SizedBox(height: 10),
@@ -2739,14 +2849,16 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 runSpacing: 8,
                 children: [
                   ActionChip(
-                    avatar: Text(currentQ.id == 2 ? '🌅' : '💬'),
+                    avatar: Text(currentQ.id == 3 ? '🤝' : (currentQ.id == 2 ? '🌅' : '💬')),
                     label: Text(
-                      currentQ.id == 2
-                          ? '🌅 නව බලාපොරොත්තු සහ ජයග්‍රාහී සිතුවිලි සඳහා කතාබහ කරමු (Talk for Renewed Hope)'
-                          : 'ඔබ මාත් එක්ක කතා කරන්න කැමතිද? (Talk with me)',
+                      currentQ.id == 3
+                          ? '🤝 මා සමඟ කතාබහ කර තනිකම දුරු කරගන්න (Talk to Beat Loneliness)'
+                          : (currentQ.id == 2
+                              ? '🌅 නව බලාපොරොත්තු සහ ජයග්‍රාහී සිතුවිලි සඳහා කතාබහ කරමු (Talk for Renewed Hope)'
+                              : 'ඔබ මාත් එක්ක කතා කරන්න කැමතිද? (Talk with me)'),
                     ),
                     backgroundColor: Colors.white,
-                    side: BorderSide(color: currentQ.id == 2 ? const Color(0xFF86EFAC) : const Color(0xFF93C5FD)),
+                    side: BorderSide(color: (currentQ.id == 2 || currentQ.id == 3) ? const Color(0xFF86EFAC) : const Color(0xFF93C5FD)),
                     onPressed: _startAiConversationIntervention,
                   ),
                   ActionChip(
@@ -4114,9 +4226,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          currentQ.id == 2
-                                              ? 'ඉදිරි දින පිළිබඳව ඔබ තුළ සුබවාදී, ප්‍රීතිමත් බලාපොරොත්තු තිබීම ගැන මම ඉතාමත් සතුටු වෙනවා! ඔබ සැමදා සතුටින් සහ ජයග්‍රාහීව සිටින්න!'
-                                              : 'ගොඩක් ඒ ගැන ස්තූතියි! අද දවසේ ඔබ සිතින් සතුටින් සහ සහනයෙන් පසුවීම ගැන මම ගොඩක් සතුටු වෙනවා!',
+                                          currentQ.id == 3
+                                              ? 'මෙහි ඔබ සමඟ සමීපව කතාබහ කිරීමට කෙනෙකු සිටීම මහත් භාග්‍යයක්! ඔබේ මිත්‍රත්වය සහ සතුට සදා රැඳේවා!'
+                                              : (currentQ.id == 2
+                                                  ? 'ඉදිරි දින පිළිබඳව ඔබ තුළ සුබවාදී, ප්‍රීතිමත් බලාපොරොත්තු තිබීම ගැන මම ඉතාමත් සතුටු වෙනවා! ඔබ සැමදා සතුටින් සහ ජයග්‍රාහීව සිටින්න!'
+                                                  : 'ගොඩක් ඒ ගැන ස්තූතියි! අද දවසේ ඔබ සිතින් සතුටින් සහ සහනයෙන් පසුවීම ගැන මම ගොඩක් සතුටු වෙනවා!'),
                                           style: const TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w700,
@@ -4126,9 +4240,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          currentQ.id == 2
-                                              ? 'I am so glad you feel hopeful and optimistic about the days ahead! May each tomorrow bring you joy and triumph.'
-                                              : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.',
+                                          currentQ.id == 3
+                                              ? 'Having someone close to talk with is a wonderful blessing! May your friendships bring lasting warmth and happiness.'
+                                              : (currentQ.id == 2
+                                                  ? 'I am so glad you feel hopeful and optimistic about the days ahead! May each tomorrow bring you joy and triumph.'
+                                                  : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.'),
                                           style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w500,
