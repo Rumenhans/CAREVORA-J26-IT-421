@@ -90,6 +90,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   String _selectedSongTitle = 'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)';
   bool _isPlayingMusic = false;
   int _songPlaybackSeconds = 0;
+  static const int _musicTotalDurationSeconds = 300; // At least 5 minutes (300 seconds)
   Timer? _songTimer;
   bool _caregiverNotified = false;
 
@@ -1260,7 +1261,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         setState(() {
           _songPlaybackSeconds++;
         });
-        if (_songPlaybackSeconds >= 45) {
+        if (_songPlaybackSeconds >= _musicTotalDurationSeconds) {
           _finishMusicIntervention();
         }
       }
@@ -1281,7 +1282,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           setState(() {
             _songPlaybackSeconds++;
           });
-          if (_songPlaybackSeconds >= 45) {
+          if (_songPlaybackSeconds >= _musicTotalDurationSeconds) {
             _finishMusicIntervention();
           }
         }
@@ -1500,7 +1501,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               Row(
                 children: [
                   ElevatedButton.icon(
-                    onPressed: _selectQuietPath,
+                    onPressed: () => _startMusicIntervention('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)'),
                     icon: const Icon(LucideIcons.music, size: 16),
                     label: const Text('ඔවුන් එනතුරු සන්සුන් සංගීතයකට සවන් දෙන්න'),
                     style: ElevatedButton.styleFrom(
@@ -1664,7 +1665,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 children: [
                   _buildSongChip('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)'),
                   _buildSongChip('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව'),
+                  _buildSongChip('සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)'),
+                  _buildSongChip('වික්ටර් රත්නායක - සිත නිවන සෙවන (Victor Ratnayake)'),
+                  _buildSongChip('නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)'),
                   _buildSongChip('සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute)'),
+                  _buildSongChip('සොබාදහමේ සන්සුන් නාදය (Peaceful Nature Streams)'),
                 ],
               ),
               const SizedBox(height: 14),
@@ -1712,7 +1717,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      '0:${_songPlaybackSeconds.toString().padLeft(2, '0')} / 0:45',
+                      '${_songPlaybackSeconds ~/ 60}:${(_songPlaybackSeconds % 60).toString().padLeft(2, '0')} / ${_musicTotalDurationSeconds ~/ 60}:${(_musicTotalDurationSeconds % 60).toString().padLeft(2, '0')}',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.muted),
                     ),
                   ],
