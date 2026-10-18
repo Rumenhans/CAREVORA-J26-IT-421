@@ -1859,6 +1859,18 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               color: AppColors.navy,
             ),
           ),
+          if (currentQ.promptSinhala.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              currentQ.promptSinhala,
+              style: AppTextStyles.h2.copyWith(
+                fontSize: 20,
+                height: 1.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -3601,6 +3613,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   void _showResultDialog(CognitiveSubmissionResult result) {
+    // Risk level must not be shown to Elder users
+    final bool hideRiskLevel = ref.read(authProvider).state.isElder;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -3740,6 +3754,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                                 ),
                               ],
                             ),
+                            if (!hideRiskLevel)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
@@ -3769,7 +3784,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             height: 1.35,
                           ),
                         ),
-                        if (result.probabilities != null) ...[
+                        if (!hideRiskLevel && result.probabilities != null) ...[
                           const SizedBox(height: 8),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,

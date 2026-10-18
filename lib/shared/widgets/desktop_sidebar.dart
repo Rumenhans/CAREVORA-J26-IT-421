@@ -61,12 +61,13 @@ class DesktopSidebar extends ConsumerWidget {
                   label: 'Overview',
                   route: '/dashboard',
                 ),
-                _buildNavItem(
-                  context,
-                  icon: LucideIcons.users,
-                  label: authState.isElder ? 'My Health Record' : 'Resident Directory',
-                  route: '/dashboard/residents',
-                ),
+                if (!authState.isElder)
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.users,
+                    label: authState.isElder ? 'My Health Record' : 'Resident Directory',
+                    route: '/dashboard/residents',
+                  ),
                 _buildNavItem(
                   context,
                   icon: LucideIcons.brain,
@@ -97,12 +98,13 @@ class DesktopSidebar extends ConsumerWidget {
                   label: 'Reports & Analytics',
                   route: '/dashboard/reports',
                 ),
-                _buildNavItem(
-                  context,
-                  icon: LucideIcons.clipboardList,
-                  label: 'Care Plans',
-                  route: '/dashboard/care-plans',
-                ),
+                if (!authState.isElder)
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.clipboardList,
+                    label: 'Care Plans',
+                    route: '/dashboard/care-plans',
+                  ),
                 if (!authState.isElder) ...[
                   _buildNavItem(
                     context,
