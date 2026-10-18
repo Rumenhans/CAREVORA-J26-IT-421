@@ -1,29 +1,164 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../data/mock/mock_carevora_data.dart';
 import '../../../data/models/carevora_models.dart';
+import '../../assessment/application/cognitive_assessment_service.dart';
+import '../../auth/application/auth_controller.dart';
 
-class AlertsNotificationsPage extends StatefulWidget {
+class AlertsNotificationsPage extends ConsumerStatefulWidget {
   const AlertsNotificationsPage({super.key});
 
   @override
-  State<AlertsNotificationsPage> createState() => _AlertsNotificationsPageState();
+  ConsumerState<AlertsNotificationsPage> createState() => _AlertsNotificationsPageState();
 }
 
-class _AlertsNotificationsPageState extends State<AlertsNotificationsPage> {
+class _AlertsNotificationsPageState extends ConsumerState<AlertsNotificationsPage> {
   String _selectedFilter = 'All';
   final Set<String> _acknowledgedAlertIds = {};
+  bool _hasSynced = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncCognitiveAlerts();
+    });
+  }
+
+  Future<void> _syncCognitiveAlerts() async {
+    if (_hasSynced) return;
+    _hasSynced = true;
+    try {
+      final authState = ref.read(authProvider).state;
+      if (authState.isElder) return;
+
+      final residents = await CognitiveAssessmentService.fetchResidents(token: authState.token);
+      if (residents.isEmpty) return;
+
+      for (final res in residents) {
+        final history = await CognitiveAssessmentService.fetchHistory(
+          residentId: res.id,
+          token: authState.token,
+        );
+        if (history.isEmpty) continue;
+
+        final latest = history.first;
+        final bool isHighRisk =
+            (latest.riskLevel?.toLowerCase().contains('high') ?? false) ||
+            (latest.mlPrediction?.toLowerCase().contains('high') ?? false) ||
+            (latest.alertTriggered == true) ||
+            (latest.acrfScore != null && latest.acrfScore! < 50.0);
+
+        MockCarevoraData.alerts.removeWhere((a) =>
+            a.id.startsWith('ALT-COG') &&
+            (a.residentName == res.name || a.residentName == latest.residentName));
+
+        if (isHighRisk) {
+          final scoreVal = latest.acrfScore ?? 0.0;
+          final scoreText = '${scoreVal.toStringAsFixed(1)}/100';
+          final roomNo = res.roomNumber.isNotEmpty ? res.roomNumber : '105';
+          final resName = res.name.isNotEmpty ? res.name : latest.residentName;
+
+          String formattedTime = 'Recent Assessment';
+          if (latest.createdAt != null && latest.createdAt!.isNotEmpty) {
+            try {
+              final parsedDate = DateTime.parse(latest.createdAt!);
+              formattedTime = 'Today, ${parsedDate.hour.toString().padLeft(2, '0')}:${parsedDate.minute.toString().padLeft(2, '0')}';
+            } catch (_) {
+              formattedTime = latest.createdAt!;
+            }
+          }
+
+          MockCarevoraData.alerts.insert(
+            0,
+            AlertItem(
+              id: 'ALT-COG-REAL-${res.id}-${latest.id}',
+              title: 'High Cognitive Impairment Risk: $resName',
+              description:
+                  'Cognitive assessment score ($scoreText) indicates acute cognitive decline risk for $resName in room $roomNo. Urgent caregiver review and clinical attention required.',
+              severity: 'High',
+              timestamp: formattedTime,
+              residentName: resName,
+              roomNo: roomNo,
+              residentAge: res.age,
+              residentGender: res.gender,
+              currentStatus: 'High Cognitive Risk',
+              cognitiveScore: scoreVal,
+            ),
+          );
+        }
+      }
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider).state;
+
+    // Clinical alerts and facility notifications are restricted to caregivers and staff
+    if (authState.isElder) {
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          margin: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(LucideIcons.shieldCheck, size: 48, color: AppColors.primary),
+              const SizedBox(height: 16),
+              const Text(
+                'Clinical Alerts are Staff-Only',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.navy),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Alerts and clinical notifications are managed by caregivers and medical attendants.',
+                style: TextStyle(fontSize: 13, color: AppColors.muted),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () => context.go('/dashboard'),
+                icon: const Icon(LucideIcons.arrowLeft, size: 16),
+                label: const Text('Return to Overview'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final caregiverName = (authState.userName != null && authState.userName!.isNotEmpty)
+        ? authState.userName!
+        : 'Pasidi Sarangi';
+    final careHomeName = (authState.elderHomeName != null && authState.elderHomeName!.isNotEmpty)
+        ? authState.elderHomeName!
+        : 'Serenity Elder Home';
+
     final alerts = MockCarevoraData.alerts;
     final filteredAlerts = alerts.where((a) {
       if (_selectedFilter == 'Urgent & High') {
         return a.severity.toLowerCase() == 'high' || a.title.contains('Urgent') || a.title.contains('Doctor');
       } else if (_selectedFilter == 'Caregiver Dispatches') {
-        return a.title.contains('Caregiver') || a.title.contains('Doctor');
+        return a.title.contains('Caregiver') || a.title.contains('Doctor') || a.severity.toLowerCase() == 'high';
       }
       return true;
     }).toList();
@@ -118,8 +253,8 @@ class _AlertsNotificationsPageState extends State<AlertsNotificationsPage> {
               const SizedBox(width: 16),
               _buildMetricCard(
                 title: 'Assigned Staff',
-                value: 'Nurse Seetha N. (RN)',
-                subtitle: 'Room 101 On-duty Attendant',
+                value: caregiverName,
+                subtitle: '$careHomeName On-duty Caregiver',
                 icon: LucideIcons.userCheck,
                 color: const Color(0xFF0D9488),
                 bgColor: const Color(0xFFCCFBF1),
@@ -160,7 +295,7 @@ class _AlertsNotificationsPageState extends State<AlertsNotificationsPage> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: filteredAlerts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              separatorBuilder: (context, index) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final alert = filteredAlerts[index];
                 final isUrgent = alert.severity.toLowerCase() == 'high' || alert.title.contains('Urgent');
@@ -249,6 +384,86 @@ class _AlertsNotificationsPageState extends State<AlertsNotificationsPage> {
                               alert.description,
                               style: const TextStyle(fontSize: 13, color: AppColors.body, height: 1.4),
                             ),
+                            if (alert.residentName != null || alert.roomNo != null) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceSecondary,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    if (alert.residentName != null)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(LucideIcons.user, size: 13, color: AppColors.primary),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            alert.residentName!,
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.navy),
+                                          ),
+                                        ],
+                                      ),
+                                    if (alert.roomNo != null)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(LucideIcons.doorClosed, size: 13, color: AppColors.muted),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Room ${alert.roomNo}',
+                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.body),
+                                          ),
+                                        ],
+                                      ),
+                                    if (alert.residentAge != null)
+                                      Text(
+                                        'Age: ${alert.residentAge}${alert.residentGender != null ? ' (${alert.residentGender})' : ''}',
+                                        style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                                      ),
+                                    if (alert.currentStatus != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: alert.currentStatus!.toLowerCase().contains('high')
+                                              ? const Color(0xFFFEE2E2)
+                                              : const Color(0xFFFEF3C7),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          alert.currentStatus!,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: alert.currentStatus!.toLowerCase().contains('high')
+                                                ? const Color(0xFFDC2626)
+                                                : const Color(0xFFB45309),
+                                          ),
+                                        ),
+                                      ),
+                                    if (alert.cognitiveScore != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.lavenderBg,
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: AppColors.lilac),
+                                        ),
+                                        child: Text(
+                                          'Cognitive Score: ${alert.cognitiveScore!.toStringAsFixed(1)} / 100',
+                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             if (isUrgent) ...[
                               const SizedBox(height: 10),
                               Container(
@@ -260,12 +475,12 @@ class _AlertsNotificationsPageState extends State<AlertsNotificationsPage> {
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
-                                  children: const [
-                                    Icon(LucideIcons.userCheck, size: 14, color: Color(0xFFDC2626)),
-                                    SizedBox(width: 6),
+                                  children: [
+                                    const Icon(LucideIcons.userCheck, size: 14, color: Color(0xFFDC2626)),
+                                    const SizedBox(width: 6),
                                     Text(
-                                      'Assigned Caregiver: Nurse Seetha N. (RN) Dispatched',
-                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF991B1B)),
+                                      'Assigned Caregiver: $caregiverName Dispatched',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF991B1B)),
                                     ),
                                   ],
                                 ),

@@ -68,6 +68,12 @@ class AlertItem {
   final String description;
   final String severity; // High, Moderate, Reminder
   final String timestamp;
+  final String? residentName;
+  final String? roomNo;
+  final int? residentAge;
+  final String? residentGender;
+  final String? currentStatus;
+  final double? cognitiveScore;
 
   const AlertItem({
     required this.id,
@@ -75,6 +81,12 @@ class AlertItem {
     required this.description,
     required this.severity,
     required this.timestamp,
+    this.residentName,
+    this.roomNo,
+    this.residentAge,
+    this.residentGender,
+    this.currentStatus,
+    this.cognitiveScore,
   });
 }
 

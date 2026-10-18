@@ -13,6 +13,8 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../../core/responsive/responsive_builder.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../data/mock/mock_carevora_data.dart';
+import '../../../data/models/carevora_models.dart';
 import '../../auth/application/auth_controller.dart';
 import '../application/cognitive_assessment_service.dart';
 import '../domain/cognitive_scoring.dart';
@@ -969,6 +971,78 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         payload: payload,
         token: token,
       );
+
+      final bool isHighRisk =
+          (result.riskLevel?.toLowerCase().contains('high') ?? false) ||
+          (result.mlPrediction?.toLowerCase().contains('high') ?? false) ||
+          (result.alertTriggered == true) ||
+          (result.acrfScore != null && result.acrfScore! < 50.0);
+
+      final residentName = result.residentName.isNotEmpty
+          ? result.residentName
+          : (_resident?.name ?? 'Resident');
+
+      // Clear any prior cognitive alert for this resident so alerts reflect latest assessment
+      MockCarevoraData.alerts.removeWhere((a) =>
+          a.id.startsWith('ALT-COG') &&
+          (a.residentName == residentName || a.residentName == _resident?.name));
+
+      if (isHighRisk) {
+        final alertId = 'ALT-COG-${DateTime.now().millisecondsSinceEpoch}';
+        final scoreText = result.acrfScore != null
+            ? '${result.acrfScore!.toStringAsFixed(1)}/100'
+            : 'High Risk';
+
+        // 1. Dispatch alert notification to facility alerts for caregivers
+        MockCarevoraData.alerts.insert(
+          0,
+          AlertItem(
+            id: alertId,
+            title: 'High Cognitive Impairment Risk: $residentName',
+            description:
+                'Cognitive assessment score ($scoreText) indicates high risk of cognitive impairment. Immediate caregiver clinical review and close monitoring required.',
+            severity: 'High',
+            timestamp: 'Just now',
+            residentName: residentName,
+            roomNo: _resident?.roomNumber ?? '105',
+            residentAge: _resident?.age ?? effectiveAge,
+            residentGender: _resident?.gender ?? 'Resident',
+            currentStatus: 'High Cognitive Risk',
+            cognitiveScore: result.acrfScore,
+          ),
+        );
+
+        // 2. Display immediate in-app notification to caregiver (staff only, not elder)
+        final isElderUser = ref.read(authProvider).state.isElder;
+        if (mounted && !isElderUser) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(LucideIcons.alertTriangle,
+                      color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '🚨 High Cognitive Risk Alert: Clinical notification sent to caregiver for $residentName.',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFFDC2626),
+              duration: const Duration(seconds: 6),
+              behavior: SnackBarBehavior.floating,
+              action: SnackBarAction(
+                label: 'View Alerts',
+                textColor: Colors.white,
+                onPressed: () => context.go('/dashboard/alerts'),
+              ),
+            ),
+          );
+        }
+      }
 
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -3615,6 +3689,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   void _showResultDialog(CognitiveSubmissionResult result) {
     // Risk level must not be shown to Elder users
     final bool hideRiskLevel = ref.read(authProvider).state.isElder;
+    final bool isHighRisk =
+        (result.riskLevel?.toLowerCase().contains('high') ?? false) ||
+        (result.mlPrediction?.toLowerCase().contains('high') ?? false) ||
+        (result.alertTriggered == true) ||
+        (result.acrfScore != null && result.acrfScore! < 50.0);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -3784,6 +3863,37 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             height: 1.35,
                           ),
                         ),
+                        if (!hideRiskLevel && isHighRisk) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEE2E2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFFCA5A5)),
+                            ),
+                            child: Row(
+                              children: const [
+                                Icon(LucideIcons.bellRing,
+                                    size: 16, color: Color(0xFFDC2626)),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Caregiver Notification Sent: High risk alert logged to Clinical Alerts & Notifications dashboard.',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF991B1B),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         if (!hideRiskLevel && result.probabilities != null) ...[
                           const SizedBox(height: 8),
                           Row(

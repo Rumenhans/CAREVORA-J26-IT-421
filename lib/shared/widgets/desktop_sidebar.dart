@@ -86,12 +86,13 @@ class DesktopSidebar extends ConsumerWidget {
                   label: 'Metabolic Health',
                   route: '/dashboard/metabolic',
                 ),
-                _buildNavItem(
-                  context,
-                  icon: LucideIcons.bell,
-                  label: 'Alerts & Notifications',
-                  route: '/dashboard/alerts',
-                ),
+                if (!authState.isElder)
+                  _buildNavItem(
+                    context,
+                    icon: LucideIcons.bell,
+                    label: 'Alerts & Notifications',
+                    route: '/dashboard/alerts',
+                  ),
                 _buildNavItem(
                   context,
                   icon: LucideIcons.barChart3,
