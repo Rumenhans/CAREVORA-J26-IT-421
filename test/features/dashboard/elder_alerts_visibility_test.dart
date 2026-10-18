@@ -344,5 +344,45 @@ void main() {
       expect(find.text('Room 204'), findsOneWidget);
       expect(find.text('Cognitive Score: 42.5 / 100'), findsOneWidget);
     });
+
+    testWidgets('10. Serenity Elder Home high risk cognitive alerts display Senarath and James Perera with details', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 1200));
+
+      MockCarevoraData.alerts.removeWhere((a) => a.id.startsWith('ALT-COG'));
+
+      final router = GoRouter(
+        initialLocation: '/dashboard/alerts',
+        routes: [
+          GoRoute(
+            path: '/dashboard/alerts',
+            builder: (context, state) => const Scaffold(
+              body: AlertsNotificationsPage(),
+            ),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authProvider.overrideWith((ref) => MockCaregiverAuthNotifier()),
+          ],
+          child: MaterialApp.router(
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      tester.takeException();
+
+      expect(find.text('High Cognitive Impairment Risk: Senarath'), findsOneWidget);
+      expect(find.text('Room 101'), findsOneWidget);
+      expect(find.text('Cognitive Score: 41.3 / 100'), findsOneWidget);
+
+      expect(find.text('High Cognitive Impairment Risk: James Perera'), findsOneWidget);
+      expect(find.text('Room 25'), findsOneWidget);
+      expect(find.text('Cognitive Score: 48.8 / 100'), findsOneWidget);
+    });
   });
 }

@@ -245,6 +245,16 @@ class AuthNotifier extends ChangeNotifier {
         elderHomeId: 2,
         elderHomeName: 'Golden Sunset Eldercare',
       );
+    } else if ((normalizedEmail == 'ps@gmail.com' || normalizedEmail == 'pasidi.sarangi@carevora.com' || normalizedEmail == 'pasidi@carevora.com') &&
+        (password == '123456' || password == 'carevora123' || password == 'demo1234')) {
+      fallbackState = const AuthState(
+        isAuthenticated: true,
+        email: 'ps@gmail.com',
+        userName: 'Pasidi Sarangi',
+        role: UserRole.caregiver,
+        elderHomeId: 3,
+        elderHomeName: 'Serenity Elder Home',
+      );
     } else if (normalizedEmail == 'eleanor.vance@carevora.com' && (password == 'carevora_admin' || password == 'carevora123')) {
       fallbackState = const AuthState(
         isAuthenticated: true,

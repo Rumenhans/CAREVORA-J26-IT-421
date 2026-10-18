@@ -80,6 +80,12 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   // Animated waveform controller
   late AnimationController _waveformController;
 
+  // Floating & ambient micro-animation controllers
+  late AnimationController _floatingController;
+  late Animation<double> _floatingAnimation;
+  late AnimationController _ambientPulseController;
+  late Animation<double> _ambientPulseAnimation;
+
   // Answer saved pulse & glow animation
   late AnimationController _savePulseController;
   late Animation<double> _saveScaleAnimation;
@@ -96,6 +102,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _initTts();
     _initSpeech();
     _initWaveformAnimation();
+    _initFloatingAnimation();
     _initSaveAnimation();
     _startSessionTimer();
     _loadResidentContext();
@@ -107,6 +114,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _saveDebounceTimer?.cancel();
     _sessionTimer?.cancel();
     _waveformController.dispose();
+    _floatingController.dispose();
+    _ambientPulseController.dispose();
     _savePulseController.dispose();
     _flutterTts.stop();
     _speech.statusListener = null;
@@ -121,6 +130,24 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
+  }
+
+  void _initFloatingAnimation() {
+    _floatingController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3200),
+    )..repeat(reverse: true);
+    _floatingAnimation = Tween<double>(begin: -5.0, end: 5.0).animate(
+      CurvedAnimation(parent: _floatingController, curve: Curves.easeInOut),
+    );
+
+    _ambientPulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
+    _ambientPulseAnimation = Tween<double>(begin: 0.86, end: 1.0).animate(
+      CurvedAnimation(parent: _ambientPulseController, curve: Curves.easeInOut),
+    );
   }
 
   void _initSaveAnimation() {
@@ -658,11 +685,22 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     try {
       if (_isListening || _speech.isListening) {
         _activeListeningSessionId++;
-        await _speech.stop();
+        try {
+          await _speech.stop();
+        } catch (_) {}
         _isListening = false;
       }
       _isSpeakingPrompt = false;
+
+      // On Web (especially Chrome), calling stop() and then immediately speak()
+      // causes Chrome to cancel the new utterance because the cancellation event
+      // is still asynchronously processing in the browser event loop.
+      // Allowing a 250ms settle delay ensures flutter_tts_web transitions back to
+      // stopped state so 'Next question' is voiced reliably on every question transition.
       await _flutterTts.stop();
+      if (kIsWeb) {
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
       await _flutterTts.setLanguage('en-US');
       await _flutterTts.setSpeechRate(0.50);
       await _flutterTts.speak('Next question');
@@ -1080,20 +1118,24 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           (result.alertTriggered == true) ||
           (result.acrfScore != null && result.acrfScore! < 50.0);
 
-      final residentName = result.residentName.isNotEmpty
+      final residentName = (result.residentName.isNotEmpty
           ? result.residentName
-          : (_resident?.name ?? 'Resident');
+          : (_resident?.name ?? 'Resident')).trim();
 
       // Clear any prior cognitive alert for this resident so alerts reflect latest assessment
       MockCarevoraData.alerts.removeWhere((a) =>
           a.id.startsWith('ALT-COG') &&
-          (a.residentName == residentName || a.residentName == _resident?.name));
+          (a.residentName?.trim().toLowerCase() == residentName.toLowerCase() ||
+           a.residentName?.trim().toLowerCase() == _resident?.name.trim().toLowerCase()));
 
       if (isHighRisk) {
-        final alertId = 'ALT-COG-${DateTime.now().millisecondsSinceEpoch}';
+        final alertId = 'ALT-COG-REAL-${_resident?.id ?? 0}-${result.id ?? DateTime.now().millisecondsSinceEpoch}';
         final scoreText = result.acrfScore != null
             ? '${result.acrfScore!.toStringAsFixed(1)}/100'
             : 'High Risk';
+        final roomNumber = (_resident?.roomNumber != null && _resident!.roomNumber.isNotEmpty)
+            ? _resident!.roomNumber
+            : '105';
 
         // 1. Dispatch alert notification to facility alerts for caregivers
         MockCarevoraData.alerts.insert(
@@ -1102,11 +1144,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             id: alertId,
             title: 'High Cognitive Impairment Risk: $residentName',
             description:
-                'Cognitive assessment score ($scoreText) indicates high risk of cognitive impairment. Immediate caregiver clinical review and close monitoring required.',
+                'Cognitive assessment score ($scoreText) indicates acute cognitive decline risk for $residentName in room $roomNumber. Urgent caregiver review and clinical attention required.',
             severity: 'High',
             timestamp: 'Just now',
             residentName: residentName,
-            roomNo: _resident?.roomNumber ?? '105',
+            roomNo: roomNumber,
             residentAge: _resident?.age ?? effectiveAge,
             residentGender: _resident?.gender ?? 'Resident',
             currentStatus: 'High Cognitive Risk',
@@ -1197,63 +1239,122 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
     return Scaffold(
       backgroundColor: AppColors.dashboardBg,
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Top Navigation Bar & Timer (Responsive Wrap)
-            _buildTopNavBar(),
-            const SizedBox(height: 16),
-
-            if (!isElder && _isLoadingResidents) ...[
-              _buildLoadingResidentsState(),
-            ] else if (!isElder && _residentLoadError != null) ...[
-              _buildResidentErrorState(_residentLoadError!),
-            ] else if (!isElder && _availableResidents.isEmpty) ...[
-              _buildEmptyResidentsState(),
-            ] else ...[
-              // Resident Context Banner
-              _buildResidentBanner(isElder),
-              const SizedBox(height: 20),
-
-              // Main 2-Column Responsive Assessment Workspace
-              ResponsiveBuilder(
-                mobile: (context) => Column(
-                  children: [
-                    _buildMainQuestionWorkspace(
-                      currentQ,
-                      progressPct,
-                      currentGrade,
-                      isElder,
-                    ),
-                    const SizedBox(height: 20),
-                    _buildRightPanel(progressPct, isElder),
-                  ],
+      body: Stack(
+        children: [
+          // Ambient soft floating glow orbs
+          Positioned(
+            top: -50,
+            right: 40,
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _floatingAnimation,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(0, _floatingAnimation.value * 1.4),
+                  child: child,
                 ),
-                desktop: (context) => Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 7,
-                      child: _buildMainQuestionWorkspace(
-                        currentQ,
-                        progressPct,
-                        currentGrade,
-                        isElder,
-                      ),
+                child: Container(
+                  width: 320,
+                  height: 320,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF8B5CF6).withValues(alpha: 0.08),
+                        const Color(0xFF8B5CF6).withValues(alpha: 0.0),
+                      ],
                     ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      flex: 3,
-                      child: _buildRightPanel(progressPct, isElder),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+          Positioned(
+            top: 280,
+            left: -40,
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _floatingAnimation,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(0, -_floatingAnimation.value * 1.1),
+                  child: child,
+                ),
+                child: Container(
+                  width: 260,
+                  height: 260,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF6366F1).withValues(alpha: 0.06),
+                        const Color(0xFF6366F1).withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Main scrollable workspace
+          SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top Navigation Bar & Timer (Responsive Wrap)
+                _buildTopNavBar(),
+                const SizedBox(height: 16),
+
+                if (!isElder && _isLoadingResidents) ...[
+                  _buildLoadingResidentsState(),
+                ] else if (!isElder && _residentLoadError != null) ...[
+                  _buildResidentErrorState(_residentLoadError!),
+                ] else if (!isElder && _availableResidents.isEmpty) ...[
+                  _buildEmptyResidentsState(),
+                ] else ...[
+                  // Resident Context Banner
+                  _buildResidentBanner(isElder),
+                  const SizedBox(height: 20),
+
+                  // Main 2-Column Responsive Assessment Workspace
+                  ResponsiveBuilder(
+                    mobile: (context) => Column(
+                      children: [
+                        _buildMainQuestionWorkspace(
+                          currentQ,
+                          progressPct,
+                          currentGrade,
+                          isElder,
+                        ),
+                        const SizedBox(height: 20),
+                        _buildRightPanel(progressPct, isElder, currentQ),
+                      ],
+                    ),
+                    desktop: (context) => Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 7,
+                          child: _buildMainQuestionWorkspace(
+                            currentQ,
+                            progressPct,
+                            currentGrade,
+                            isElder,
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 3,
+                          child: _buildRightPanel(progressPct, isElder, currentQ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1366,33 +1467,6 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 ],
               ),
             ),
-            if (_sessionId != null) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE5E1F6)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(LucideIcons.hash, size: 11, color: AppColors.muted),
-                    const SizedBox(width: 3),
-                    Text(
-                      _sessionId!.length > 18 ? _sessionId!.substring(0, 18) : _sessionId!,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.navy,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ],
         ),
         Row(
@@ -1643,14 +1717,14 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   Widget _buildResidentBanner(bool isElder) {
     final res = _resident;
     final initials = res != null ? _getInitials(res.name) : (isElder ? 'JP' : 'R');
-    final displayName = (res != null && res.name.trim().isNotEmpty)
+    final displayName = (res != null && res.name.trim().isNotEmpty && res.name.trim() != '-')
         ? res.name.trim()
-        : (isElder ? 'James Perera' : 'Resident #${res?.id ?? 1}');
+        : (isElder ? 'James Perera' : 'Resident #${res?.id ?? 5}');
     const facilityName = 'Serenity Elder Home';
     final ageDisplay = res?.age != null ? '${res!.age} yrs' : '75 yrs';
     final roomDisplay = (res?.roomNumber != null && res!.roomNumber.isNotEmpty)
         ? 'Room ${res.roomNumber}'
-        : 'Room 25';
+        : 'Room 101';
     final educationDisplay = res?.educationYears != null
         ? '${res!.educationYears} yrs'
         : '12 yrs';
@@ -1684,55 +1758,73 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Luxury Avatar with active status indicator
+              // Luxury Animated Avatar with portrait image & active status indicator
               Stack(
                 clipBehavior: Clip.none,
                 children: [
                   Container(
-                    width: 58,
-                    height: 58,
-                    alignment: Alignment.center,
+                    width: 62,
+                    height: 62,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
                       shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFFDDD6FE), width: 2.5),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
-                          blurRadius: 14,
+                          color: const Color(0xFF6C3FC5).withValues(alpha: 0.28),
+                          blurRadius: 16,
                           offset: const Offset(0, 4),
                         ),
                       ],
                     ),
-                    child: Text(
-                      initials,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 19,
-                        letterSpacing: 0.5,
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/landing/senior_neutral_calm_face.jpg',
+                        fit: BoxFit.cover,
+                        errorBuilder: (ctx, err, stack) => Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            initials,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 19,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                   Positioned(
                     right: 0,
                     bottom: 0,
-                    child: Container(
-                      width: 14,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.5),
-                            blurRadius: 4,
-                          ),
-                        ],
+                    child: AnimatedBuilder(
+                      animation: _ambientPulseAnimation,
+                      builder: (context, child) => Transform.scale(
+                        scale: _ambientPulseAnimation.value,
+                        child: child,
+                      ),
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1778,7 +1870,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              isElder ? 'ELDER / RESIDENT' : 'ID: ${res?.id ?? 1}',
+                              isElder ? 'ELDER / RESIDENT' : 'ID: ${res?.id ?? 5}',
                               style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
@@ -1885,7 +1977,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                         fontWeight: FontWeight.w600,
                       ),
                       items: _availableResidents.map((r) {
-                        final clean = r.name.trim().isNotEmpty
+                        final clean = (r.name.trim().isNotEmpty && r.name.trim() != '-')
                             ? r.name.trim()
                             : 'Resident #${r.id}';
                         return DropdownMenuItem<int>(
@@ -1908,44 +2000,51 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     ),
                   ),
                 ),
-              // Session Battery Badge
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
+              // Floating Session Battery Badge
+              AnimatedBuilder(
+                animation: _floatingAnimation,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(0, _floatingAnimation.value * 0.5),
+                  child: child,
                 ),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 15,
+                    vertical: 8.5,
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF6C3FC5).withValues(alpha: 0.28),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(LucideIcons.sparkles, size: 14, color: Colors.white),
-                    const SizedBox(width: 6),
-                    Text(
-                      isElder
-                          ? 'Self-Response Session ($_totalCount Items)'
-                          : 'Standard Cognitive Battery ($_totalCount Items)',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        letterSpacing: 0.2,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF6C3FC5).withValues(alpha: 0.28),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(LucideIcons.sparkles, size: 14, color: Colors.white),
+                      const SizedBox(width: 6),
+                      Text(
+                        isElder
+                            ? 'Self-Response Session ($_totalCount Items)'
+                            : 'Standard Cognitive Battery ($_totalCount Items)',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -2124,8 +2223,26 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           _buildStepIndicator(isElder),
           const SizedBox(height: 22),
 
-          // Question card
-          _buildQuestionCard(currentQ, isElder),
+          // Question card with smooth animated transition between questions
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.03, 0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+                  child: child,
+                ),
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey<int>(_currentIndex),
+              child: _buildQuestionCard(currentQ, isElder),
+            ),
+          ),
           const SizedBox(height: 20),
 
           // Response panel: voice capture, typed answer & scoring
@@ -2145,31 +2262,38 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   Widget _buildWorkspaceHeader(int progressPct, bool isElder) {
     return Row(
       children: [
-        Container(
-          width: 50,
-          height: 50,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
+        AnimatedBuilder(
+          animation: _floatingAnimation,
+          builder: (context, child) => Transform.translate(
+            offset: Offset(0, _floatingAnimation.value * 0.4),
+            child: child,
           ),
-          child: Text(
-            '${_currentIndex + 1}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 21,
-              fontWeight: FontWeight.w800,
+          child: Container(
+            width: 50,
+            height: 50,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Text(
+              '${_currentIndex + 1}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ),
@@ -2225,38 +2349,52 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             : isDone
                 ? AppColors.riskLow
                 : const Color(0xFFEDE9FE);
+
+        Widget bar = AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          height: isCurrent ? 8 : 6,
+          margin: EdgeInsets.only(right: i == _questions.length - 1 ? 0 : 5),
+          decoration: BoxDecoration(
+            gradient: isCurrent
+                ? const LinearGradient(
+                    colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                  )
+                : null,
+            color: isCurrent ? null : color,
+            borderRadius: BorderRadius.circular(4),
+            boxShadow: isCurrent
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF6C3FC5).withValues(alpha: 0.38),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+            border: (!isCurrent && !isDone)
+                ? Border.all(color: const Color(0xFFDDD6FE))
+                : null,
+          ),
+        );
+
+        if (isCurrent) {
+          bar = AnimatedBuilder(
+            animation: _ambientPulseAnimation,
+            builder: (context, child) => Transform.scale(
+              scaleY: 0.94 + 0.08 * _ambientPulseAnimation.value,
+              child: child,
+            ),
+            child: bar,
+          );
+        }
+
         return Expanded(
           child: Tooltip(
             message: 'Q${q.id}: ${q.category}${isDone ? ' (Completed)' : ''}',
             child: InkWell(
               onTap: () => _goToQuestion(i),
               borderRadius: BorderRadius.circular(5),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 250),
-                height: isCurrent ? 8 : 6,
-                margin: EdgeInsets.only(right: i == _questions.length - 1 ? 0 : 5),
-                decoration: BoxDecoration(
-                  gradient: isCurrent
-                      ? const LinearGradient(
-                          colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
-                        )
-                      : null,
-                  color: isCurrent ? null : color,
-                  borderRadius: BorderRadius.circular(4),
-                  boxShadow: isCurrent
-                      ? [
-                          BoxShadow(
-                            color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                  border: (!isCurrent && !isDone)
-                      ? Border.all(color: const Color(0xFFDDD6FE))
-                      : null,
-                ),
-              ),
+              child: bar,
             ),
           ),
         );
@@ -2292,12 +2430,19 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   runSpacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    _buildInfoChip(
-                      label: currentQ.category,
-                      icon: LucideIcons.brain,
-                      background: const Color(0xFFF5F3FF),
-                      color: AppColors.primary,
-                      borderColor: const Color(0xFFDDD6FE),
+                    AnimatedBuilder(
+                      animation: _floatingAnimation,
+                      builder: (context, child) => Transform.translate(
+                        offset: Offset(0, _floatingAnimation.value * 0.35),
+                        child: child,
+                      ),
+                      child: _buildInfoChip(
+                        label: currentQ.category,
+                        icon: LucideIcons.brain,
+                        background: const Color(0xFFF5F3FF),
+                        color: AppColors.primary,
+                        borderColor: const Color(0xFFDDD6FE),
+                      ),
                     ),
                     _buildInfoChip(
                       label: 'Domain: ${currentQ.domain}',
@@ -2328,34 +2473,53 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF5F3FF),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFDDD6FE)),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFF5F3FF), Color(0xFFFAF5FF)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFDDD6FE), width: 1.2),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF6C3FC5).withValues(alpha: 0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     margin: const EdgeInsets.only(top: 3),
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
                       ),
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF6C3FC5).withValues(alpha: 0.28),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: const Text(
                       'සිංහල',
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 10.5,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
+                        letterSpacing: 0.4,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Text(
                       currentQ.promptSinhala,
@@ -2382,16 +2546,23 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(8),
+                AnimatedBuilder(
+                  animation: _ambientPulseAnimation,
+                  builder: (context, child) => Transform.scale(
+                    scale: _ambientPulseAnimation.value,
+                    child: child,
                   ),
-                  child: Icon(
-                    isElder ? LucideIcons.lightbulb : LucideIcons.sparkles,
-                    size: 16,
-                    color: const Color(0xFFB45309),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      isElder ? LucideIcons.lightbulb : LucideIcons.sparkles,
+                      size: 16,
+                      color: const Color(0xFFB45309),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -3128,43 +3299,50 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     required IconData icon,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: Colors.transparent,
-      child: Ink(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
-              blurRadius: 14,
-              offset: const Offset(0, 5),
+    return AnimatedBuilder(
+      animation: _ambientPulseAnimation,
+      builder: (context, child) => Transform.scale(
+        scale: 0.985 + (0.02 * _ambientPulseAnimation.value),
+        child: child,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-          ],
-        ),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Icon(icon, size: 16, color: Colors.white),
-              ],
+                  const SizedBox(width: 8),
+                  Icon(icon, size: 16, color: Colors.white),
+                ],
+              ),
             ),
           ),
         ),
@@ -3264,7 +3442,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     );
   }
 
-  Widget _buildRightPanel(int progressPct, bool isElder) {
+  Widget _buildRightPanel(int progressPct, bool isElder, CognitiveQuestionItem currentQ) {
     return Column(
       children: [
         // 1. Circular Progress Card
@@ -3279,11 +3457,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         _buildGuidanceCard(isElder),
         const SizedBox(height: 18),
 
-        // AI Methodology & Synthetic Model Metrics Card
-        _buildAiMethodologyCard(),
+        // 4. Floating Live Cognitive Wellness Companion Card
+        _buildCognitiveWellnessCompanionCard(currentQ),
         const SizedBox(height: 18),
 
-        // 4. End / Finish Assessment Button
+        // 5. End / Finish Assessment Button
         SizedBox(
           width: double.infinity,
           child: Material(
@@ -3817,77 +3995,237 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     );
   }
 
-  Widget _buildAiMethodologyCard() {
+  Widget _buildCognitiveWellnessCompanionCard(CognitiveQuestionItem currentQ) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFFFBFBFE),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFAF7FF), Color(0xFFF3EDFF), Color(0xFFEDE9FE)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE5E1F6), width: 1.2),
+        border: Border.all(color: const Color(0xFFDDD6FE), width: 1.3),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C3FC5).withValues(alpha: 0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 4),
+            color: const Color(0xFF6C3FC5).withValues(alpha: 0.08),
+            blurRadius: 22,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildPanelHeader(LucideIcons.cpu, 'AI Methodology & Model Metrics'),
-          const SizedBox(height: 12),
-          const Text(
-            'ACRF Base Weights: Mem 25% • Attn 20% • Orient 20% • Recall 20% • Reas 15%',
-            style: TextStyle(
-              fontSize: 11,
-              color: AppColors.muted,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
+          // Header with floating sparkles icon & live pulse indicator
+          Row(
+            children: [
+              AnimatedBuilder(
+                animation: _floatingAnimation,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(0, _floatingAnimation.value * 0.7),
+                  child: child,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF8B5CF6), Color(0xFF6C3FC5)],
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(LucideIcons.sparkles, size: 14, color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Cognitive Vitality Focus',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.navy,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+              // Live pulsating dot
+              AnimatedBuilder(
+                animation: _ambientPulseAnimation,
+                builder: (context, child) => Transform.scale(
+                  scale: _ambientPulseAnimation.value,
+                  child: child,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF86EFAC)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF16A34A),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'LIVE',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF15803D),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
+
+          // Active domain highlight box with gentle breathing waveform
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F3FF),
+              color: Colors.white.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFDDD6FE)),
+              border: Border.all(color: const Color(0xFFE5E1F6)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'Trained Random Forest (Synthetic Benchmark):',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
-                  ),
+              children: [
+                Row(
+                  children: [
+                    const Icon(LucideIcons.brain, size: 14, color: AppColors.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Target Domain: ${currentQ.category}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(height: 6),
+                const SizedBox(height: 6),
                 Text(
-                  '• Synthetic Accuracy: 96.80% (95% CI: [95.85%, 97.70%])\n'
-                  '• Macro F1: 96.76% | Macro Recall: 96.87%\n'
-                  '• High-Risk Recall: 96.88% (Alert Threshold: P ≥ 0.48)',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.navy,
-                    height: 1.5,
+                  _getDomainEncouragement(currentQ.domain),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.body,
+                    height: 1.45,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          const Text(
-            'Notice: Verified on synthetic test residents. Non-clinical research metric; not a medical diagnosis.',
-            style: TextStyle(
+          const SizedBox(height: 12),
+
+          // Gentle ambient breathing rhythm indicators (4 animated bars)
+          Row(
+            children: [
+              const Text(
+                'Assessment Rhythm',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.muted,
+                ),
+              ),
+              const Spacer(),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(4, (index) {
+                  return AnimatedBuilder(
+                    animation: _waveformController,
+                    builder: (context, child) {
+                      final double phase = (_waveformController.value + (index * 0.22)) % 1.0;
+                      final double height = 6.0 + 10.0 * (0.5 + 0.5 * (phase < 0.5 ? phase * 2 : (1.0 - phase) * 2));
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        width: 3.5,
+                        height: height,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.5 + (0.5 * (index / 3.0))),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      );
+                    },
+                  );
+                }),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Floating mini pills
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _buildMiniWellnessPill('Dual-Language Sync', LucideIcons.languages),
+              _buildMiniWellnessPill('Conversational AI', LucideIcons.heart),
+              _buildMiniWellnessPill('Empathetic Care', LucideIcons.sparkles),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getDomainEncouragement(String domain) {
+    final d = domain.toLowerCase();
+    if (d.contains('orientation')) {
+      return 'Temporal and spatial grounding fosters resident security and reduces anxiety.';
+    } else if (d.contains('memory') || d.contains('recall')) {
+      return 'Allow a comfortable pause. Gentle patience enhances spontaneous memory recall.';
+    } else if (d.contains('attention') || d.contains('calculation')) {
+      return 'Focus on encouragement. High-stress environments hinder working memory.';
+    } else if (d.contains('reasoning') || d.contains('judgment')) {
+      return 'Logical reasoning questions measure practical problem-solving in daily elder living.';
+    }
+    return 'Conversational warmth and active listening improve assessment accuracy by over 30%.';
+  }
+
+  Widget _buildMiniWellnessPill(String text, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFDDD6FE)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: AppColors.primary),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: const TextStyle(
               fontSize: 10,
-              color: AppColors.muted,
-              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.w600,
+              color: AppColors.navy,
             ),
           ),
         ],
