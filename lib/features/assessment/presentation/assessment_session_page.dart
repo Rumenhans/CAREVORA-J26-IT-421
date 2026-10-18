@@ -1080,20 +1080,24 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           (result.alertTriggered == true) ||
           (result.acrfScore != null && result.acrfScore! < 50.0);
 
-      final residentName = result.residentName.isNotEmpty
+      final residentName = (result.residentName.isNotEmpty
           ? result.residentName
-          : (_resident?.name ?? 'Resident');
+          : (_resident?.name ?? 'Resident')).trim();
 
       // Clear any prior cognitive alert for this resident so alerts reflect latest assessment
       MockCarevoraData.alerts.removeWhere((a) =>
           a.id.startsWith('ALT-COG') &&
-          (a.residentName == residentName || a.residentName == _resident?.name));
+          (a.residentName?.trim().toLowerCase() == residentName.toLowerCase() ||
+           a.residentName?.trim().toLowerCase() == _resident?.name.trim().toLowerCase()));
 
       if (isHighRisk) {
-        final alertId = 'ALT-COG-${DateTime.now().millisecondsSinceEpoch}';
+        final alertId = 'ALT-COG-REAL-${_resident?.id ?? 0}-${result.id ?? DateTime.now().millisecondsSinceEpoch}';
         final scoreText = result.acrfScore != null
             ? '${result.acrfScore!.toStringAsFixed(1)}/100'
             : 'High Risk';
+        final roomNumber = (_resident?.roomNumber != null && _resident!.roomNumber.isNotEmpty)
+            ? _resident!.roomNumber
+            : '105';
 
         // 1. Dispatch alert notification to facility alerts for caregivers
         MockCarevoraData.alerts.insert(
@@ -1102,11 +1106,11 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             id: alertId,
             title: 'High Cognitive Impairment Risk: $residentName',
             description:
-                'Cognitive assessment score ($scoreText) indicates high risk of cognitive impairment. Immediate caregiver clinical review and close monitoring required.',
+                'Cognitive assessment score ($scoreText) indicates acute cognitive decline risk for $residentName in room $roomNumber. Urgent caregiver review and clinical attention required.',
             severity: 'High',
             timestamp: 'Just now',
             residentName: residentName,
-            roomNo: _resident?.roomNumber ?? '105',
+            roomNo: roomNumber,
             residentAge: _resident?.age ?? effectiveAge,
             residentGender: _resident?.gender ?? 'Resident',
             currentStatus: 'High Cognitive Risk',
