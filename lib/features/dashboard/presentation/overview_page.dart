@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/responsive/responsive_builder.dart';
 import '../../../core/theme/app_colors.dart';
@@ -10,15 +11,16 @@ import '../../../shared/widgets/recent_assessments_table.dart';
 import '../../../shared/widgets/resident_header_card.dart';
 import '../../../shared/widgets/risk_trend_chart.dart';
 import '../../../shared/widgets/score_card.dart';
+import '../../auth/application/auth_controller.dart';
 
-class OverviewPage extends StatefulWidget {
+class OverviewPage extends ConsumerStatefulWidget {
   const OverviewPage({super.key});
 
   @override
-  State<OverviewPage> createState() => _OverviewPageState();
+  ConsumerState<OverviewPage> createState() => _OverviewPageState();
 }
 
-class _OverviewPageState extends State<OverviewPage> {
+class _OverviewPageState extends ConsumerState<OverviewPage> {
   final Resident _resident = MockCarevoraData.defaultResident;
   final List<AssessmentRecord> _assessments = MockCarevoraData.recentAssessments;
   final List<AlertItem> _alerts = MockCarevoraData.alerts;
@@ -115,6 +117,9 @@ class _OverviewPageState extends State<OverviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider).state;
+    final isElder = authState.isElder;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -272,30 +277,40 @@ class _OverviewPageState extends State<OverviewPage> {
                 const SizedBox(height: 340, child: RiskTrendChart()),
                 const SizedBox(height: 16),
                 const SizedBox(height: 340, child: ComponentDonutChart()),
-                const SizedBox(height: 16),
-                AlertsListWidget(
-                  alerts: _alerts,
-                  onViewAll: () => context.go('/dashboard/alerts'),
-                ),
+                if (!isElder) ...[
+                  const SizedBox(height: 16),
+                  AlertsListWidget(
+                    alerts: _alerts,
+                    onViewAll: () => context.go('/dashboard/alerts'),
+                  ),
+                ],
               ],
             ),
             desktop: (context) => Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Expanded(flex: 4, child: SizedBox(height: 360, child: RiskTrendChart())),
-                const SizedBox(width: 16),
-                const Expanded(flex: 3, child: SizedBox(height: 360, child: ComponentDonutChart())),
+                Expanded(
+                  flex: isElder ? 5 : 4,
+                  child: const SizedBox(height: 360, child: RiskTrendChart()),
+                ),
                 const SizedBox(width: 16),
                 Expanded(
-                  flex: 3,
-                  child: SizedBox(
-                    height: 360,
-                    child: AlertsListWidget(
-                      alerts: _alerts,
-                      onViewAll: () => context.go('/dashboard/alerts'),
+                  flex: isElder ? 5 : 3,
+                  child: const SizedBox(height: 360, child: ComponentDonutChart()),
+                ),
+                if (!isElder) ...[
+                  const SizedBox(width: 16),
+                  Expanded(
+                    flex: 3,
+                    child: SizedBox(
+                      height: 360,
+                      child: AlertsListWidget(
+                        alerts: _alerts,
+                        onViewAll: () => context.go('/dashboard/alerts'),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

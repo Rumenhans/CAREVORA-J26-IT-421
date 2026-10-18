@@ -59,13 +59,6 @@ class MockCarevoraData {
       timestamp: 'Today, 08:30 AM',
     ),
     const AlertItem(
-      id: 'ALT-2',
-      title: 'Delayed Cognitive Recall',
-      description: 'Delayed verbal recall observed for 3-item delayed retrieval task.',
-      severity: 'Moderate',
-      timestamp: 'Yesterday, 04:10 PM',
-    ),
-    const AlertItem(
       id: 'ALT-3',
       title: 'Vitals Logging Reminder',
       description: 'Evening BP and blood glucose logging requested for room 105.',

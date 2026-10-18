@@ -7,14 +7,18 @@ import com.carevora.dto.cognitive.CognitiveAssessmentSubmissionRequest;
 import com.carevora.dto.cognitive.CognitiveSessionResponse;
 import com.carevora.dto.cognitive.SaveCognitiveResponsesRequest;
 import com.carevora.dto.cognitive.StartCognitiveSessionRequest;
+import com.carevora.entity.Alert;
 import com.carevora.entity.Caregiver;
 import com.carevora.entity.CognitiveAssessment;
 import com.carevora.entity.CognitiveAssessmentSession;
 import com.carevora.entity.Resident;
 import com.carevora.entity.User;
+import com.carevora.enums.AlertPriority;
+import com.carevora.enums.AlertType;
 import com.carevora.enums.UserRole;
 import com.carevora.exception.BadRequestException;
 import com.carevora.exception.ResourceNotFoundException;
+import com.carevora.repository.AlertRepository;
 import com.carevora.repository.CaregiverRepository;
 import com.carevora.repository.CognitiveAssessmentRepository;
 import com.carevora.repository.CognitiveAssessmentSessionRepository;
@@ -56,6 +60,7 @@ public class CognitiveAssessmentService {
     private final AiMlService aiMlService;
     private final ObjectMapper objectMapper;
     private CognitiveAssessmentSessionRepository cognitiveAssessmentSessionRepository;
+    private AlertRepository alertRepository;
 
     public CognitiveAssessmentService(
             CognitiveAssessmentRepository cognitiveAssessmentRepository,
@@ -73,8 +78,14 @@ public class CognitiveAssessmentService {
     }
 
     @Autowired(required = false)
-    public void setCognitiveAssessmentSessionRepository(CognitiveAssessmentSessionRepository cognitiveAssessmentSessionRepository) {
+    public void setCognitiveAssessmentSessionRepository(
+            CognitiveAssessmentSessionRepository cognitiveAssessmentSessionRepository) {
         this.cognitiveAssessmentSessionRepository = cognitiveAssessmentSessionRepository;
+    }
+
+    @Autowired(required = false)
+    public void setAlertRepository(AlertRepository alertRepository) {
+        this.alertRepository = alertRepository;
     }
 
     // Fixed ACRF Base Weights established in system specifications
@@ -83,8 +94,7 @@ public class CognitiveAssessmentService {
             "attention", 0.20,
             "orientation", 0.20,
             "recall", 0.20,
-            "reasoning", 0.15
-    );
+            "reasoning", 0.15);
 
     @Transactional
     public ApiResponse<CognitiveSessionResponse> startSession(StartCognitiveSessionRequest request) {
@@ -93,7 +103,8 @@ public class CognitiveAssessmentService {
         }
 
         Resident resident = residentRepository.findById(request.getResidentId())
-                .orElseThrow(() -> new ResourceNotFoundException("Resident not found with id: " + request.getResidentId()));
+                .orElseThrow(
+                        () -> new ResourceNotFoundException("Resident not found with id: " + request.getResidentId()));
 
         enforceResidentAccess(resident);
 
@@ -118,7 +129,8 @@ public class CognitiveAssessmentService {
     }
 
     @Transactional
-    public ApiResponse<CognitiveSessionResponse> saveResponses(String sessionId, SaveCognitiveResponsesRequest request) {
+    public ApiResponse<CognitiveSessionResponse> saveResponses(String sessionId,
+            SaveCognitiveResponsesRequest request) {
         if (sessionId == null || sessionId.isBlank()) {
             throw new BadRequestException("Session ID is required");
         }
@@ -126,21 +138,25 @@ public class CognitiveAssessmentService {
         CognitiveAssessmentSession session = null;
         if (cognitiveAssessmentSessionRepository != null) {
             session = cognitiveAssessmentSessionRepository.findBySessionId(sessionId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Assessment session not found with id: " + sessionId));
+                    .orElseThrow(
+                            () -> new ResourceNotFoundException("Assessment session not found with id: " + sessionId));
         } else {
             throw new ResourceNotFoundException("Session persistence repository is unavailable");
         }
 
         enforceResidentAccess(session.getResident());
 
-        if ("COMPLETED".equalsIgnoreCase(session.getStatus()) || "COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(session.getStatus())) {
-            throw new BadRequestException("Assessment session " + sessionId + " has already been completed and cannot be modified.");
+        if ("COMPLETED".equalsIgnoreCase(session.getStatus())
+                || "COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(session.getStatus())) {
+            throw new BadRequestException(
+                    "Assessment session " + sessionId + " has already been completed and cannot be modified.");
         }
 
         if (request.getResponses() != null && !request.getResponses().isEmpty()) {
             try {
                 session.setResponsesJson(objectMapper.writeValueAsString(request.getResponses()));
-                Map<Integer, Double> autoGrades = CognitiveScoringService.scoreBattery(request.getResponses(), LocalDate.now());
+                Map<Integer, Double> autoGrades = CognitiveScoringService.scoreBattery(request.getResponses(),
+                        LocalDate.now());
                 if (!autoGrades.isEmpty()) {
                     session.setGradesJson(objectMapper.writeValueAsString(autoGrades));
                 }
@@ -190,7 +206,8 @@ public class CognitiveAssessmentService {
             return ApiResponse.ok(null, "No pending cognitive assessment session found for resident");
         }
 
-        return ApiResponse.ok(mapToSessionResponse(pendingSession.get()), "Pending cognitive assessment session retrieved successfully");
+        return ApiResponse.ok(mapToSessionResponse(pendingSession.get()),
+                "Pending cognitive assessment session retrieved successfully");
     }
 
     @Transactional
@@ -199,10 +216,12 @@ public class CognitiveAssessmentService {
         if (request.getResponses() != null && !request.getResponses().isEmpty()) {
             List<Integer> unanswered = CognitiveScoringService.getUnansweredQuestionIds(request.getResponses());
             if (!unanswered.isEmpty()) {
-                throw new BadRequestException("Cannot finalize assessment: Question(s) " + unanswered + " must be answered before finalization. Missing responses cannot be evaluated.");
+                throw new BadRequestException("Cannot finalize assessment: Question(s) " + unanswered
+                        + " must be answered before finalization. Missing responses cannot be evaluated.");
             }
 
-            Map<Integer, Double> autoGrades = CognitiveScoringService.scoreBattery(request.getResponses(), LocalDate.now());
+            Map<Integer, Double> autoGrades = CognitiveScoringService.scoreBattery(request.getResponses(),
+                    LocalDate.now());
             if (request.getGrades() == null || request.getGrades().isEmpty()) {
                 request.setGrades(autoGrades);
             }
@@ -210,11 +229,16 @@ public class CognitiveAssessmentService {
             Map<String, Double> accs = CognitiveScoringService.calculateDomainAccuracies(request.getGrades());
             Map<String, Double> taskScores = CognitiveScoringService.calculateDomainScores(accs);
 
-            if (request.getMemory() == null) request.setMemory(taskScores.get("memory"));
-            if (request.getAttention() == null) request.setAttention(taskScores.get("attention"));
-            if (request.getOrientation() == null) request.setOrientation(taskScores.get("orientation"));
-            if (request.getRecall() == null) request.setRecall(taskScores.get("recall"));
-            if (request.getReasoning() == null) request.setReasoning(taskScores.get("reasoning"));
+            if (request.getMemory() == null)
+                request.setMemory(taskScores.get("memory"));
+            if (request.getAttention() == null)
+                request.setAttention(taskScores.get("attention"));
+            if (request.getOrientation() == null)
+                request.setOrientation(taskScores.get("orientation"));
+            if (request.getRecall() == null)
+                request.setRecall(taskScores.get("recall"));
+            if (request.getReasoning() == null)
+                request.setReasoning(taskScores.get("reasoning"));
             if (request.getAccuracies() == null || request.getAccuracies().isEmpty()) {
                 request.setAccuracies(accs);
             }
@@ -224,46 +248,61 @@ public class CognitiveAssessmentService {
         validateOptionalMlFeatures(request);
 
         Resident resident = residentRepository.findById(request.getResidentId())
-                .orElseThrow(() -> new ResourceNotFoundException("Resident not found with id: " + request.getResidentId()));
+                .orElseThrow(
+                        () -> new ResourceNotFoundException("Resident not found with id: " + request.getResidentId()));
 
         enforceResidentAccess(resident);
 
         CognitiveAssessmentSession session = null;
         if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
-            if (cognitiveAssessmentRepository != null && cognitiveAssessmentRepository.existsBySessionId(request.getSessionId())) {
-                throw new BadRequestException("Duplicate submission detected: Assessment session " + request.getSessionId() + " has already been finalized.");
+            if (cognitiveAssessmentRepository != null
+                    && cognitiveAssessmentRepository.existsBySessionId(request.getSessionId())) {
+                throw new BadRequestException("Duplicate submission detected: Assessment session "
+                        + request.getSessionId() + " has already been finalized.");
             }
             if (cognitiveAssessmentSessionRepository != null) {
                 session = cognitiveAssessmentSessionRepository.findBySessionId(request.getSessionId()).orElse(null);
                 if (session != null) {
-                    if ("COMPLETED".equalsIgnoreCase(session.getStatus()) || "COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(session.getStatus())) {
-                        throw new BadRequestException("Duplicate submission detected: Assessment session " + request.getSessionId() + " has already been completed.");
+                    if ("COMPLETED".equalsIgnoreCase(session.getStatus())
+                            || "COMPLETED_PREDICTION_UNAVAILABLE".equalsIgnoreCase(session.getStatus())) {
+                        throw new BadRequestException("Duplicate submission detected: Assessment session "
+                                + request.getSessionId() + " has already been completed.");
                     }
                     if (!session.getResident().getId().equals(resident.getId())) {
-                        throw new BadRequestException("Session " + request.getSessionId() + " does not belong to resident " + resident.getId());
+                        throw new BadRequestException("Session " + request.getSessionId()
+                                + " does not belong to resident " + resident.getId());
                     }
-                    if ((request.getResponses() == null || request.getResponses().isEmpty()) && session.getResponsesJson() != null && !session.getResponsesJson().isBlank()) {
+                    if ((request.getResponses() == null || request.getResponses().isEmpty())
+                            && session.getResponsesJson() != null && !session.getResponsesJson().isBlank()) {
                         try {
-                            Map<Integer, String> parsed = objectMapper.readValue(session.getResponsesJson(), new TypeReference<Map<Integer, String>>() {});
+                            Map<Integer, String> parsed = objectMapper.readValue(session.getResponsesJson(),
+                                    new TypeReference<Map<Integer, String>>() {
+                                    });
                             request.setResponses(parsed);
-                        } catch (Exception ignored) {}
+                        } catch (Exception ignored) {
+                        }
                     }
                 }
             }
         }
 
-        if ((request.getResponseTimes() == null || request.getResponseTimes().isEmpty()) && session != null && session.getQuestionTimesJson() != null) {
+        if ((request.getResponseTimes() == null || request.getResponseTimes().isEmpty()) && session != null
+                && session.getQuestionTimesJson() != null) {
             try {
-                Map<Integer, Double> parsedTimes = objectMapper.readValue(session.getQuestionTimesJson(), new TypeReference<Map<Integer, Double>>() {});
+                Map<Integer, Double> parsedTimes = objectMapper.readValue(session.getQuestionTimesJson(),
+                        new TypeReference<Map<Integer, Double>>() {
+                        });
                 Map<String, Double> aggTimes = CognitiveScoringService.aggregateDomainResponseTimes(parsedTimes);
                 request.setResponseTimes(aggTimes);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
-
-        // Determine effective demographics without inventing or synthesizing missing values
+        // Determine effective demographics without inventing or synthesizing missing
+        // values
         Integer effectiveAge = request.getAge() != null ? request.getAge() : resident.getAge();
-        Integer effectiveEducationYears = request.getEducationYears() != null ? request.getEducationYears() : resident.getEducationYears();
+        Integer effectiveEducationYears = request.getEducationYears() != null ? request.getEducationYears()
+                : resident.getEducationYears();
 
         if (request.getEducationYears() != null && resident.getEducationYears() == null) {
             resident.setEducationYears(request.getEducationYears());
@@ -285,18 +324,18 @@ public class CognitiveAssessmentService {
                     effectiveAge,
                     effectiveEducationYears,
                     request.getAccuracies(),
-                    request.getResponseTimes()
-            );
+                    request.getResponseTimes());
         } catch (Exception ex) {
-            log.warn("AI microservice call failed during cognitive assessment submission: {}. Falling back to authoritative local scoring without ML risk prediction.", ex.getMessage());
+            log.warn(
+                    "AI microservice call failed during cognitive assessment submission: {}. Falling back to authoritative local scoring without ML risk prediction.",
+                    ex.getMessage());
             aiResult = buildFallbackAiResult(
                     request.getMemory(),
                     request.getAttention(),
                     request.getOrientation(),
                     request.getRecall(),
                     request.getReasoning(),
-                    "AI microservice unavailable: " + ex.getMessage()
-            );
+                    "AI microservice unavailable: " + ex.getMessage());
         }
 
         String currentUserName = SecurityUtils.getCurrentUser(userRepository)
@@ -308,7 +347,12 @@ public class CognitiveAssessmentService {
         String mlPrediction = mlAvailable && mlEval.getPrediction() != null
                 ? String.valueOf(mlEval.getPrediction())
                 : null;
-        Boolean alertTriggered = mlAvailable && Boolean.TRUE.equals(mlEval.getAlertTriggered());
+        String resolvedRisk = resolveRiskLevel(mlPrediction, aiResult.getAcrfScore());
+        boolean isHighRisk = (mlAvailable && Boolean.TRUE.equals(mlEval.getAlertTriggered()))
+                || (aiResult.getAcrfScore() != null && aiResult.getAcrfScore() < 50.0)
+                || "High".equalsIgnoreCase(mlPrediction)
+                || "High Risk".equalsIgnoreCase(resolvedRisk);
+        Boolean alertTriggered = isHighRisk;
         String finalStatus = mlAvailable ? "COMPLETED" : "COMPLETED_PREDICTION_UNAVAILABLE";
 
         Double highRiskProb = null;
@@ -317,14 +361,16 @@ public class CognitiveAssessmentService {
             highRiskProb = mlEval.getProbabilities().get("High");
             try {
                 classProbsJson = objectMapper.writeValueAsString(mlEval.getProbabilities());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         String responsesJson = null;
         if (request.getResponses() != null && !request.getResponses().isEmpty()) {
             try {
                 responsesJson = objectMapper.writeValueAsString(request.getResponses());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         } else if (session != null && session.getResponsesJson() != null) {
             responsesJson = session.getResponsesJson();
         }
@@ -333,21 +379,24 @@ public class CognitiveAssessmentService {
         if (request.getGrades() != null && !request.getGrades().isEmpty()) {
             try {
                 gradesJson = objectMapper.writeValueAsString(request.getGrades());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         String accuraciesJson = null;
         if (request.getAccuracies() != null && !request.getAccuracies().isEmpty()) {
             try {
                 accuraciesJson = objectMapper.writeValueAsString(request.getAccuracies());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         String responseTimesJson = null;
         if (request.getResponseTimes() != null && !request.getResponseTimes().isEmpty()) {
             try {
                 responseTimesJson = objectMapper.writeValueAsString(request.getResponseTimes());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         String effectiveSessionId = request.getSessionId() != null && !request.getSessionId().isBlank()
@@ -387,15 +436,41 @@ public class CognitiveAssessmentService {
             cognitiveAssessmentSessionRepository.save(session);
         }
 
-        // Update Resident current cognitive snapshot (without modifying emotional or social scores)
+        // Update Resident current cognitive snapshot (without modifying emotional or
+        // social scores)
         resident.setCognitiveScore(aiResult.getAcrfScore());
         resident.setLastAssessmentDate(LocalDateTime.now());
         residentRepository.save(resident);
 
-        CognitiveAssessmentResponse response = mapToResponse(saved, aiResult, request.getResponses(), request.getGrades(), request.getAccuracies(), request.getResponseTimes());
+        if (isHighRisk && alertRepository != null) {
+            String resName = (resident.getUser() != null && resident.getUser().getFullName() != null)
+                    ? resident.getUser().getFullName()
+                    : "Resident";
+            String room = resident.getRoomNumber() != null ? resident.getRoomNumber() : "105";
+            double score = aiResult.getAcrfScore() != null ? aiResult.getAcrfScore() : 0.0;
+
+            String alertTitle = "High Cognitive Impairment Risk: " + resName;
+            String alertMessage = String.format(
+                    "Cognitive assessment score (%.1f/100) indicates acute cognitive decline risk for %s in room %s. Urgent caregiver review and clinical attention required.",
+                    score, resName, room);
+
+            Alert cognitiveAlert = Alert.builder()
+                    .resident(resident)
+                    .title(alertTitle)
+                    .message(alertMessage)
+                    .type(AlertType.RISK_ALERT)
+                    .priority(AlertPriority.HIGH)
+                    .isRead(false)
+                    .build();
+            alertRepository.save(cognitiveAlert);
+            log.info("Persisted high cognitive risk alert in AlertRepository for resident: {} (ID: {}) with score: {}",
+                    resName, resident.getId(), score);
+        }
+
+        CognitiveAssessmentResponse response = mapToResponse(saved, aiResult, request.getResponses(),
+                request.getGrades(), request.getAccuracies(), request.getResponseTimes());
         return ApiResponse.ok(response, "Cognitive assessment evaluated and saved successfully");
     }
-
 
     @Transactional(readOnly = true)
     public ApiResponse<List<CognitiveAssessmentResponse>> getResidentCognitiveAssessments(Long residentId) {
@@ -404,15 +479,16 @@ public class CognitiveAssessmentService {
 
         enforceResidentAccess(resident);
 
-        List<CognitiveAssessment> history = cognitiveAssessmentRepository.findByResidentIdOrderByCreatedAtDesc(residentId);
+        List<CognitiveAssessment> history = cognitiveAssessmentRepository
+                .findByResidentIdOrderByCreatedAtDesc(residentId);
         List<CognitiveAssessmentResponse> responses = history.stream()
                 .map(this::mapHistoryToResponse)
                 .collect(Collectors.toList());
 
         // Include any active sessions that have not yet been completed into history
         if (cognitiveAssessmentSessionRepository != null) {
-            List<CognitiveAssessmentSession> sessions =
-                    cognitiveAssessmentSessionRepository.findByResidentIdOrderByCreatedAtDesc(residentId);
+            List<CognitiveAssessmentSession> sessions = cognitiveAssessmentSessionRepository
+                    .findByResidentIdOrderByCreatedAtDesc(residentId);
             java.util.Set<String> completedSessionIds = history.stream()
                     .map(CognitiveAssessment::getSessionId)
                     .filter(java.util.Objects::nonNull)
@@ -429,9 +505,12 @@ public class CognitiveAssessmentService {
 
             // Sort combined newest first by createdAt DESC
             responses.sort((a, b) -> {
-                if (a.getCreatedAt() == null && b.getCreatedAt() == null) return 0;
-                if (a.getCreatedAt() == null) return 1;
-                if (b.getCreatedAt() == null) return -1;
+                if (a.getCreatedAt() == null && b.getCreatedAt() == null)
+                    return 0;
+                if (a.getCreatedAt() == null)
+                    return 1;
+                if (b.getCreatedAt() == null)
+                    return -1;
                 return b.getCreatedAt().compareTo(a.getCreatedAt());
             });
         }
@@ -463,7 +542,8 @@ public class CognitiveAssessmentService {
                 Double acc = entry.getValue();
                 if (acc != null) {
                     if (Double.isNaN(acc) || Double.isInfinite(acc) || acc < 0.0 || acc > 100.0) {
-                        throw new BadRequestException("Accuracy for '" + entry.getKey() + "' must be a finite number in range [0.0, 100.0]");
+                        throw new BadRequestException(
+                                "Accuracy for '" + entry.getKey() + "' must be a finite number in range [0.0, 100.0]");
                     }
                 }
             }
@@ -473,7 +553,8 @@ public class CognitiveAssessmentService {
                 Double rt = entry.getValue();
                 if (rt != null) {
                     if (Double.isNaN(rt) || Double.isInfinite(rt) || rt <= 0.0) {
-                        throw new BadRequestException("Response time for '" + entry.getKey() + "' must be a finite number > 0.0 seconds");
+                        throw new BadRequestException(
+                                "Response time for '" + entry.getKey() + "' must be a finite number > 0.0 seconds");
                     }
                 }
             }
@@ -507,13 +588,15 @@ public class CognitiveAssessmentService {
             if (caregiverOpt.isEmpty() || caregiverOpt.get().getElderHome() == null ||
                     resident.getElderHome() == null ||
                     !resident.getElderHome().getId().equals(caregiverOpt.get().getElderHome().getId())) {
-                throw new AccessDeniedException("Access denied: You can only view/assess residents belonging to your assigned Elder Home.");
+                throw new AccessDeniedException(
+                        "Access denied: You can only view/assess residents belonging to your assigned Elder Home.");
             }
         }
         // 2. Elder can only access their own assessments
         else if (role == UserRole.ELDER || role == UserRole.RESIDENT) {
             if (!resident.getUser().getId().equals(currentUser.getId())) {
-                throw new AccessDeniedException("Access denied: Elders are not authorized to view other elders' records.");
+                throw new AccessDeniedException(
+                        "Access denied: Elders are not authorized to view other elders' records.");
             }
         }
         // 3. DOCTOR and ADMIN have full cross-facility authorization
@@ -525,9 +608,10 @@ public class CognitiveAssessmentService {
             try {
                 parsedResponses = objectMapper.readValue(
                         s.getResponsesJson(),
-                        new TypeReference<Map<Integer, String>>() {}
-                );
-            } catch (Exception ignored) {}
+                        new TypeReference<Map<Integer, String>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<Integer, Double> parsedGrades = null;
@@ -535,9 +619,10 @@ public class CognitiveAssessmentService {
             try {
                 parsedGrades = objectMapper.readValue(
                         s.getGradesJson(),
-                        new TypeReference<Map<Integer, Double>>() {}
-                );
-            } catch (Exception ignored) {}
+                        new TypeReference<Map<Integer, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<Integer, Double> parsedTimes = null;
@@ -545,9 +630,10 @@ public class CognitiveAssessmentService {
             try {
                 parsedTimes = objectMapper.readValue(
                         s.getQuestionTimesJson(),
-                        new TypeReference<Map<Integer, Double>>() {}
-                );
-            } catch (Exception ignored) {}
+                        new TypeReference<Map<Integer, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         return CognitiveSessionResponse.builder()
@@ -576,29 +662,40 @@ public class CognitiveAssessmentService {
         Map<Integer, String> parsedResponses = reqResponses;
         if (parsedResponses == null && saved.getResponsesJson() != null && !saved.getResponsesJson().isBlank()) {
             try {
-                parsedResponses = objectMapper.readValue(saved.getResponsesJson(), new TypeReference<Map<Integer, String>>() {});
-            } catch (Exception ignored) {}
+                parsedResponses = objectMapper.readValue(saved.getResponsesJson(),
+                        new TypeReference<Map<Integer, String>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<Integer, Double> parsedGrades = reqGrades;
         if (parsedGrades == null && saved.getGradesJson() != null && !saved.getGradesJson().isBlank()) {
             try {
-                parsedGrades = objectMapper.readValue(saved.getGradesJson(), new TypeReference<Map<Integer, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedGrades = objectMapper.readValue(saved.getGradesJson(), new TypeReference<Map<Integer, Double>>() {
+                });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<String, Double> parsedAccuracies = reqAccuracies;
         if (parsedAccuracies == null && saved.getAccuraciesJson() != null && !saved.getAccuraciesJson().isBlank()) {
             try {
-                parsedAccuracies = objectMapper.readValue(saved.getAccuraciesJson(), new TypeReference<Map<String, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedAccuracies = objectMapper.readValue(saved.getAccuraciesJson(),
+                        new TypeReference<Map<String, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<String, Double> parsedTimes = reqResponseTimes;
         if (parsedTimes == null && saved.getResponseTimesJson() != null && !saved.getResponseTimesJson().isBlank()) {
             try {
-                parsedTimes = objectMapper.readValue(saved.getResponseTimesJson(), new TypeReference<Map<String, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedTimes = objectMapper.readValue(saved.getResponseTimesJson(),
+                        new TypeReference<Map<String, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         return CognitiveAssessmentResponse.builder()
@@ -643,37 +740,49 @@ public class CognitiveAssessmentService {
             try {
                 parsedProbs = objectMapper.readValue(
                         c.getClassProbabilities(),
-                        new TypeReference<Map<String, Double>>() {}
-                );
-            } catch (Exception ignored) {}
+                        new TypeReference<Map<String, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<Integer, String> parsedResponses = null;
         if (c.getResponsesJson() != null && !c.getResponsesJson().isBlank()) {
             try {
-                parsedResponses = objectMapper.readValue(c.getResponsesJson(), new TypeReference<Map<Integer, String>>() {});
-            } catch (Exception ignored) {}
+                parsedResponses = objectMapper.readValue(c.getResponsesJson(),
+                        new TypeReference<Map<Integer, String>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<Integer, Double> parsedGrades = null;
         if (c.getGradesJson() != null && !c.getGradesJson().isBlank()) {
             try {
-                parsedGrades = objectMapper.readValue(c.getGradesJson(), new TypeReference<Map<Integer, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedGrades = objectMapper.readValue(c.getGradesJson(), new TypeReference<Map<Integer, Double>>() {
+                });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<String, Double> parsedAccuracies = null;
         if (c.getAccuraciesJson() != null && !c.getAccuraciesJson().isBlank()) {
             try {
-                parsedAccuracies = objectMapper.readValue(c.getAccuraciesJson(), new TypeReference<Map<String, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedAccuracies = objectMapper.readValue(c.getAccuraciesJson(),
+                        new TypeReference<Map<String, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<String, Double> parsedTimes = null;
         if (c.getResponseTimesJson() != null && !c.getResponseTimesJson().isBlank()) {
             try {
-                parsedTimes = objectMapper.readValue(c.getResponseTimesJson(), new TypeReference<Map<String, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedTimes = objectMapper.readValue(c.getResponseTimesJson(),
+                        new TypeReference<Map<String, Double>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         boolean mlAvailable = Boolean.TRUE.equals(c.getMlAvailable());
@@ -682,7 +791,8 @@ public class CognitiveAssessmentService {
             mlStatus = CognitiveAssessmentResponse.MlModelStatusDto.builder()
                     .available(true)
                     .modelType("RandomForestClassifier")
-                    .statusMessage("Experimental prediction generated using artifact trained on synthetic data. Non-clinical demonstration metric.")
+                    .statusMessage(
+                            "Experimental prediction generated using artifact trained on synthetic data. Non-clinical demonstration metric.")
                     .prediction(c.getMlPrediction())
                     .probabilities(parsedProbs)
                     .alertTriggered(c.getAlertTriggered())
@@ -735,7 +845,8 @@ public class CognitiveAssessmentService {
                 .assessedBy(c.getAssessedBy())
                 .createdAt(c.getCreatedAt())
                 .sessionId(c.getSessionId())
-                .status(c.getStatus() != null ? c.getStatus() : (Boolean.TRUE.equals(c.getMlAvailable()) ? "COMPLETED" : "COMPLETED_PREDICTION_UNAVAILABLE"))
+                .status(c.getStatus() != null ? c.getStatus()
+                        : (Boolean.TRUE.equals(c.getMlAvailable()) ? "COMPLETED" : "COMPLETED_PREDICTION_UNAVAILABLE"))
                 .responses(parsedResponses)
                 .grades(parsedGrades)
                 .accuracies(parsedAccuracies)
@@ -747,28 +858,36 @@ public class CognitiveAssessmentService {
         Map<Integer, String> parsedResponses = null;
         if (s.getResponsesJson() != null && !s.getResponsesJson().isBlank()) {
             try {
-                parsedResponses = objectMapper.readValue(s.getResponsesJson(), new TypeReference<Map<Integer, String>>() {});
-            } catch (Exception ignored) {}
+                parsedResponses = objectMapper.readValue(s.getResponsesJson(),
+                        new TypeReference<Map<Integer, String>>() {
+                        });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<Integer, Double> parsedGrades = null;
         if (s.getGradesJson() != null && !s.getGradesJson().isBlank()) {
             try {
-                parsedGrades = objectMapper.readValue(s.getGradesJson(), new TypeReference<Map<Integer, Double>>() {});
-            } catch (Exception ignored) {}
+                parsedGrades = objectMapper.readValue(s.getGradesJson(), new TypeReference<Map<Integer, Double>>() {
+                });
+            } catch (Exception ignored) {
+            }
         }
 
         Map<String, Double> parsedTimes = null;
         if (s.getQuestionTimesJson() != null && !s.getQuestionTimesJson().isBlank()) {
             try {
-                Map<Integer, Double> intTimes = objectMapper.readValue(s.getQuestionTimesJson(), new TypeReference<Map<Integer, Double>>() {});
+                Map<Integer, Double> intTimes = objectMapper.readValue(s.getQuestionTimesJson(),
+                        new TypeReference<Map<Integer, Double>>() {
+                        });
                 if (intTimes != null) {
                     parsedTimes = new HashMap<>();
                     for (Map.Entry<Integer, Double> entry : intTimes.entrySet()) {
                         parsedTimes.put("Q" + entry.getKey(), entry.getValue());
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         CognitiveAssessmentResponse.MlModelStatusDto mlStatus = CognitiveAssessmentResponse.MlModelStatusDto.builder()
@@ -808,23 +927,30 @@ public class CognitiveAssessmentService {
     }
 
     private String resolveRiskLevel(String mlPrediction, Double acrfScore) {
-        if (mlPrediction != null && !mlPrediction.isBlank() && !"Not Available".equalsIgnoreCase(mlPrediction.trim()) && !"Prediction Unavailable".equalsIgnoreCase(mlPrediction.trim())) {
+        if (mlPrediction != null && !mlPrediction.isBlank() && !"Not Available".equalsIgnoreCase(mlPrediction.trim())
+                && !"Prediction Unavailable".equalsIgnoreCase(mlPrediction.trim())) {
             String p = mlPrediction.trim();
-            if (p.equalsIgnoreCase("Low") || p.equalsIgnoreCase("Low Risk")) return "Low Risk";
-            if (p.equalsIgnoreCase("Moderate") || p.equalsIgnoreCase("Moderate Risk")) return "Moderate Risk";
-            if (p.equalsIgnoreCase("High") || p.equalsIgnoreCase("High Risk")) return "High Risk";
+            if (p.equalsIgnoreCase("Low") || p.equalsIgnoreCase("Low Risk"))
+                return "Low Risk";
+            if (p.equalsIgnoreCase("Moderate") || p.equalsIgnoreCase("Moderate Risk"))
+                return "Moderate Risk";
+            if (p.equalsIgnoreCase("High") || p.equalsIgnoreCase("High Risk"))
+                return "High Risk";
             return p;
         }
         if (acrfScore != null && !Double.isNaN(acrfScore)) {
             double s = (acrfScore <= 1.0 && acrfScore > 0.0) ? acrfScore * 100.0 : acrfScore;
-            if (s >= 70.0) return "Low Risk";
-            if (s >= 50.0) return "Moderate Risk";
+            if (s >= 70.0)
+                return "Low Risk";
+            if (s >= 50.0)
+                return "Moderate Risk";
             return "High Risk";
         }
         return "Not Available";
     }
 
-    private CognitiveAssessmentResponse.CategoryContributionDto createContrib(String category, Double score, Double weight) {
+    private CognitiveAssessmentResponse.CategoryContributionDto createContrib(String category, Double score,
+            Double weight) {
         double contribution = Math.round(score * weight * 10000.0) / 10000.0;
         return CognitiveAssessmentResponse.CategoryContributionDto.builder()
                 .category(category)
@@ -841,9 +967,9 @@ public class CognitiveAssessmentService {
             Double orientation,
             Double recall,
             Double reasoning,
-            String reason
-    ) {
-        Double acrfScore = CognitiveScoringService.calculateAcrfScore(memory, attention, orientation, recall, reasoning);
+            String reason) {
+        Double acrfScore = CognitiveScoringService.calculateAcrfScore(memory, attention, orientation, recall,
+                reasoning);
         Map<String, Double> weightsApplied = new HashMap<>();
         weightsApplied.put("memory", 0.25);
         weightsApplied.put("attention", 0.20);
@@ -869,7 +995,8 @@ public class CognitiveAssessmentService {
                 .available(false)
                 .modelType("RandomForestClassifier")
                 .statusMessage(reason != null && !reason.isBlank()
-                        ? "AI microservice is unavailable (" + reason + "). ACRF cognitive score calculated authoritatively by backend scoring engine."
+                        ? "AI microservice is unavailable (" + reason
+                                + "). ACRF cognitive score calculated authoritatively by backend scoring engine."
                         : "AI microservice is unavailable. ACRF cognitive score calculated authoritatively by backend scoring engine.")
                 .prediction(null)
                 .probabilities(null)

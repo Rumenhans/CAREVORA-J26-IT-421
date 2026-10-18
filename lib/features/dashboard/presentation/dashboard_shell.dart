@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/responsive/responsive_builder.dart';
@@ -7,15 +8,17 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/desktop_sidebar.dart';
 import '../../../shared/widgets/mobile_bottom_nav.dart';
 import '../../../data/mock/mock_carevora_data.dart';
+import '../../auth/application/auth_controller.dart';
 
-class DashboardShell extends StatelessWidget {
+class DashboardShell extends ConsumerWidget {
   final Widget child;
 
   const DashboardShell({super.key, required this.child});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).matchedLocation;
+    final authState = ref.watch(authProvider).state;
 
     return Scaffold(
       backgroundColor: AppColors.dashboardBg,
@@ -28,9 +31,12 @@ class DashboardShell extends StatelessWidget {
       body: ResponsiveBuilder(
         mobile: (context) => Column(
           children: [
-            _buildTopBar(context, isMobile: true),
+            _buildTopBar(context, authState, isMobile: true),
             Expanded(child: child),
-            MobileBottomNav(currentRoute: location),
+            MobileBottomNav(
+              currentRoute: location,
+              isElder: authState.isElder,
+            ),
           ],
         ),
         tablet: (context) => Row(
@@ -39,7 +45,7 @@ class DashboardShell extends StatelessWidget {
             Expanded(
               child: Column(
                 children: [
-                  _buildTopBar(context, isMobile: false),
+                  _buildTopBar(context, authState, isMobile: false),
                   Expanded(child: child),
                 ],
               ),
@@ -52,7 +58,7 @@ class DashboardShell extends StatelessWidget {
             Expanded(
               child: Column(
                 children: [
-                  _buildTopBar(context, isMobile: false),
+                  _buildTopBar(context, authState, isMobile: false),
                   Expanded(child: child),
                 ],
               ),
@@ -63,7 +69,7 @@ class DashboardShell extends StatelessWidget {
     );
   }
 
-  Widget _buildTopBar(BuildContext context, {required bool isMobile}) {
+  Widget _buildTopBar(BuildContext context, AuthState authState, {required bool isMobile}) {
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 12 : 24,
@@ -111,7 +117,9 @@ class DashboardShell extends StatelessWidget {
                 ),
                 if (!isMobile)
                   Text(
-                    "Here's the overall wellness overview of your residents.",
+                    authState.isElder
+                        ? "Here's your personal wellness overview."
+                        : "Here's the overall wellness overview of your residents.",
                     style: AppTextStyles.caption,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -146,40 +154,41 @@ class DashboardShell extends StatelessWidget {
                   ),
                 ),
               if (!isMobile) const SizedBox(width: 8),
-              // Bell Notification Icon with Badge
-              Stack(
-                alignment: Alignment.topRight,
-                children: [
-                  IconButton(
-                    padding: EdgeInsets.all(isMobile ? 8 : 12),
-                    constraints: const BoxConstraints(),
-                    icon: const Icon(LucideIcons.bell, size: 20, color: AppColors.navy),
-                    onPressed: () => context.go('/dashboard/alerts'),
-                  ),
-                  Positioned(
-                    top: isMobile ? 2 : 4,
-                    right: isMobile ? 2 : 4,
-                    child: Container(
-                      width: 16,
-                      height: 16,
-                      decoration: const BoxDecoration(
-                        color: AppColors.riskHigh,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Center(
-                        child: Text(
-                          '${MockCarevoraData.alerts.length}',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+              // Bell Notification Icon with Badge (Caregivers/Staff only)
+              if (!authState.isElder)
+                Stack(
+                  alignment: Alignment.topRight,
+                  children: [
+                    IconButton(
+                      padding: EdgeInsets.all(isMobile ? 8 : 12),
+                      constraints: const BoxConstraints(),
+                      icon: const Icon(LucideIcons.bell, size: 20, color: AppColors.navy),
+                      onPressed: () => context.go('/dashboard/alerts'),
+                    ),
+                    Positioned(
+                      top: isMobile ? 2 : 4,
+                      right: isMobile ? 2 : 4,
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: const BoxDecoration(
+                          color: AppColors.riskHigh,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${MockCarevoraData.alerts.length}',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
             ],
           ),
         ],
