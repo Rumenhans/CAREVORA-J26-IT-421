@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +13,6 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../../core/responsive/responsive_builder.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/app_text_styles.dart';
 import '../../../data/mock/mock_carevora_data.dart';
 import '../../../data/models/carevora_models.dart';
 import '../../auth/application/auth_controller.dart';
@@ -77,6 +77,13 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   String? _sessionId;
   String _sessionStatus = 'IN_PROGRESS'; // 'IN_PROGRESS', 'PENDING_CAREGIVER_REVIEW', 'COMPLETED'
 
+  // Navigation transition direction (1: next/forward, -1: prev/backward)
+  int _transitionDirection = 1;
+
+  // Background slow therapeutic breathing controller for elderly wellness
+  late AnimationController _ambientBgController;
+  late Animation<double> _ambientBgAnimation;
+
   // Animated waveform controller
   late AnimationController _waveformController;
 
@@ -103,6 +110,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _initSpeech();
     _initWaveformAnimation();
     _initFloatingAnimation();
+    _initAmbientBgAnimation();
     _initSaveAnimation();
     _startSessionTimer();
     _loadResidentContext();
@@ -113,6 +121,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     _activeListeningSessionId++;
     _saveDebounceTimer?.cancel();
     _sessionTimer?.cancel();
+    _ambientBgController.dispose();
     _waveformController.dispose();
     _floatingController.dispose();
     _ambientPulseController.dispose();
@@ -130,6 +139,17 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
+  }
+
+  void _initAmbientBgAnimation() {
+    _ambientBgController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    )..repeat(reverse: true);
+    _ambientBgAnimation = CurvedAnimation(
+      parent: _ambientBgController,
+      curve: Curves.easeInOutSine,
+    );
   }
 
   void _initFloatingAnimation() {
@@ -946,6 +966,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     if (index == _currentIndex) return;
     _saveCurrentQuestionState();
     setState(() {
+      _transitionDirection = index > _currentIndex ? 1 : -1;
       _currentIndex = index;
       _responseController.text = _responses[_questions[index].id] ?? '';
       _isListening = false;
@@ -959,6 +980,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
 
     if (_currentIndex < _questions.length - 1) {
       setState(() {
+        _transitionDirection = 1;
         _currentIndex++;
         _responseController.text =
             _responses[_questions[_currentIndex].id] ?? '';
@@ -976,6 +998,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     if (_currentIndex > 0) {
       _saveCurrentQuestionState();
       setState(() {
+        _transitionDirection = -1;
         _currentIndex--;
         _responseController.text =
             _responses[_questions[_currentIndex].id] ?? '';
@@ -1238,61 +1261,12 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     final progressPct = _getProgressPct(isElder);
 
     return Scaffold(
-      backgroundColor: AppColors.dashboardBg,
+      backgroundColor: const Color(0xFFFBFBFE),
       body: Stack(
         children: [
-          // Ambient soft floating glow orbs
-          Positioned(
-            top: -50,
-            right: 40,
-            child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _floatingAnimation,
-                builder: (context, child) => Transform.translate(
-                  offset: Offset(0, _floatingAnimation.value * 1.4),
-                  child: child,
-                ),
-                child: Container(
-                  width: 320,
-                  height: 320,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        const Color(0xFF8B5CF6).withValues(alpha: 0.08),
-                        const Color(0xFF8B5CF6).withValues(alpha: 0.0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 280,
-            left: -40,
-            child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _floatingAnimation,
-                builder: (context, child) => Transform.translate(
-                  offset: Offset(0, -_floatingAnimation.value * 1.1),
-                  child: child,
-                ),
-                child: Container(
-                  width: 260,
-                  height: 260,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        const Color(0xFF6366F1).withValues(alpha: 0.06),
-                        const Color(0xFF6366F1).withValues(alpha: 0.0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          // Subtle, calm therapeutic animated background suitable for elderly users
+          Positioned.fill(
+            child: _buildSubtleTherapeuticBackground(),
           ),
 
           // Main scrollable workspace
@@ -1355,6 +1329,118 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSubtleTherapeuticBackground() {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _ambientBgAnimation,
+        builder: (context, _) {
+          final t = _ambientBgAnimation.value;
+          return Stack(
+            children: [
+              // Gentle calming base gradient
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFFAF9FF),
+                      Color(0xFFF5F1FD),
+                      Color(0xFFF7F4FE),
+                      Color(0xFFFBF9FE),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Therapeutic soft concentric wave ripples
+              CustomPaint(
+                size: Size.infinite,
+                painter: _TherapeuticRipplesPainter(animationValue: t),
+              ),
+
+              // Soft lavender aura orb (top right)
+              Positioned(
+                top: -90 + (t * 35),
+                right: -50 + ((1.0 - t) * 45),
+                child: Container(
+                  width: 460,
+                  height: 460,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF8B5CF6).withValues(alpha: 0.08),
+                        const Color(0xFF8B5CF6).withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Soft serene indigo/periwinkle aura orb (center left)
+              Positioned(
+                top: 240 + ((1.0 - t) * 40),
+                left: -90 + (t * 30),
+                child: Container(
+                  width: 420,
+                  height: 420,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF6366F1).withValues(alpha: 0.065),
+                        const Color(0xFF6366F1).withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Healing mint/teal aura orb (bottom right)
+              Positioned(
+                bottom: -80 + (t * 30),
+                right: 50 + (t * 40),
+                child: Container(
+                  width: 380,
+                  height: 380,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF0D9488).withValues(alpha: 0.038),
+                        const Color(0xFF0D9488).withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Subtle rose mist aura orb (mid right)
+              Positioned(
+                top: 480 + (t * 25),
+                right: -70 + ((1.0 - t) * 35),
+                child: Container(
+                  width: 320,
+                  height: 320,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFFEC4899).withValues(alpha: 0.032),
+                        const Color(0xFFEC4899).withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2223,17 +2309,29 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
           _buildStepIndicator(isElder),
           const SizedBox(height: 22),
 
-          // Question card with smooth animated transition between questions
+          // Question card with smooth directional animated transition between questions
           AnimatedSwitcher(
-            duration: const Duration(milliseconds: 280),
+            duration: const Duration(milliseconds: 320),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
             transitionBuilder: (child, animation) {
+              final isIncoming = child.key == ValueKey<int>(_currentIndex);
+              final double dx = isIncoming
+                  ? (_transitionDirection >= 0 ? 0.04 : -0.04)
+                  : (_transitionDirection >= 0 ? -0.04 : 0.04);
               return FadeTransition(
-                opacity: animation,
+                opacity: CurvedAnimation(
+                  parent: animation,
+                  curve: const Interval(0.1, 1.0, curve: Curves.easeOutCubic),
+                ),
                 child: SlideTransition(
                   position: Tween<Offset>(
-                    begin: const Offset(0.03, 0),
+                    begin: Offset(dx, 0),
                     end: Offset.zero,
-                  ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  )),
                   child: child,
                 ),
               );
@@ -2269,8 +2367,8 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             child: child,
           ),
           child: Container(
-            width: 50,
-            height: 50,
+            width: 52,
+            height: 52,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
@@ -2291,7 +2389,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               '${_currentIndex + 1}',
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 21,
+                fontSize: 22,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -2305,7 +2403,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               Text(
                 'Question ${_currentIndex + 1} of $_totalCount',
                 style: const TextStyle(
-                  fontSize: 20,
+                  fontSize: 21,
                   fontWeight: FontWeight.w800,
                   color: AppColors.navy,
                   letterSpacing: -0.3,
@@ -2314,7 +2412,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
               const SizedBox(height: 3),
               Text(
                 isElder
-                    ? 'Questions Answered: $_answeredCount/$_totalCount ($progressPct%) • Status: Self-Response'
+                    ? 'Questions Answered: $_answeredCount/$_totalCount ($progressPct%) • Self-Paced Wellness'
                     : 'Completed: $_fullyCompletedCount/$_totalCount ($progressPct%) • Answered: $_answeredCount • Graded: $_gradedCount',
                 style: const TextStyle(
                   fontSize: 12.5,
@@ -2344,57 +2442,102 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         final q = _questions[i];
         final bool isCurrent = i == _currentIndex;
         final bool isDone = isElder ? _isAnswered(q.id) : _isFullyCompleted(q.id);
-        final Color color = isCurrent
-            ? AppColors.primary
-            : isDone
-                ? AppColors.riskLow
-                : const Color(0xFFEDE9FE);
-
-        Widget bar = AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          height: isCurrent ? 8 : 6,
-          margin: EdgeInsets.only(right: i == _questions.length - 1 ? 0 : 5),
-          decoration: BoxDecoration(
-            gradient: isCurrent
-                ? const LinearGradient(
-                    colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
-                  )
-                : null,
-            color: isCurrent ? null : color,
-            borderRadius: BorderRadius.circular(4),
-            boxShadow: isCurrent
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFF6C3FC5).withValues(alpha: 0.38),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-            border: (!isCurrent && !isDone)
-                ? Border.all(color: const Color(0xFFDDD6FE))
-                : null,
-          ),
-        );
-
-        if (isCurrent) {
-          bar = AnimatedBuilder(
-            animation: _ambientPulseAnimation,
-            builder: (context, child) => Transform.scale(
-              scaleY: 0.94 + 0.08 * _ambientPulseAnimation.value,
-              child: child,
-            ),
-            child: bar,
-          );
-        }
 
         return Expanded(
+          flex: isCurrent ? 3 : 2,
           child: Tooltip(
-            message: 'Q${q.id}: ${q.category}${isDone ? ' (Completed)' : ''}',
+            message: 'Question ${i + 1}: ${q.category}${isDone ? ' (Completed)' : ''}',
             child: InkWell(
               onTap: () => _goToQuestion(i),
-              borderRadius: BorderRadius.circular(5),
-              child: bar,
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
+                height: isCurrent ? 28 : 22,
+                margin: EdgeInsets.only(right: i == _questions.length - 1 ? 0 : 6),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  gradient: isCurrent
+                      ? const LinearGradient(
+                          colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : isDone
+                          ? const LinearGradient(
+                              colors: [Color(0xFF10B981), Color(0xFF059669)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : null,
+                  color: (isCurrent || isDone) ? null : const Color(0xFFF3EDFD),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isCurrent
+                        ? const Color(0xFF8B5CF6)
+                        : isDone
+                            ? const Color(0xFF059669)
+                            : const Color(0xFFDDD6FE),
+                    width: isCurrent ? 1.5 : 1.0,
+                  ),
+                  boxShadow: isCurrent
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : isDone
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.18),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ]
+                          : null,
+                ),
+                alignment: Alignment.center,
+                child: isCurrent
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Q${i + 1}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
+                      )
+                    : isDone
+                        ? const Icon(
+                            LucideIcons.check,
+                            size: 12,
+                            color: Colors.white,
+                          )
+                        : Text(
+                            '${i + 1}',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF8E8CA3),
+                            ),
+                          ),
+              ),
             ),
           ),
         );
@@ -2405,181 +2548,212 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   Widget _buildQuestionCard(CognitiveQuestionItem currentQ, bool isElder) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(26, 22, 26, 24),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE5E1F6), width: 1.4),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE9E4F7), width: 1.3),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C3FC5).withValues(alpha: 0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
+            color: const Color(0xFF6C3FC5).withValues(alpha: 0.06),
+            blurRadius: 28,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    AnimatedBuilder(
-                      animation: _floatingAnimation,
-                      builder: (context, child) => Transform.translate(
-                        offset: Offset(0, _floatingAnimation.value * 0.35),
-                        child: child,
-                      ),
-                      child: _buildInfoChip(
-                        label: currentQ.category,
-                        icon: LucideIcons.brain,
-                        background: const Color(0xFFF5F3FF),
-                        color: AppColors.primary,
-                        borderColor: const Color(0xFFDDD6FE),
-                      ),
-                    ),
-                    _buildInfoChip(
-                      label: 'Domain: ${currentQ.domain}',
-                      icon: LucideIcons.compass,
-                      color: const Color(0xFF475569),
-                      background: const Color(0xFFF8FAFC),
-                      borderColor: const Color(0xFFE2E8F0),
-                    ),
-                  ],
-                ),
+          // Top subtle gradient accent strip
+          Container(
+            height: 4.5,
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              gradient: LinearGradient(
+                colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6), Color(0xFFA78BFA)],
               ),
-              const SizedBox(width: 10),
-              _buildListenButton(currentQ.prompt),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            currentQ.prompt,
-            style: const TextStyle(
-              fontSize: 24,
-              height: 1.4,
-              fontWeight: FontWeight.w700,
-              color: AppColors.navy,
-              letterSpacing: -0.3,
             ),
           ),
-          if (currentQ.promptSinhala.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFF5F3FF), Color(0xFFFAF5FF)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(26, 20, 26, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row: Category & Domain pills, Listen TTS button
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          AnimatedBuilder(
+                            animation: _floatingAnimation,
+                            builder: (context, child) => Transform.translate(
+                              offset: Offset(0, _floatingAnimation.value * 0.35),
+                              child: child,
+                            ),
+                            child: _buildInfoChip(
+                              label: currentQ.category,
+                              icon: LucideIcons.brain,
+                              background: const Color(0xFFF5F3FF),
+                              color: AppColors.primary,
+                              borderColor: const Color(0xFFDDD6FE),
+                            ),
+                          ),
+                          _buildInfoChip(
+                            label: 'Domain: ${currentQ.domain}',
+                            icon: LucideIcons.compass,
+                            color: const Color(0xFF475569),
+                            background: const Color(0xFFF8FAFC),
+                            borderColor: const Color(0xFFE2E8F0),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildListenButton(currentQ.prompt),
+                  ],
                 ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFDDD6FE), width: 1.2),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF6C3FC5).withValues(alpha: 0.04),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
+                const SizedBox(height: 20),
+
+                // Question Prompt (high-contrast, large, accessible for elderly)
+                Text(
+                  currentQ.prompt,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    height: 1.45,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.navy,
+                    letterSpacing: -0.3,
                   ),
-                ],
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                ),
+
+                // Sinhala Bilingual Prompt Card
+                if (currentQ.promptSinhala.isNotEmpty) ...[
+                  const SizedBox(height: 14),
                   Container(
-                    margin: const EdgeInsets.only(top: 3),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                        colors: [Color(0xFFFAF8FF), Color(0xFFF3EDFD)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFFDDD6FE), width: 1.3),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF6C3FC5).withValues(alpha: 0.28),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
+                          color: const Color(0xFF6C3FC5).withValues(alpha: 0.04),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
-                    child: const Text(
-                      'සිංහල',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      currentQ.promptSinhala,
-                      style: const TextStyle(
-                        fontSize: 21,
-                        height: 1.5,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF4338CA),
-                      ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          margin: const EdgeInsets.only(top: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF6C3FC5).withValues(alpha: 0.28),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Text(
+                            'සිංහල',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            currentQ.promptSinhala,
+                            style: const TextStyle(
+                              fontSize: 21,
+                              height: 1.55,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF3B2F7E),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 18),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFFBEB),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFFDE68A)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AnimatedBuilder(
-                  animation: _ambientPulseAnimation,
-                  builder: (context, child) => Transform.scale(
-                    scale: _ambientPulseAnimation.value,
-                    child: child,
+                const SizedBox(height: 18),
+
+                // Helpful Tip / AI Guidance Card
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
                   ),
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      isElder ? LucideIcons.lightbulb : LucideIcons.sparkles,
-                      size: 16,
-                      color: const Color(0xFFB45309),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      isElder
-                          ? 'Helpful Tip: Take your time. Speak clearly into the microphone or type your answer.'
-                          : 'AI Guidance: ${currentQ.aiTip}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF92400E),
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AnimatedBuilder(
+                        animation: _ambientPulseAnimation,
+                        builder: (context, child) => Transform.scale(
+                          scale: _ambientPulseAnimation.value,
+                          child: child,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            isElder ? LucideIcons.lightbulb : LucideIcons.sparkles,
+                            size: 16,
+                            color: const Color(0xFFB45309),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            isElder
+                                ? 'Helpful Tip: Take your time. Speak clearly into the microphone or type your answer.'
+                                : 'AI Guidance: ${currentQ.aiTip}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF92400E),
+                              fontWeight: FontWeight.w600,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -2591,51 +2765,101 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Widget _buildListenButton(String prompt) {
-    final Color fg = _isSpeaking ? Colors.white : AppColors.primary;
+    final bool isPlaying = _isSpeaking;
     return Tooltip(
-      message: _isSpeaking ? 'Stop audio' : 'Read question aloud',
+      message: isPlaying ? 'Stop reading' : 'Read question aloud',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: () => _toggleTts(prompt),
           borderRadius: BorderRadius.circular(24),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            duration: const Duration(milliseconds: 220),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
             decoration: BoxDecoration(
-              color: _isSpeaking ? AppColors.primary : const Color(0xFFF5F3FF),
+              gradient: isPlaying
+                  ? const LinearGradient(
+                      colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                  : const LinearGradient(
+                      colors: [Color(0xFFFAF7FF), Color(0xFFF3EDFD)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: _isSpeaking ? AppColors.primary : const Color(0xFFDDD6FE),
-                width: 1.2,
+                color: isPlaying ? const Color(0xFF6C3FC5) : const Color(0xFFDDD6FE),
+                width: 1.3,
               ),
-              boxShadow: _isSpeaking
+              boxShadow: isPlaying
                   ? [
                       BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
+                        color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
                     ]
-                  : [],
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  _isSpeaking ? LucideIcons.volume2 : LucideIcons.volumeX,
-                  size: 16,
-                  color: fg,
-                ),
-                const SizedBox(width: 7),
-                Text(
-                  _isSpeaking ? 'Stop Audio' : 'Read Aloud',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: fg,
+                if (isPlaying) ...[
+                  // Mini 3-bar animated soundwave equalizer
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(3, (barIdx) {
+                      return AnimatedBuilder(
+                        animation: _waveformController,
+                        builder: (context, _) {
+                          final phase = (_waveformController.value + barIdx * 0.33) % 1.0;
+                          final barHeight = 6.0 + 8.0 * (phase < 0.5 ? phase * 2 : (1.0 - phase) * 2);
+                          return Container(
+                            width: 2.5,
+                            height: barHeight,
+                            margin: const EdgeInsets.only(right: 2.5),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(1.5),
+                            ),
+                          );
+                        },
+                      );
+                    }),
                   ),
-                ),
+                  const SizedBox(width: 5),
+                  const Icon(LucideIcons.square, size: 14, color: Colors.white),
+                  const SizedBox(width: 7),
+                  const Text(
+                    'Stop Audio',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ] else ...[
+                  const Icon(LucideIcons.volume2, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Read Aloud',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2645,44 +2869,72 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
   }
 
   Widget _buildMicButton() {
-    final Color base = _isListening ? AppColors.riskHigh : AppColors.primary;
     return Tooltip(
-      message: _isListening ? 'Stop listening' : 'Tap to speak',
+      message: _isListening ? 'Stop listening' : 'Tap to speak your answer',
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           onTap: _toggleListening,
           child: SizedBox(
-            width: 80,
-            height: 80,
+            width: 84,
+            height: 84,
             child: Stack(
               alignment: Alignment.center,
               children: [
+                // Outer breathing or ripple ring
                 if (_isListening) ...[
                   AnimatedBuilder(
                     animation: _waveformController,
                     builder: (context, _) {
                       final v = _waveformController.value;
                       return Container(
-                        width: 64 + 16 * v,
-                        height: 64 + 16 * v,
+                        width: 66 + 18 * v,
+                        height: 66 + 18 * v,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: base.withValues(alpha: 0.25 * (1 - v)),
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.25 * (1.0 - v)),
                         ),
                       );
                     },
                   ),
+                  AnimatedBuilder(
+                    animation: _waveformController,
+                    builder: (context, _) {
+                      final v = (_waveformController.value + 0.5) % 1.0;
+                      return Container(
+                        width: 66 + 18 * v,
+                        height: 66 + 18 * v,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.18 * (1.0 - v)),
+                        ),
+                      );
+                    },
+                  ),
+                ] else ...[
+                  AnimatedBuilder(
+                    animation: _ambientPulseAnimation,
+                    builder: (context, child) => Container(
+                      width: 66 + (8 * _ambientPulseAnimation.value),
+                      height: 66 + (8 * _ambientPulseAnimation.value),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.14 * _ambientPulseAnimation.value),
+                      ),
+                    ),
+                  ),
                 ],
+                // Main tactile circle button
                 AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 64,
-                  height: 64,
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  width: 66,
+                  height: 66,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: _isListening
                         ? const LinearGradient(
-                            colors: [Color(0xFFF87171), AppColors.riskHigh],
+                            colors: [Color(0xFFF43F5E), Color(0xFFE11D48)],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           )
@@ -2693,16 +2945,19 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                           ),
                     boxShadow: [
                       BoxShadow(
-                        color: base.withValues(alpha: 0.38),
-                        blurRadius: 16,
+                        color: (_isListening ? const Color(0xFFE11D48) : const Color(0xFF6C3FC5))
+                            .withValues(alpha: 0.38),
+                        blurRadius: 18,
                         offset: const Offset(0, 6),
                       ),
                     ],
                   ),
-                  child: Icon(
-                    _isListening ? LucideIcons.micOff : LucideIcons.mic,
-                    color: Colors.white,
-                    size: 26,
+                  child: Center(
+                    child: Icon(
+                      _isListening ? LucideIcons.micOff : LucideIcons.mic,
+                      color: Colors.white,
+                      size: 28,
+                    ),
                   ),
                 ),
               ],
@@ -2721,44 +2976,59 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         return FadeTransition(opacity: animation, child: child);
       },
       child: isAnswered
-          ? Container(
+          ? AnimatedBuilder(
               key: const ValueKey('answered_chip'),
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6.5),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFDCFCE7), Color(0xFFD1FAE5)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF86EFAC),
-                  width: 1.2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF16A34A).withValues(alpha: 0.12),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text('✨', style: TextStyle(fontSize: 13)),
-                  SizedBox(width: 6),
-                  Text(
-                    'Answer Saved',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF14532D),
-                      letterSpacing: 0.2,
+              animation: _savePulseController,
+              builder: (context, child) {
+                final scale = _savePulseController.isAnimating ? _saveScaleAnimation.value : 1.0;
+                final glow = _savePulseController.isAnimating ? _saveGlowAnimation.value : 0.0;
+                return Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6.5),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFDCFCE7), Color(0xFFD1FAE5)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF86EFAC),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF16A34A).withValues(alpha: 0.12 + 0.25 * glow),
+                          blurRadius: 6 + 8 * glow,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Transform.scale(
+                          scale: _savePulseController.isAnimating
+                              ? (0.8 + 0.4 * _saveCheckmarkAnimation.value)
+                              : 1.0,
+                          child: const Text('✨', style: TextStyle(fontSize: 13)),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Answer Saved',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF14532D),
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             )
           : const SizedBox.shrink(key: ValueKey('empty_chip')),
     );
@@ -3227,7 +3497,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
       children: [
         Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 10,
+          spacing: 12,
           runSpacing: 8,
           children: [
             OutlinedButton.icon(
@@ -3236,15 +3506,16 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                 foregroundColor: AppColors.primary,
                 backgroundColor: Colors.white,
                 side: const BorderSide(color: Color(0xFFDDD6FE), width: 1.5),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                 ),
+                elevation: 0,
               ),
               icon: const Icon(LucideIcons.rotateCcw, size: 16),
               label: const Text(
                 'Repeat Question',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
               ),
             ),
             _buildInfoChip(
@@ -3260,7 +3531,7 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         ),
         Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 10,
+          spacing: 12,
           runSpacing: 8,
           children: [
             if (_currentIndex > 0)
@@ -3270,15 +3541,16 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                   foregroundColor: AppColors.navy,
                   backgroundColor: Colors.white,
                   side: const BorderSide(color: Color(0xFFE5E1F6), width: 1.5),
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                   ),
+                  elevation: 0,
                 ),
-                icon: const Icon(LucideIcons.chevronLeft, size: 16),
+                icon: const Icon(LucideIcons.chevronLeft, size: 17),
                 label: const Text(
                   '← Prev',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
                 ),
               ),
             _buildPrimaryActionButton(
@@ -3310,24 +3582,24 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
         child: Ink(
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFF6C3FC5), Color(0xFF8B5CF6)],
+              colors: [Color(0xFF6C3FC5), Color(0xFF7C3AED)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF6C3FC5).withValues(alpha: 0.35),
-                blurRadius: 14,
+                color: const Color(0xFF6C3FC5).withValues(alpha: 0.38),
+                blurRadius: 16,
                 offset: const Offset(0, 5),
               ),
             ],
           ),
           child: InkWell(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 15),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -3335,12 +3607,13 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
                     label,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Icon(icon, size: 16, color: Colors.white),
+                  const SizedBox(width: 9),
+                  Icon(icon, size: 17, color: Colors.white),
                 ],
               ),
             ),
@@ -3422,15 +3695,23 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: List.generate(24, (i) {
-                final waveHeight = _isListening
-                    ? (10 + 16 * ((i + _waveformController.value * 24) % 6) / 6)
-                    : (4.0 + 4.0 * ((i * 7) % 5) / 5);
+                final double phase = (i / 24.0 + _waveformController.value) % 1.0;
+                final double waveHeight = _isListening
+                    ? (8.0 + 18.0 * (0.5 + 0.5 * math.sin(phase * 2 * math.pi).abs()))
+                    : 4.5;
                 return Container(
                   width: 3.5,
                   height: waveHeight,
                   margin: const EdgeInsets.symmetric(horizontal: 2),
                   decoration: BoxDecoration(
-                    color: _isListening ? AppColors.riskLow : AppColors.lilac,
+                    gradient: _isListening
+                        ? const LinearGradient(
+                            colors: [Color(0xFF10B981), Color(0xFF059669)],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          )
+                        : null,
+                    color: _isListening ? null : const Color(0xFFDDD6FE),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 );
@@ -3539,45 +3820,56 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
             isElder ? 'Your Answer Progress' : 'Assessment Progress',
           ),
           const SizedBox(height: 20),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 120,
-                height: 120,
-                child: CircularProgressIndicator(
-                  value: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
-                  strokeWidth: 11,
-                  strokeCap: StrokeCap.round,
-                  backgroundColor: const Color(0xFFF3F0FF),
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                    AppColors.primary,
-                  ),
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+              begin: 0.0,
+              end: _totalCount == 0 ? 0.0 : (progressPct / 100.0),
+            ),
+            duration: const Duration(milliseconds: 550),
+            curve: Curves.easeOutCubic,
+            builder: (context, animatedVal, _) {
+              final pctInt = (animatedVal * 100).round();
+              return Stack(
+                alignment: Alignment.center,
                 children: [
-                  Text(
-                    '$progressPct%',
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.navy,
-                      letterSpacing: -0.5,
+                  SizedBox(
+                    width: 130,
+                    height: 130,
+                    child: CircularProgressIndicator(
+                      value: animatedVal,
+                      strokeWidth: 12,
+                      strokeCap: StrokeCap.round,
+                      backgroundColor: const Color(0xFFF3EDFF),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        AppColors.primary,
+                      ),
                     ),
                   ),
-                  Text(
-                    isElder ? 'Answered' : 'Completed',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.muted,
-                    ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$pctInt%',
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.navy,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      Text(
+                        isElder ? 'Answered' : 'Completed',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.muted,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
-              ),
-            ],
+              );
+            },
           ),
           const SizedBox(height: 20),
           if (isElder) ...[
@@ -5302,7 +5594,43 @@ class _AssessmentSessionPageState extends ConsumerState<AssessmentSessionPage>
     );
   }
 
-  Widget _buildCategoryBadge(String title, double score, String weight) {
-    return _buildCategoryCard(title, score, weight, LucideIcons.brain);
+}
+
+/// Subtle, calming concentric wave ripples custom painter for elderly cognitive wellness
+class _TherapeuticRipplesPainter extends CustomPainter {
+  final double animationValue;
+
+  _TherapeuticRipplesPainter({required this.animationValue});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint1 = Paint()
+      ..color = const Color(0xFF8B5CF6).withValues(alpha: 0.024)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.3;
+
+    final paint2 = Paint()
+      ..color = const Color(0xFF6366F1).withValues(alpha: 0.018)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    // Gentle therapeutic breathing ripple wave center 1 (top right)
+    final center1 = Offset(size.width * 0.88, size.height * 0.12);
+    for (int i = 1; i <= 3; i++) {
+      final r = 90.0 * i + (animationValue * 30.0);
+      canvas.drawCircle(center1, r, paint1);
+    }
+
+    // Gentle therapeutic breathing ripple wave center 2 (bottom left)
+    final center2 = Offset(size.width * 0.08, size.height * 0.72);
+    for (int i = 1; i <= 3; i++) {
+      final r = 80.0 * i + ((1.0 - animationValue) * 26.0);
+      canvas.drawCircle(center2, r, paint2);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TherapeuticRipplesPainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue;
   }
 }

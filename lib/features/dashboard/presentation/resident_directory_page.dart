@@ -1302,6 +1302,22 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
               ),
             ],
           ),
+          if (_memoryGameProgress != null && _memoryGameProgress!.totalCompletedSessions > 0) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(LucideIcons.gamepad2, size: 13, color: AppColors.primary),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Memory Practice: ${_memoryGameProgress!.hasRepeatedDecline ? "Needs Observation" : ((_memoryGameProgress!.averageScore ?? 0) >= 80.0 ? "Good Condition" : "Stable Condition")} (${_memoryGameProgress!.averageScore?.toStringAsFixed(1) ?? "--"}% avg)',
+                    style: const TextStyle(fontSize: 12, color: AppColors.body, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           const Text(
             'ACRF is a weighted wellness metric. Model trained on synthetic data. Non-diagnostic.',
@@ -1726,6 +1742,82 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
               ),
             ),
           ] else ...[
+            // Orderly Caregiver Memory Condition Banner
+            if (totalSessions > 0) ...[
+              Builder(
+                builder: (context) {
+                  final avgScore = progress?.averageScore;
+                  final isDecline = progress?.hasRepeatedDecline == true || (avgScore != null && avgScore < 60.0);
+                  final isGood = !isDecline && avgScore != null && avgScore >= 80.0;
+
+                  final Color bannerColor = isGood
+                      ? const Color(0xFF047857)
+                      : (isDecline ? const Color(0xFFB45309) : const Color(0xFF1D4ED8));
+                  final Color bannerBg = isGood
+                      ? const Color(0xFFECFDF5)
+                      : (isDecline ? const Color(0xFFFEF3C7) : const Color(0xFFEFF6FF));
+                  final Color bannerBorder = isGood
+                      ? const Color(0xFFA7F3D0)
+                      : (isDecline ? const Color(0xFFFDE68A) : const Color(0xFFBFDBFE));
+                  final IconData bannerIcon = isGood
+                      ? LucideIcons.checkCircle2
+                      : (isDecline ? LucideIcons.alertTriangle : LucideIcons.activity);
+
+                  final String conditionLabel = isGood
+                      ? 'Memory Condition: Good (Healthy Recall)'
+                      : (isDecline
+                          ? 'Memory Condition: Needs Observation'
+                          : 'Memory Condition: Fair (Stable)');
+
+                  final String conditionNote = isGood
+                      ? 'Strong cognitive recall across the 3 memory games'
+                      : (isDecline
+                          ? 'Recent game variation observed. Supportive practice advised'
+                          : 'Consistent mental recall within expected baseline range');
+
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: bannerBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: bannerBorder),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(bannerIcon, size: 14, color: bannerColor),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                conditionLabel,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: bannerColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          conditionNote,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: bannerColor.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+
             // Sessions Completed Counter
             Container(
               width: double.infinity,
@@ -1799,13 +1891,62 @@ class _ResidentDirectoryPageState extends ConsumerState<ResidentDirectoryPage> {
   }
 
   Widget _buildGameScoreRow(String gameTitle, double? score) {
+    String statusTag;
+    Color tagColor;
+    Color tagBg;
+
+    if (score == null) {
+      statusTag = 'Not Played';
+      tagColor = AppColors.muted;
+      tagBg = AppColors.surfaceSecondary;
+    } else if (score >= 80.0) {
+      statusTag = 'Good';
+      tagColor = const Color(0xFF047857);
+      tagBg = const Color(0xFFECFDF5);
+    } else if (score >= 60.0) {
+      statusTag = 'Fair';
+      tagColor = const Color(0xFF1D4ED8);
+      tagBg = const Color(0xFFEFF6FF);
+    } else {
+      statusTag = 'Needs Practice';
+      tagColor = const Color(0xFFB45309);
+      tagBg = const Color(0xFFFEF3C7);
+    }
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          gameTitle,
-          style: const TextStyle(fontSize: 12.5, color: AppColors.navy),
+        Expanded(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  gameTitle,
+                  style: const TextStyle(fontSize: 12, color: AppColors.navy),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: tagBg,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  statusTag,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                    color: tagColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+        const SizedBox(width: 6),
         Text(
           MemoryGameService.formatScore(score),
           style: TextStyle(

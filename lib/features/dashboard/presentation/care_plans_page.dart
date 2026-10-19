@@ -37,8 +37,12 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
   bool _isLoadingWellness = false;
   String? _wellnessError;
 
+  // Active domain selector: 0 = Cognitive, 1 = Emotional, 2 = Metabolic
+  int _selectedDomainIndex = 0;
+
   // Cognitive history view state
   bool _showCognitiveHistory = false;
+  bool _showSessionHistory = false;
 
   @override
   void initState() {
@@ -125,7 +129,9 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
   Future<void> _selectResident(CarePlanResident resident) async {
     setState(() {
       _selectedResident = resident;
+      _selectedDomainIndex = 0;
       _showCognitiveHistory = false;
+      _showSessionHistory = false;
     });
     await _loadResidentWellness(resident);
   }
@@ -178,11 +184,13 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
   void _clearSelectedResident() {
     setState(() {
       _selectedResident = null;
+      _selectedDomainIndex = 0;
       _cognitiveData = null;
       _emotionalData = null;
       _metabolicData = null;
       _memoryGameProgress = null;
       _showCognitiveHistory = false;
+      _showSessionHistory = false;
     });
   }
 
@@ -674,19 +682,363 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
         ] else if (_wellnessError != null) ...[
           _buildErrorBanner(_wellnessError!, () => _loadResidentWellness(resident)),
         ] else ...[
-          // THREE SEPARATE RECOMMENDATION CARDS
-          // 1. Cognitive Wellness (Includes Integrated Memory Games Progress)
-          _buildCognitiveWellnessCard(resident),
-          const SizedBox(height: 20),
+          // THREE INTERACTIVE DOMAIN SELECTOR CARDS
+          _buildDomainSelectorCards(resident),
+          const SizedBox(height: 14),
 
-          // 2. Emotional Wellness
-          _buildEmotionalWellnessCard(),
-          const SizedBox(height: 20),
+          // ACTIVE FOCUS DOMAIN BANNER
+          _buildActiveDomainBanner(),
+          const SizedBox(height: 16),
 
-          // 3. Metabolic Wellness
-          _buildMetabolicWellnessCard(),
+          // ACTIVE DOMAIN DETAIL CARD (IndexedStack preserves state & tests)
+          IndexedStack(
+            index: _selectedDomainIndex,
+            children: [
+              _buildCognitiveWellnessCard(resident),
+              _buildEmotionalWellnessCard(),
+              _buildMetabolicWellnessCard(),
+            ],
+          ),
         ],
       ],
+    );
+  }
+
+  // ----------------------------------------------------
+  // INTERACTIVE DOMAIN SELECTOR CARDS
+  // ----------------------------------------------------
+  Widget _buildDomainSelectorCards(CarePlanResident resident) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 720;
+        if (isWide) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _buildCognitiveDomainCard(resident)),
+              const SizedBox(width: 14),
+              Expanded(child: _buildEmotionalDomainCard()),
+              const SizedBox(width: 14),
+              Expanded(child: _buildMetabolicDomainCard()),
+            ],
+          );
+        } else {
+          return Column(
+            children: [
+              _buildCognitiveDomainCard(resident),
+              const SizedBox(height: 12),
+              _buildEmotionalDomainCard(),
+              const SizedBox(height: 12),
+              _buildMetabolicDomainCard(),
+            ],
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildCognitiveDomainCard(CarePlanResident resident) {
+    final isSelected = _selectedDomainIndex == 0;
+    final cog = _cognitiveData;
+    final hasCog = cog != null && cog.hasAssessment;
+    final rec = cog?.recommendation;
+    final accuracyStr = hasCog ? CarePlansService.formatTaskAccuracyScore(cog.taskAccuracyScore) : null;
+    final dateStr = hasCog ? _formatDate(cog.assessmentDate) : null;
+
+    final badgeLabel = hasCog && rec != null ? rec.categoryLabel : 'AWAITING EVAL';
+    final badgeBg = hasCog && rec != null ? rec.badgeBg : const Color(0xFFF3F4F6);
+    final badgeColor = hasCog && rec != null ? rec.badgeColor : AppColors.muted;
+
+    return _buildDomainCardContainer(
+      index: 0,
+      isSelected: isSelected,
+      accentColor: AppColors.primary,
+      selectedBgColor: const Color(0xFFFAF7FF),
+      iconBgColor: AppColors.primarySoft,
+      iconColor: AppColors.primary,
+      icon: LucideIcons.brain,
+      title: 'Cognitive Wellness',
+      badgeLabel: badgeLabel,
+      badgeBg: badgeBg,
+      badgeColor: badgeColor,
+      subtitle: hasCog
+          ? 'Task Accuracy: $accuracyStr • $dateStr'
+          : 'Baseline clinical assessment pending',
+      tagText: 'Practice & Memory Games',
+    );
+  }
+
+  Widget _buildEmotionalDomainCard() {
+    final isSelected = _selectedDomainIndex == 1;
+    final emo = _emotionalData;
+    final hasEmo = emo != null && emo.hasData;
+
+    final String badgeLabel;
+    final Color badgeBg;
+    final Color badgeColor;
+
+    if (hasEmo && emo.riskLevel != null) {
+      badgeLabel = '${emo.riskLevel} RISK';
+      badgeColor = _getRiskBadgeColor(emo.riskLevel!);
+      badgeBg = badgeColor.withValues(alpha: 0.12);
+    } else {
+      badgeLabel = 'STABLE';
+      badgeColor = const Color(0xFF059669);
+      badgeBg = const Color(0xFFECFDF5);
+    }
+
+    return _buildDomainCardContainer(
+      index: 1,
+      isSelected: isSelected,
+      accentColor: const Color(0xFFDB2777),
+      selectedBgColor: const Color(0xFFFDF2F8),
+      iconBgColor: const Color(0xFFFCE7F3),
+      iconColor: const Color(0xFFDB2777),
+      icon: LucideIcons.heartHandshake,
+      title: 'Emotional Wellness',
+      badgeLabel: badgeLabel,
+      badgeBg: badgeBg,
+      badgeColor: badgeColor,
+      subtitle: hasEmo && emo.socialScore != null
+          ? 'Social Score: ${emo.socialScore!.toStringAsFixed(0)}% • ${emo.trajectory ?? 'Stable'}'
+          : 'Social connectedness & affect monitoring',
+      tagText: 'Music & Activity Plans',
+    );
+  }
+
+  Widget _buildMetabolicDomainCard() {
+    final isSelected = _selectedDomainIndex == 2;
+
+    return _buildDomainCardContainer(
+      index: 2,
+      isSelected: isSelected,
+      accentColor: const Color(0xFFD97706),
+      selectedBgColor: const Color(0xFFFFFBEB),
+      iconBgColor: const Color(0xFFFEF3C7),
+      iconColor: const Color(0xFFD97706),
+      icon: LucideIcons.activity,
+      title: 'Metabolic Wellness',
+      badgeLabel: 'Sync Pending',
+      badgeBg: const Color(0xFFFEF3C7),
+      badgeColor: const Color(0xFFD97706),
+      subtitle: 'Vitals tracking, glucose & sleep telemetry',
+      tagText: 'Non-invasive Sync',
+    );
+  }
+
+  Widget _buildDomainCardContainer({
+    required int index,
+    required bool isSelected,
+    required Color accentColor,
+    required Color selectedBgColor,
+    required Color iconBgColor,
+    required Color iconColor,
+    required IconData icon,
+    required String title,
+    required String badgeLabel,
+    required Color badgeBg,
+    required Color badgeColor,
+    required String subtitle,
+    required String tagText,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _selectedDomainIndex = index;
+          });
+        },
+        borderRadius: BorderRadius.circular(16),
+        hoverColor: accentColor.withValues(alpha: 0.04),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected ? selectedBgColor : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? accentColor : AppColors.border,
+              width: isSelected ? 2.0 : 1.0,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isSelected
+                    ? accentColor.withValues(alpha: 0.12)
+                    : Colors.black.withValues(alpha: 0.02),
+                blurRadius: isSelected ? 10 : 6,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: iconBgColor,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: iconColor, size: 20),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: badgeBg,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: badgeColor.withValues(alpha: 0.25)),
+                    ),
+                    child: Text(
+                      badgeLabel,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: badgeColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.navy,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.muted,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      tagText,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.body,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (isSelected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.check, size: 11, color: accentColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Active View',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: accentColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Text(
+                          'View',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                        SizedBox(width: 2),
+                        Icon(LucideIcons.arrowRight, size: 12, color: AppColors.muted),
+                      ],
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveDomainBanner() {
+    final String domainName;
+    final Color domainColor;
+    final IconData domainIcon;
+
+    if (_selectedDomainIndex == 0) {
+      domainName = 'Cognitive Clinical Protocol & Care Plan';
+      domainColor = AppColors.primary;
+      domainIcon = LucideIcons.brain;
+    } else if (_selectedDomainIndex == 1) {
+      domainName = 'Emotional Care Protocol & Interventions';
+      domainColor = const Color(0xFFDB2777);
+      domainIcon = LucideIcons.heartHandshake;
+    } else {
+      domainName = 'Metabolic Health Telemetry Protocol';
+      domainColor = const Color(0xFFD97706);
+      domainIcon = LucideIcons.activity;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: domainColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: domainColor.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(domainIcon, size: 15, color: domainColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Active Focus: $domainName',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: domainColor,
+              ),
+            ),
+          ),
+          const Text(
+            'Click cards above to switch',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: AppColors.muted,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -772,7 +1124,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Cognitive Wellness',
+                        'Cognitive Clinical Protocol & Care Plan',
                         style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -917,6 +1269,67 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                     ),
                   ],
                 ),
+                if (_memoryGameProgress != null &&
+                    _memoryGameProgress!.totalCompletedSessions > 0) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: AppColors.lavenderBg.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(LucideIcons.gamepad2, size: 16, color: AppColors.primary),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Memory Games Status: ',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navy,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (_memoryGameProgress!.averageScore ?? 0) >= 80.0 &&
+                                    !_memoryGameProgress!.hasRepeatedDecline
+                                ? AppColors.riskLowBg
+                                : (_memoryGameProgress!.hasRepeatedDecline
+                                    ? const Color(0xFFFEF3C7)
+                                    : const Color(0xFFEFF6FF)),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            (_memoryGameProgress!.averageScore ?? 0) >= 80.0 &&
+                                    !_memoryGameProgress!.hasRepeatedDecline
+                                ? 'Good Condition'
+                                : (_memoryGameProgress!.hasRepeatedDecline
+                                    ? 'Needs Observation'
+                                    : 'Stable Condition'),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: (_memoryGameProgress!.averageScore ?? 0) >= 80.0 &&
+                                      !_memoryGameProgress!.hasRepeatedDecline
+                                  ? AppColors.riskLow
+                                  : (_memoryGameProgress!.hasRepeatedDecline
+                                      ? const Color(0xFFB45309)
+                                      : const Color(0xFF1D4ED8)),
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${_memoryGameProgress!.totalCompletedSessions} sessions (${_memoryGameProgress!.averageScore?.toStringAsFixed(1) ?? "--"}% avg)',
+                          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
 
                 // Sub-Domain Accuracy Bar
@@ -1301,7 +1714,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Emotional Wellness',
+                        'Emotional Care Protocol & Interventions',
                         style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -1548,7 +1961,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Metabolic Wellness',
+                        'Metabolic Health Telemetry Protocol',
                         style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -1832,6 +2245,10 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
               ),
             ),
           ] else ...[
+            // Orderly Caregiver Memory Condition Overview Card
+            _buildCaregiverMemoryConditionCard(resident, progress!),
+            const SizedBox(height: 20),
+
             // 1. Separate Progress Summaries for All 3 Games
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1895,6 +2312,205 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
       );
   }
 
+  Widget _buildCaregiverMemoryConditionCard(
+    CarePlanResident resident,
+    MemoryGameProgressSummary progress,
+  ) {
+    final avgScore = progress.averageScore;
+    final isDecline = progress.hasRepeatedDecline || (avgScore != null && avgScore < 60.0);
+    final isGood = !isDecline && avgScore != null && avgScore >= 80.0;
+
+    final String conditionTitle = isGood
+        ? 'Memory Condition: Good (Healthy Recall)'
+        : (isDecline
+            ? 'Memory Condition: Needs Observation'
+            : 'Memory Condition: Fair (Stable Baseline)');
+
+    final String conditionBadge = isGood
+        ? 'Good Condition'
+        : (isDecline ? 'Needs Attention' : 'Stable Condition');
+
+    final Color primaryColor = isGood
+        ? const Color(0xFF047857)
+        : (isDecline ? const Color(0xFFB45309) : const Color(0xFF1D4ED8));
+
+    final Color bgColor = isGood
+        ? const Color(0xFFF0FDF4)
+        : (isDecline ? const Color(0xFFFEF3C7) : const Color(0xFFEFF6FF));
+
+    final Color borderColor = isGood
+        ? const Color(0xFFA7F3D0)
+        : (isDecline ? const Color(0xFFFDE68A) : const Color(0xFFBFDBFE));
+
+    final IconData icon = isGood
+        ? LucideIcons.checkCircle2
+        : (isDecline ? LucideIcons.alertTriangle : LucideIcons.activity);
+
+    final String evaluationText = isGood
+        ? 'Based on completed practice sessions across Remember the Sequence, Matching Pairs, and Remember the Items, ${resident.name} demonstrates strong short-term memory recall, sequence tracking, and visual association. Memory function is in a good, healthy condition.'
+        : (isDecline
+            ? 'A downward variation in memory game scores has been recorded across recent practice sessions. The caregiver should observe whether the resident is experiencing fatigue, changes in sleep, or temporary distractions before scheduling a relaxed retry.'
+            : 'Memory game accuracy and recall performance remain consistent and steady across practice rounds. Continue regular cognitive exercises to maintain active mental wellness.');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: primaryColor.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primaryColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: primaryColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      conditionTitle,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: primaryColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Caregiver Memory Assessment • 3 Cognitive Games Practice',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: primaryColor.withValues(alpha: 0.8),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: primaryColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      conditionBadge,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: primaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            evaluationText,
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppColors.navy,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 24,
+            runSpacing: 8,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Overall Practice Accuracy: ',
+                    style: TextStyle(fontSize: 12, color: AppColors.body),
+                  ),
+                  Text(
+                    avgScore != null ? '${avgScore.toStringAsFixed(1)}%' : '--',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Sessions Analyzed: ',
+                    style: TextStyle(fontSize: 12, color: AppColors.body),
+                  ),
+                  Text(
+                    '${progress.totalCompletedSessions}',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navy,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Game Recall Tier: ',
+                    style: TextStyle(fontSize: 12, color: AppColors.body),
+                  ),
+                  Text(
+                    isGood ? 'Optimal' : (isDecline ? 'Observation Needed' : 'Baseline'),
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildGameSummaryCard({
     required String title,
     required IconData icon,
@@ -1933,6 +2549,22 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
         trendColor = AppColors.primary;
       }
     }
+
+    final String recallCondition = latestScore == null
+        ? 'No Data'
+        : (latestScore >= 80.0
+            ? 'Good Recall'
+            : (latestScore >= 60.0 ? 'Fair Recall' : 'Needs Practice'));
+    final Color conditionColor = latestScore == null
+        ? AppColors.muted
+        : (latestScore >= 80.0
+            ? const Color(0xFF047857)
+            : (latestScore >= 60.0 ? const Color(0xFF1D4ED8) : const Color(0xFFB45309)));
+    final Color conditionBg = latestScore == null
+        ? AppColors.surfaceSecondary
+        : (latestScore >= 80.0
+            ? const Color(0xFFECFDF5)
+            : (latestScore >= 60.0 ? const Color(0xFFEFF6FF) : const Color(0xFFFEF3C7)));
 
     return Container(
       width: width,
@@ -1984,6 +2616,26 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
                   'Prev: ${MemoryGameService.formatScore(previousScore)}',
                   style: const TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: conditionBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'Condition: $recallCondition',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: conditionColor,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -2097,24 +2749,74 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Icon(LucideIcons.history, size: 18, color: AppColors.navy),
-            const SizedBox(width: 8),
-            Text(
-              'Session History (${sessions.length})',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.navy),
+        InkWell(
+          onTap: () {
+            setState(() {
+              _showSessionHistory = !_showSessionHistory;
+            });
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  _showSessionHistory ? LucideIcons.chevronDown : LucideIcons.chevronRight,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: 8),
+                const Icon(LucideIcons.history, size: 18, color: AppColors.navy),
+                const SizedBox(width: 8),
+                Text(
+                  'Session History (${sessions.length})',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.navy),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _showSessionHistory ? AppColors.primarySoft : AppColors.surfaceSecondary,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _showSessionHistory
+                          ? AppColors.primary.withValues(alpha: 0.3)
+                          : AppColors.border,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _showSessionHistory ? 'Collapse' : 'Expand History',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _showSessionHistory ? AppColors.primary : AppColors.muted,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _showSessionHistory ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                        size: 14,
+                        color: _showSessionHistory ? AppColors.primary : AppColors.muted,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
           ),
-          child: ListView.separated(
+        ),
+        if (_showSessionHistory) ...[
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: sessions.length,
@@ -2217,6 +2919,7 @@ class _CarePlansPageState extends ConsumerState<CarePlansPage> {
             },
           ),
         ),
+        ],
       ],
     );
   }
