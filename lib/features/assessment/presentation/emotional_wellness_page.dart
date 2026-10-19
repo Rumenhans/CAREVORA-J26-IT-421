@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -4394,7 +4395,8 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   }
 
   Widget _buildClapOverlayAnimation() {
-    final emojis = ['👏', '✨', '👏', '🎉', '👏', '🌸', '👏', '👏'];
+    // Beautiful shower of small, joyful clapping hands (clap emojis only)
+    const particleCount = 28;
     return AnimatedBuilder(
       animation: _clapController,
       builder: (context, child) {
@@ -4402,25 +4404,51 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         return ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: Stack(
-            children: List.generate(emojis.length, (index) {
-              final xAlign = -0.8 + (index * 0.23);
-              final yStart = 0.9;
-              final yEnd = -1.1;
-              final yCurrent = yStart + (yEnd - yStart) * (progress * 1.25 - (index * 0.04)).clamp(0.0, 1.0);
-              final opacity = (progress < 0.15)
-                  ? (progress / 0.15)
-                  : (progress > 0.7 ? ((1.0 - progress) / 0.3).clamp(0.0, 1.0) : 1.0);
-              final scale = 0.9 + (index % 3) * 0.3 + (progress * 0.4);
+            children: List.generate(particleCount, (index) {
+              // Evenly spread across the card width (-0.92 to 0.92)
+              final ratio = index / (particleCount - 1);
+              final xBase = -0.92 + (ratio * 1.84);
+              // Gentle wave oscillation for smooth natural floating
+              final wave = 0.04 * math.sin((progress * 6.28) + (index * 0.8));
+              final xAlign = (xBase + wave).clamp(-1.0, 1.0);
+
+              // Staggered launch delays so claps float up in a continuous stream
+              final delay = (index % 6) * 0.06 + ((index * 7) % 13) * 0.012;
+              final speedMultiplier = 1.15 + ((index % 5) * 0.08);
+              final particleProgress = ((progress * speedMultiplier) - delay).clamp(0.0, 1.0);
+
+              // Float gracefully from bottom (1.05) to above the card (-1.25)
+              final yStart = 1.05;
+              final yEnd = -1.25;
+              final yCurrent = yStart + (yEnd - yStart) * math.pow(particleProgress, 0.88);
+
+              // Smooth fade-in, vibrant visibility, gentle fade-out at the top
+              final opacity = (particleProgress <= 0.0 || particleProgress >= 1.0)
+                  ? 0.0
+                  : (particleProgress < 0.15
+                      ? (particleProgress / 0.15)
+                      : (particleProgress > 0.72
+                          ? ((1.0 - particleProgress) / 0.28).clamp(0.0, 1.0)
+                          : 1.0));
+
+              // Small, delicate, beautiful clap emoji size (15px to 21px)
+              final fontSize = 15.0 + (index % 4) * 2.0; // 15, 17, 19, 21
 
               return Align(
                 alignment: Alignment(xAlign, yCurrent),
                 child: Opacity(
                   opacity: opacity.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: scale,
-                    child: Text(
-                      emojis[index],
-                      style: const TextStyle(fontSize: 32),
+                  child: Text(
+                    '👏',
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      shadows: [
+                        BoxShadow(
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.35),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
                     ),
                   ),
                 ),
