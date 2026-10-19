@@ -90,7 +90,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   String _selectedSongTitle = 'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)';
   bool _isPlayingMusic = false;
   int _songPlaybackSeconds = 0;
-  static const int _musicTotalDurationSeconds = 600; // 10 minutes (600 seconds) soothing music playback
+  int _currentMusicDurationSeconds = 300; // 300s (5m) for songs, 900s (15m) for Pirith / Was Dadu Rawaya
   Timer? _songTimer;
   int _conversationSeconds = 0;
   static const int _conversationTotalSeconds = 600; // 10 minutes (600 seconds) soothing conversation
@@ -101,13 +101,39 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   final List<Map<String, dynamic>> _aiConversationMessages = [];
   bool _caregiverNotified = false;
 
+  int _getTrackDurationSeconds(String trackTitle) {
+    final lower = trackTitle.toLowerCase();
+    if (lower.contains('පිරිත්') || lower.contains('pirith') || lower.contains('සූත්‍ර') || lower.contains('sutta')) {
+      return 900; // 15 minutes (900 seconds) for Pirith
+    } else if (lower.contains('වස්දඬු') || lower.contains('flute') || lower.contains('was dadu') || lower.contains('බටනලා')) {
+      return 900; // 15 minutes (900 seconds) for Was Dadu Rawaya
+    } else {
+      return 300; // 5 minutes (300 seconds) for songs (Nanda Malini, Amaradeva, etc.)
+    }
+  }
+
+  static const List<String> _defaultSuggestedTracks = [
+    'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)',
+    'නන්දා මාලිනී - රන්කෙන්දෙන් බැඳි අතැඟිලි (Nanda Malini)',
+    'නන්දා මාලිනී - සාර සොඳුරු මල් පිපී (Nanda Malini)',
+    'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව',
+    'සෙත් පිරිත් සජ්ඣායනය (Seth Pirith Deshana - 15 Mins)',
+    'සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute - Was Dadu Rawaya)',
+    'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)',
+    'වික්ටර් රත්නායක - සිත නිවන සෙවන (Victor Ratnayake)',
+  ];
+
   static const Map<String, String> _songAudioPaths = {
     'සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)': 'audio/pirith.mp3',
+    'සෙත් පිරිත් සජ්ඣායනය (Seth Pirith Deshana - 15 Mins)': 'audio/pirith.mp3',
+    'කරණීයමෙත්ත සූත්‍රය (Karaniya Metta Sutta - 15 Mins)': 'audio/pirith.mp3',
+    'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)': 'audio/nanda_malini.mp3',
+    'නන්දා මාලිනී - රන්කෙන්දෙන් බැඳි අතැඟිලි (Nanda Malini)': 'audio/nanda_malini.mp3',
+    'නන්දා මාලිනී - සාර සොඳුරු මල් පිපී (Nanda Malini)': 'audio/nanda_malini.mp3',
     'ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව': 'audio/amaradeva.mp3',
     'සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)': 'audio/sunil_edirisinghe.mp3',
     'වික්ටර් රත්නායක - සිත නිවන සෙවන (Victor Ratnayake)': 'audio/victor_ratnayake.mp3',
-    'නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)': 'audio/nanda_malini.mp3',
-    'සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute)': 'audio/bamboo_flute.mp3',
+    'සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute - Was Dadu Rawaya)': 'audio/bamboo_flute.mp3',
     'සොබාදහමේ සන්සුන් නාදය (Peaceful Nature Streams)': 'audio/nature_stream.mp3',
   };
 
@@ -1319,6 +1345,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   void _startMusicIntervention(String songTitle) {
     setState(() {
       _selectedSongTitle = songTitle;
+      _currentMusicDurationSeconds = _getTrackDurationSeconds(songTitle);
       _interventionStage = 4;
       _isPlayingMusic = true;
       _songPlaybackSeconds = 0;
@@ -1329,13 +1356,26 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         setState(() {
           _songPlaybackSeconds++;
         });
-        if (_songPlaybackSeconds >= _musicTotalDurationSeconds) {
+        if (_songPlaybackSeconds >= _currentMusicDurationSeconds) {
           _finishMusicIntervention();
         }
       }
     });
     _flutterTts.stop();
-    final audioPath = _songAudioPaths[songTitle] ?? 'audio/pirith.mp3';
+    String audioPath = _songAudioPaths[songTitle] ?? 'audio/pirith.mp3';
+    if (songTitle.contains('අමරදේව') || songTitle.toLowerCase().contains('amaradeva')) {
+      audioPath = 'audio/amaradeva.mp3';
+    } else if (songTitle.contains('නන්දා') || songTitle.toLowerCase().contains('nanda')) {
+      audioPath = 'audio/nanda_malini.mp3';
+    } else if (songTitle.contains('සුනිල්') || songTitle.toLowerCase().contains('sunil')) {
+      audioPath = 'audio/sunil_edirisinghe.mp3';
+    } else if (songTitle.contains('වික්ටර්') || songTitle.toLowerCase().contains('victor')) {
+      audioPath = 'audio/victor_ratnayake.mp3';
+    } else if (songTitle.contains('වස්දඬු') || songTitle.toLowerCase().contains('flute') || songTitle.toLowerCase().contains('was dadu') || songTitle.contains('බටනලා')) {
+      audioPath = 'audio/bamboo_flute.mp3';
+    } else if (songTitle.contains('පිරිත්') || songTitle.contains('සූත්‍ර') || songTitle.toLowerCase().contains('pirith')) {
+      audioPath = 'audio/pirith.mp3';
+    }
     AudioPlayerService.instance.play(audioPath, onEnded: () {
       if (mounted && _isPlayingMusic) {
         _finishMusicIntervention();
@@ -1357,7 +1397,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           setState(() {
             _songPlaybackSeconds++;
           });
-          if (_songPlaybackSeconds >= _musicTotalDurationSeconds) {
+          if (_songPlaybackSeconds >= _currentMusicDurationSeconds) {
             _finishMusicIntervention();
           }
         }
@@ -1383,6 +1423,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   void _playSongInAiChat(String songTitle) {
     setState(() {
       _selectedSongTitle = songTitle;
+      _currentMusicDurationSeconds = _getTrackDurationSeconds(songTitle);
       _isPlayingMusic = true;
       _songPlaybackSeconds = 0;
     });
@@ -1393,7 +1434,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         setState(() {
           _songPlaybackSeconds++;
         });
-        if (_songPlaybackSeconds >= _musicTotalDurationSeconds) {
+        if (_songPlaybackSeconds >= _currentMusicDurationSeconds) {
           _songTimer?.cancel();
           AudioPlayerService.instance.stop();
           setState(() {
@@ -1412,6 +1453,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       audioPath = 'audio/sunil_edirisinghe.mp3';
     } else if (songTitle.contains('වික්ටර්') || songTitle.toLowerCase().contains('victor')) {
       audioPath = 'audio/victor_ratnayake.mp3';
+    } else if (songTitle.contains('වස්දඬු') || songTitle.toLowerCase().contains('flute') || songTitle.toLowerCase().contains('was dadu') || songTitle.contains('බටනලා')) {
+      audioPath = 'audio/bamboo_flute.mp3';
+    } else if (songTitle.contains('පිරිත්') || songTitle.contains('සූත්‍ර') || songTitle.toLowerCase().contains('pirith')) {
+      audioPath = 'audio/pirith.mp3';
     }
 
     _flutterTts.stop();
@@ -1427,26 +1472,50 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     setState(() {
       _aiConversationMessages.add({
         'isAi': false,
-        'sinhala': '🎵 මම "$songTitle" ගීතයට සවන් දෙන්න තෝරාගත්තා.',
+        'sinhala': '🎵 මම "$songTitle" තෝරාගත්තා.',
         'timestamp': 'Just now',
       });
     });
 
     // Heart-comforting AI response (හිත හැදෙන්න කියන වදන්)
-    final artistName = songTitle.contains('අමරදේව')
-        ? 'ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ'
-        : (songTitle.contains('නන්දා') ? 'විශාරද නන්දා මාලිනියන්ගේ' : 'මේ මිහිරි');
+    final isPirith = songTitle.contains('පිරිත්') || songTitle.toLowerCase().contains('pirith');
+    final isFlute = songTitle.contains('වස්දඬු') || songTitle.toLowerCase().contains('flute') || songTitle.toLowerCase().contains('was dadu');
+    final isNanda = songTitle.contains('නන්දා') || songTitle.toLowerCase().contains('nanda');
+    final isAmaradeva = songTitle.contains('අමරදේව') || songTitle.toLowerCase().contains('amaradeva');
 
-    final comfortMsgSi =
-        'ආදරණීය ${_currentResident.name}, ඔබේ සිතේ ඇති තනිකම, පාළුව සහ දුක $artistName මේ මිහිරි ගීතයේ සන්සුන් නාදයෙන් සම්පූර්ණයෙන්ම පහව යාවි. ඔබ කිසිදාක තනි වී නැහැ! මම නිරතුරුවම ඔබ ළඟින්ම හිඳිමින් ඔබේ දුක සතුට බෙදාගන්නවා. සිත සැහැල්ලු කරගෙන, දෙනෙත් පියාගෙන විනාඩි 10ක් පුරා මේ සන්සුන් ගීතයට සවන් දෙන්න. ඔබේ සිතට මහත් සැනසීමක් හා සහනයක් උදාවේවා!';
-    final comfortMsgEn =
-        'Dear ${_currentResident.name}, let the peaceful melodies of this song soothe away all your loneliness and sorrow. You are never alone; I am always right here beside you. Relax, close your eyes, and enjoy this 10-minute comforting music. May peace fill your heart.';
+    final durationMins = _currentMusicDurationSeconds ~/ 60;
+    String comfortMsgSi;
+    String comfortMsgEn;
+    String badgeTitle;
+
+    if (isPirith) {
+      badgeTitle = 'පිරිත් සජ්ඣායනය (Pirith Meditation)';
+      comfortMsgSi =
+          'ආදරණීය ${_currentResident.name}, මේ උතුම් සෙත් පිරිත් දේශනාවේ ශාන්ත, ආශිර්වාදාත්මක හඬට විනාඩි $durationMins ක් සවන් දෙන්න. සියලු භය, දුක්, කරදර දුරු වී ඔබේ සිතට සහ ගතට උතුම් සැනසීමක්, සුවයක් සහ ආශිර්වාදයක් උදාවේවා!';
+      comfortMsgEn =
+          'Dear ${_currentResident.name}, listen to these sacred, blessed Buddhist Pirith chants for $durationMins minutes. May all fear and distress vanish, bringing profound peace, healing, and blessings to your mind.';
+    } else if (isFlute) {
+      badgeTitle = 'වස්දඬු රාවය (Soothing Flute)';
+      comfortMsgSi =
+          'ආදරණීය ${_currentResident.name}, මේ නිහඬ, මිහිරි වස්දඬු රාවයට දෙනෙත් පියාගෙන සවන් දෙන්න. මනසට දැනෙන සියලු වෙහෙස, පීඩනය සහ තනිකම සන්සුන් සංගීතයෙන් පහව යාවි.';
+      comfortMsgEn =
+          'Dear ${_currentResident.name}, close your eyes and listen to this serene acoustic bamboo flute melody. Let the gentle notes wash away all tension and bring deep stillness to your soul.';
+    } else {
+      final artistName = isAmaradeva
+          ? 'ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ'
+          : (isNanda ? 'විශාරද නන්දා මාලිනියන්ගේ' : 'මේ මිහිරි');
+      badgeTitle = 'ගීතමය සැනසීම (Music Therapy)';
+      comfortMsgSi =
+          'ආදරණීය ${_currentResident.name}, ඔබේ සිතේ ඇති තනිකම, පාළුව සහ දුක $artistName මේ මිහිරි ගීතයේ සන්සුන් නාදයෙන් සම්පූර්ණයෙන්ම පහව යාවි. ඔබ කිසිදාක තනි වී නැහැ! මම නිරතුරුවම ඔබ ළඟින්ම හිඳිමින් ඔබේ දුක සතුට බෙදාගන්නවා. සිත සැහැල්ලු කරගෙන, දෙනෙත් පියාගෙන විනාඩි $durationMins ක් පුරා මේ සන්සුන් ගීතයට සවන් දෙන්න. ඔබේ සිතට මහත් සැනසීමක් හා සහනයක් උදාවේවා!';
+      comfortMsgEn =
+          'Dear ${_currentResident.name}, let the peaceful melodies of this song soothe away all your loneliness and sorrow. You are never alone; I am always right here beside you. Relax, close your eyes, and enjoy this $durationMins-minute comforting music. May peace fill your heart.';
+    }
 
     setState(() {
       _aiConversationMessages.add({
         'isAi': true,
-        'title': '🌸 සිත නිවන සැනසිලිදායක ගීතමය මොහොත',
-        'badge': 'සිත සැනසීම (Heart-Soothed)',
+        'title': '🌸 සිත නිවන සැනසිලිදායක මොහොත',
+        'badge': badgeTitle,
         'sinhala': comfortMsgSi,
         'english': comfortMsgEn,
         'timestamp': 'Just now',
@@ -1455,7 +1524,11 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
     _scrollToChatBottom();
 
-    _flutterTts.speak('Dear ${_currentResident.name}, let this soothing melody bring peace to your heart. You are never alone, I am always right here beside you. Relax and enjoy this comforting music.');
+    _flutterTts.speak(isPirith
+        ? 'Dear ${_currentResident.name}, let these peaceful Pirith chants comfort and bless your soul. Relax and listen.'
+        : (isFlute
+            ? 'Dear ${_currentResident.name}, close your eyes and enjoy this peaceful bamboo flute melody.'
+            : 'Dear ${_currentResident.name}, let this soothing melody bring peace to your heart. You are never alone, I am always right here beside you. Relax and enjoy this music.'));
   }
 
   void _startBookIntervention() {
@@ -1581,9 +1654,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           'title': '🌸 ආයුබෝවන්, මම ඔබේ සුහද AI සහායක',
           'badge': 'සුහද පිළිසඳර (Caring Companion)',
           'sinhala':
-              'ආදරණීය ${_currentResident.name}, අද දවසේ ඔබේ සිතට දුකක්, තනිකමක් හෝ බරක් දැනෙන්නේ ඇයි කියලා මට කියන්න පුළුවන්ද? මම ඔබේම දරුවෙක් වගේ ඔබට සවන් දීලා සිත සනසන්න මෙහි ඉන්නවා.',
+              'ආදරණීය ${_currentResident.name}, අද දවසේ ඔබේ සිතට දුකක්, තනිකමක් හෝ බරක් දැනෙන්නේ ඇයි කියලා මට කියන්න පුළුවන්ද? මම ඔබේම දරුවෙක් වගේ ඔබට සවන් දීලා සිත සනසන්න මෙහි ඉන්නවා. සිත සනසාගන්න විශාරද නන්දා මාලිනියන්ගේ ගීත, ආචාර්ය ඩබ්.ඩී. අමරදේවයන්ගේ ගීත, සෙත් පිරිත් (මිනිත්තු 15) හෝ සන්සුන් වස්දඬු රාවයට පහතින් සවන් දෙන්න පුළුවන්.',
           'english':
-              'Dear ${_currentResident.name}, could you gently share with me why you are feeling lonely or down today? I am right here beside you, ready to listen and soothe your heart.',
+              'Dear ${_currentResident.name}, could you gently share with me why you are feeling lonely or down today? I am right here beside you. You can also select and listen to peaceful songs by Nanda Malini, Amaradeva, Seth Pirith (15 mins), or soothing Bamboo Flute below to bring peace to your heart.',
+          'suggestedSongs': _defaultSuggestedTracks,
           'timestamp': 'Just now',
         });
         _elderNegativeReasons[currentQ.id] =
@@ -1631,6 +1705,14 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       _playSongInAiChat('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව');
       return;
     }
+    if (lower.contains('රන්කෙන්දෙන්') || lower.contains('rankenden')) {
+      _playSongInAiChat('නන්දා මාලිනී - රන්කෙන්දෙන් බැඳි අතැඟිලි (Nanda Malini)');
+      return;
+    }
+    if (lower.contains('සාර සොඳුරු') || lower.contains('sara sonduru')) {
+      _playSongInAiChat('නන්දා මාලිනී - සාර සොඳුරු මල් පිපී (Nanda Malini)');
+      return;
+    }
     if (lower.contains('නන්දා') || lower.contains('nanda') || lower.contains('නිවන් දොරටු')) {
       _playSongInAiChat('නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)');
       return;
@@ -1640,11 +1722,15 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       return;
     }
     if (lower.contains('පිරිත්') || lower.contains('pirith')) {
-      _playSongInAiChat('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)');
+      _playSongInAiChat('සෙත් පිරිත් සජ්ඣායනය (Seth Pirith Deshana - 15 Mins)');
+      return;
+    }
+    if (lower.contains('වස්දඬු') || lower.contains('was dadu') || lower.contains('flute') || lower.contains('බටනලා')) {
+      _playSongInAiChat('සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute - Was Dadu Rawaya)');
       return;
     }
     if (lower.contains('සින්දු') || lower.contains('song') || lower.contains('ගීත')) {
-      _playSongInAiChat('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව');
+      _playSongInAiChat('නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)');
       return;
     }
 
@@ -2591,12 +2677,14 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                 spacing: 8,
                 runSpacing: 6,
                 children: [
-                  _buildSongChip('සන්සුන් බෞද්ධ පිරිත් සහ ගාථා (Buddhist Pirith Chants)'),
+                  _buildSongChip('නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)'),
+                  _buildSongChip('නන්දා මාලිනී - රන්කෙන්දෙන් බැඳි අතැඟිලි (Nanda Malini)'),
+                  _buildSongChip('නන්දා මාලිනී - සාර සොඳුරු මල් පිපී (Nanda Malini)'),
                   _buildSongChip('ආචාර්ය ඩබ්.ඩී. අමරදේව - ශාන්ත සන්ධ්‍යාව'),
+                  _buildSongChip('සෙත් පිරිත් සජ්ඣායනය (Seth Pirith Deshana - 15 Mins)'),
+                  _buildSongChip('සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute - Was Dadu Rawaya)'),
                   _buildSongChip('සුනිල් එදිරිසිංහ - නිවන් දුටු හිමි (Sunil Edirisinghe)'),
                   _buildSongChip('වික්ටර් රත්නායක - සිත නිවන සෙවන (Victor Ratnayake)'),
-                  _buildSongChip('නන්දා මාලිනී - නිවන් දොරටු පාමුල (Nanda Malini)'),
-                  _buildSongChip('සන්සුන් වස්දඬු රාවය (Acoustic Bamboo Flute)'),
                   _buildSongChip('සොබාදහමේ සන්සුන් නාදය (Peaceful Nature Streams)'),
                 ],
               ),
@@ -2645,7 +2733,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      '${_songPlaybackSeconds ~/ 60}:${(_songPlaybackSeconds % 60).toString().padLeft(2, '0')} / ${_musicTotalDurationSeconds ~/ 60}:${(_musicTotalDurationSeconds % 60).toString().padLeft(2, '0')}',
+                      '${_songPlaybackSeconds ~/ 60}:${(_songPlaybackSeconds % 60).toString().padLeft(2, '0')} / ${_currentMusicDurationSeconds ~/ 60}:${(_currentMusicDurationSeconds % 60).toString().padLeft(2, '0')} (මිනිත්තු ${_currentMusicDurationSeconds ~/ 60})',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.muted),
                     ),
                   ],
@@ -3121,7 +3209,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  '${(_songPlaybackSeconds ~/ 60).toString().padLeft(2, '0')}:${(_songPlaybackSeconds % 60).toString().padLeft(2, '0')} / ${(_musicTotalDurationSeconds ~/ 60).toString().padLeft(2, '0')}:${(_musicTotalDurationSeconds % 60).toString().padLeft(2, '0')} (මිනිත්තු 10)',
+                                  '${(_songPlaybackSeconds ~/ 60).toString().padLeft(2, '0')}:${(_songPlaybackSeconds % 60).toString().padLeft(2, '0')} / ${(_currentMusicDurationSeconds ~/ 60).toString().padLeft(2, '0')}:${(_currentMusicDurationSeconds % 60).toString().padLeft(2, '0')} (මිනිත්තු ${_currentMusicDurationSeconds ~/ 60})',
                                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
                                 ),
                               ],
@@ -3246,7 +3334,7 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                                   Icon(LucideIcons.music, size: 13, color: Color(0xFF15803D)),
                                   SizedBox(width: 5),
                                   Text(
-                                    'සන්සුන් ගීත තෝරන්න (Select to play for 10 minutes):',
+                                    'සන්සුන් ගීත, පිරිත් හා වස්දඬු රාවය (Select Song 5m / Pirith 15m / Was Dadu Rawaya):',
                                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
                                   ),
                                 ],
