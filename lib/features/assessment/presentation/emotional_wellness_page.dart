@@ -1179,21 +1179,25 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
         _clapController.forward(from: 0.0);
         _flutterTts.stop();
         _flutterTts.speak(
-          questionId == 5
-              ? 'Wonderful! I am so glad to hear that you stay active and do not isolate yourself in your room all day.'
-              : (questionId == 4
-                  ? 'Wonderful! I am so glad to hear that you feel warmly included and comfortable when others gather around.'
-                  : (questionId == 3
-                      ? 'Wonderful! Having a close, caring friend to talk with is a true blessing. I am so glad to hear that.'
-                      : (questionId == 2
-                          ? 'Wonderful! I am so glad to hear that you feel hopeful and in good spirits about your days ahead.'
-                          : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.'))),
+          questionId == 9
+              ? 'Wonderful! Having comfortable and open communication with your caregivers is so reassuring and valuable. I am so glad to hear that.'
+              : (questionId == 5
+                  ? 'Wonderful! I am so glad to hear that you stay active and do not isolate yourself in your room all day.'
+                  : (questionId == 4
+                      ? 'Wonderful! I am so glad to hear that you feel warmly included and comfortable when others gather around.'
+                      : (questionId == 3
+                          ? 'Wonderful! Having a close, caring friend to talk with is a true blessing. I am so glad to hear that.'
+                          : (questionId == 2
+                              ? 'Wonderful! I am so glad to hear that you feel hopeful and in good spirits about your days ahead.'
+                              : 'Thank you so much! I am very glad to hear that you are feeling peaceful and in good spirits today.')))),
         );
       } else {
         _showClapAnimation = false;
         _reasonTextController.text = _elderNegativeReasons[questionId] ?? '';
         _flutterTts.stop();
-        if (questionId == 5) {
+        if (questionId == 9) {
+          _routeDirectlyToDoctorForElderRoom();
+        } else if (questionId == 5) {
           _flutterTts.speak(
             'Spending most of your day alone in your room can feel lonely and tiring. Let us have a comforting talk and find refreshing activities to brighten your day.',
           );
@@ -1340,6 +1344,164 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     );
     _flutterTts.stop();
     _flutterTts.speak('An urgent notification has been sent to your caregiver and attending physician. Please remain calm, assistance is arriving right now.');
+  }
+
+  Map<String, String> _getAssignedDoctorDetails() {
+    final authState = ref.read(authProvider).state;
+    final home = (authState.elderHomeName != null && authState.elderHomeName!.isNotEmpty)
+        ? authState.elderHomeName!
+        : 'Serene Valley Senior Living';
+
+    if (home.toLowerCase().contains('golden sunset')) {
+      return {
+        'doctorName': 'Dr. Aris Thorne',
+        'specialty': 'Neurology & Geriatric Specialist',
+        'phone': '+94 71 987 6543',
+        'home': home,
+      };
+    } else if (home.toLowerCase().contains('lotus care')) {
+      return {
+        'doctorName': 'Dr. Sarah Jenkins',
+        'specialty': 'General Physician & Senior Health',
+        'phone': '+94 75 456 7890',
+        'home': home,
+      };
+    } else {
+      return {
+        'doctorName': 'Dr. Nimal Fernando',
+        'specialty': 'Geriatric Specialist & Medical Lead',
+        'phone': '+94 77 123 4567',
+        'home': home,
+      };
+    }
+  }
+
+  void _routeDirectlyToDoctorForElderRoom() {
+    final docInfo = _getAssignedDoctorDetails();
+    final doctorName = docInfo['doctorName']!;
+    final homeName = docInfo['home']!;
+    final roomNumber = _currentResident.roomNo.isNotEmpty ? _currentResident.roomNo : '101';
+    final elderName = _currentResident.name.isNotEmpty ? _currentResident.name : 'Senior Resident';
+
+    setState(() {
+      _interventionStage = 9;
+      _caregiverNotified = true;
+      _elderNegativeReasons[9] =
+          'රැකවරණ නිලධාරීන් සමඟ ගැටලු බෙදා ගැනීමට අපහසු බව ප්‍රකාශ කර $homeName හි $doctorName වෙත සෘජුව යොමු කළ අතර කාමර අංක $roomNumber සඳහා වෛද්‍ය Notification එකක් යවන ලදී.';
+      _reasonTextController.text = _elderNegativeReasons[9]!;
+    });
+
+    // Directly dispatch high-priority alert to the doctor with elder room
+    MockCarevoraData.alerts.insert(
+      0,
+      AlertItem(
+        id: 'ALT-DOC-${DateTime.now().millisecondsSinceEpoch}',
+        title: '🚨 Direct Doctor Alert: $elderName (Room $roomNumber)',
+        description:
+            'Resident $elderName in Room $roomNumber at $homeName reported difficulty sharing concerns with caregivers during emotional wellness session. Direct clinical consultation and room visit routed to $doctorName.',
+        severity: 'High',
+        timestamp: 'Just now',
+        residentName: elderName,
+        roomNo: roomNumber,
+        residentAge: _currentResident.age,
+        residentGender: _currentResident.gender,
+        currentStatus: 'Doctor Consultation Routed',
+        cognitiveScore: _currentResident.cognitiveScore,
+      ),
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(LucideIcons.stethoscope, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'කාමර අංක $roomNumber හි $elderName වෙනුවෙන් $homeName හි $doctorName වෙත සෘජු Notification එකක් යවන ලදී!',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF0284C7),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+
+    _flutterTts.stop();
+    _flutterTts.speak(
+      'Because you cannot share your concerns with caregivers, you have been directly connected to your elder home doctor, $doctorName. An urgent notification has been sent with your Room number $roomNumber, and the doctor will attend to you shortly.',
+    );
+  }
+
+  void _showDoctorCallDialog(String doctorName, String specialty, String phone, String roomNo, String home) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Color(0xFFE0F2FE),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(LucideIcons.phoneCall, color: Color(0xFF0284C7), size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'වෛද්‍යවරයා ඇමතීම (Calling Doctor)',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0C4A6E)),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$home හි $doctorName ($specialty) වෙත සෘජු ඇමතුමක් සම්බන්ධ වෙමින් පවතී...',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('📞 Phone Line: $phone', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0284C7))),
+                  const SizedBox(height: 4),
+                  Text('🚪 Caller Location: Room No $roomNo (${_currentResident.name})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFFDC2626))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'වෛද්‍යවරයා ඔබගේ ඇමතුමට පිළිතුරු දීමට හෝ මොහොතකින් කාමරයට පැමිණීමට සූදානම් වේ.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('අවසන් කරන්න (End Call)'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _startMusicIntervention(String songTitle) {
@@ -1551,6 +1713,10 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
 
   void _startAiConversationIntervention() {
     final currentQ = _questions[_currentIndex];
+    if (currentQ.id == 9) {
+      _routeDirectlyToDoctorForElderRoom();
+      return;
+    }
     final isHopeQuestion = currentQ.id == 2;
     final isCompanionshipQuestion = currentQ.id == 3;
     final isValuedBelongingQuestion = currentQ.id == 4;
@@ -2383,7 +2549,305 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
     );
   }
 
+  Widget _buildDoctorDirectRoutingCard(AssessmentQuestion currentQ) {
+    final docInfo = _getAssignedDoctorDetails();
+    final doctorName = docInfo['doctorName']!;
+    final doctorSpecialty = docInfo['specialty']!;
+    final doctorPhone = docInfo['phone']!;
+    final homeName = docInfo['home']!;
+    final roomNumber = _currentResident.roomNo.isNotEmpty ? _currentResident.roomNo : '101';
+    final elderName = _currentResident.name.isNotEmpty ? _currentResident.name : 'Senior Resident';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F9FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF38BDF8), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0284C7).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(color: Color(0x15000000), blurRadius: 4, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: const Icon(LucideIcons.stethoscope, size: 24, color: Color(0xFF0284C7)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'වෛද්‍යවරයා වෙත සෘජුව යොමු කිරීම (Direct Doctor Routing)',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0369A1),
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Caregiver Rapport Escalation • Attending Physician Direct Alert',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0284C7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF86EFAC)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.circleCheck, size: 14, color: Color(0xFF16A34A)),
+                    SizedBox(width: 5),
+                    Text(
+                      'දැනුම් දෙන ලදී (Notified)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF166534),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          Text(
+            'ඔබේ රැකවරණ නිලධාරීන් (Caregivers) සමඟ අදහස් බෙදා ගැනීමට අපහසු බව පැවසූ බැවින්, මෙම වැඩිහිටි නිවාසයේ ($homeName) ප්‍රධාන වෛද්‍යවරයා ($doctorName) වෙත ඔබව සෘජුවම යොමු කරන ලදී.',
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF0C4A6E),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'ඔබේ කාමර අංකය ($roomNumber) ඇතුළත් හදිසි Notification එකක් වෛද්‍යවරයාගේ Clinical Dashboard වෙත යවා ඇත. කරුණාකර සුවපහසුව සිටින්න, වෛද්‍යවරයා ඉතා ඉක්මනින් ඔබේ කාමරයට පැමිණෙනු ඇත.',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF0369A1),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Direct emergency clinical notification dispatched with your room number to the attending physician.',
+            style: TextStyle(
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+              color: Color(0xFF0284C7),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFBAE6FD)),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE0F2FE),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(LucideIcons.userCheck, color: Color(0xFF0284C7), size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                doctorName,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0C4A6E),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE0F2FE),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'Assigned Doctor',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF0284C7),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            doctorSpecialty,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF0369A1),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 6,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(LucideIcons.building2, size: 13, color: Color(0xFF0284C7)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    homeName,
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(LucideIcons.doorClosed, size: 13, color: Color(0xFFDC2626)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Room No: $roomNumber ($elderName)',
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFDC2626)),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(LucideIcons.phone, size: 13, color: Color(0xFF0284C7)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    doctorPhone,
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Icon(LucideIcons.bellRing, size: 15, color: Color(0xFF0284C7)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Notification Status: Active & Dispatched to $doctorName for Room $roomNumber',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0369A1)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () => _showDoctorCallDialog(doctorName, doctorSpecialty, doctorPhone, roomNumber, homeName),
+                icon: const Icon(LucideIcons.phoneCall, size: 16),
+                label: const Text('📞 වෛද්‍යවරයා අමතන්න (Call Doctor)'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => context.push('/dashboard/doctor'),
+                icon: const Icon(LucideIcons.stethoscope, size: 16),
+                label: const Text('🩺 වෛද්‍ය අංශය (Doctor Portal)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF0284C7),
+                  side: const BorderSide(color: Color(0xFF38BDF8), width: 1.5),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: _nextQuestion,
+                icon: const Icon(LucideIcons.arrowRight, size: 16),
+                label: const Text('ඊළඟ ප්‍රශ්නයට යන්න (Next Question)'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF334155),
+                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildConversationalSupportCard(AssessmentQuestion currentQ) {
+    if (currentQ.id == 9 || _interventionStage == 9) {
+      return _buildDoctorDirectRoutingCard(currentQ);
+    }
     switch (_interventionStage) {
       case 1:
         return Container(
