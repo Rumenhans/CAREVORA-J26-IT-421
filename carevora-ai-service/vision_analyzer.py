@@ -86,41 +86,43 @@ transform = transforms.Compose([
 def extract_face_crop(img: Image.Image) -> Image.Image:
     """
     Locates the primary human face in the webcam image using robust YCrCb skin segmentation
-    and returns a square crop tightly focused on the face (avoiding ceilings/backgrounds).
+    and returns a square crop tightly focused on the face (avoiding ceilings/neck/backgrounds).
     """
     try:
         w, h = img.size
+        # Search primarily in upper 72% where the head/face is located on webcams
+        search_h = int(h * 0.72)
         arr = np.array(img).astype(np.float32)
-        R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        R, G, B = arr[:search_h, :, 0], arr[:search_h, :, 1], arr[:search_h, :, 2]
         Y = 0.299 * R + 0.587 * G + 0.114 * B
         Cr = (R - Y) * 0.713 + 128.0
         Cb = (B - Y) * 0.564 + 128.0
 
-        # Human skin chrominance cluster
-        skin = (Cr >= 133) & (Cr <= 178) & (Cb >= 77) & (Cb <= 127) & (Y >= 30) & (Y <= 245)
+        # Inclusive human skin chrominance + RGB ratio (works for all ethnicities/lighting)
+        skin = (Cr >= 126) & (Cr <= 185) & (Cb >= 72) & (Cb <= 138) & (Y >= 25) & (R > G) & (R > B)
         ys, xs = np.where(skin)
 
-        if len(xs) > 400:
-            x_min, x_max = int(np.percentile(xs, 5)), int(np.percentile(xs, 95))
-            y_min, y_max = int(np.percentile(ys, 5)), int(np.percentile(ys, 95))
+        if len(xs) > 250:
+            x_min, x_max = int(np.percentile(xs, 6)), int(np.percentile(xs, 94))
+            y_min, y_max = int(np.percentile(ys, 6)), int(np.percentile(ys, 94))
             fw, fh = x_max - x_min, y_max - y_min
             if fw > 30 and fh > 30:
                 cx = (x_min + x_max) // 2
                 cy = (y_min + y_max) // 2
-                side = int(max(fw, fh) * 1.35)
+                side = int(min(max(fw, fh) * 1.10, min(w, h)))
                 half = side // 2
                 l = max(0, cx - half)
                 t = max(0, cy - half)
-                r = min(w, cx + half)
-                b = min(h, cy + half)
+                r = min(w, l + side)
+                b = min(h, t + side)
                 return img.crop((l, t, r, b))
     except Exception:
         pass
 
-    # Fallback: lower-center crop (avoiding top ceiling area of webcam)
+    # Fallback: upper-center crop centered at face level (42% height on laptop webcams)
     w, h = img.size
-    crop_size = int(min(w, h) * 0.75)
-    cx, cy = w // 2, int(h * 0.55)
+    crop_size = int(min(w, h) * 0.65)
+    cx, cy = w // 2, int(h * 0.42)
     l = max(0, cx - crop_size // 2)
     t = max(0, cy - crop_size // 2)
     r = min(w, l + crop_size)
@@ -150,6 +152,7 @@ def detect_smile_signal(face_img: Image.Image) -> float:
         # True open-mouth smile with teeth exposure
         if teeth_pixels > 0.035 and contrast > 50 and mouth_mean > 110:
             return min(0.92, 0.65 + teeth_pixels * 3.0)
+
         return 0.0
     except Exception:
         return 0.0
@@ -235,48 +238,57 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         raw_dominant_idx = int(np.argmax(probabilities))
         raw_dominant = EMOTION_CATEGORIES[raw_dominant_idx]
 
-        is_smiling = (smile_score > 0.0) or (probabilities[happy_idx] > 0.50)
+        # Calibrate non-smiling affect:
+        fear_sig = probabilities[fear_idx] * 2.0 + probabilities[surp_idx] * 1.5
+        ang_sig = probabilities[ang_idx] * 1.85
+        sad_sig = probabilities[sad_idx] * 1.6
+
+        # 1. Smile / Happy expression
+        is_smiling = (
+            (smile_score > 0.0) or
+            (probabilities[happy_idx] > 0.28) or
+            (raw_dominant == 'happy' and probabilities[happy_idx] >= 0.22)
+        )
+
+        # 2. Confused: AU4 Corrugator brow furrowing (angry signal dominates neutral and sad)
+        is_confused = (
+            (probabilities[ang_idx] >= 0.24 and probabilities[ang_idx] > probabilities[neu_idx] * 1.8 and ang_sig > sad_sig and ang_sig >= fear_sig) or
+            (raw_dominant == 'angry' and probabilities[ang_idx] >= 0.25 and probabilities[ang_idx] > probabilities[neu_idx] * 1.8)
+        )
+
+        # 3. Sad: sad is highest, mouth corners depressed (mouth_mean < 92)
+        is_sad_expr = (
+            (raw_dominant == 'sad' and probabilities[sad_idx] > probabilities[fear_idx] and mouth_mean < 92) or
+            (probabilities[sad_idx] > 0.28 and sad_sig > ang_sig and mouth_mean < 92)
+        )
+
+        # 4. Fear: apprehension / upper eyelid elevation
+        is_fear_expr = (
+            (fear_sig > ang_sig and (probabilities[surp_idx] >= 0.055 or raw_dominant in ['fear', 'surprise'] or fear_sig > 0.45))
+        )
 
         if is_smiling:
-            probabilities[happy_idx] = max(probabilities[happy_idx], smile_score, 0.65)
+            probabilities[happy_idx] = max(probabilities[happy_idx] * 1.5, smile_score, 0.65)
             dominant_emotion = 'happy'
+        elif is_confused:
+            probabilities[ang_idx] = max(probabilities[ang_idx] * 1.85, 0.58)
+            probabilities[neu_idx] *= 0.40
+            dominant_emotion = 'confused'
+        elif is_sad_expr:
+            probabilities[sad_idx] = max(probabilities[sad_idx] * 1.5, 0.55)
+            dominant_emotion = 'sad'
+        elif is_fear_expr:
+            probabilities[fear_idx] = max(probabilities[fear_idx], fear_sig, 0.58)
+            probabilities[surp_idx] *= 0.20
+            probabilities[neu_idx] *= 0.35
+            probabilities[sad_idx] *= 0.60
+            dominant_emotion = 'fear'
+        elif raw_dominant == 'neutral' or probabilities[neu_idx] > 0.14:
+            probabilities[neu_idx] = max(probabilities[neu_idx] * 1.6, 0.55)
+            dominant_emotion = 'neutral'
         else:
-            # Calibrate non-smiling affect:
-            fear_sig = probabilities[fear_idx] * 2.0 + probabilities[surp_idx] * 1.5
-            ang_sig = probabilities[ang_idx] * 1.85
-            sad_sig = probabilities[sad_idx] * 1.6
-
-            # 1. Confused expression: glabella furrowing / AU4 corrugator tension
-            is_confused = ((raw_dominant == 'angry' and glabella_std > 36) or
-                           (ang_sig >= fear_sig and ang_sig > sad_sig and probabilities[ang_idx] >= 0.20 and glabella_std > 36))
-
-            # 2. Sad expression: Downturned mouth, depressed affect
-            is_sad_expr = (raw_dominant == 'sad' and mouth_mean < 85 and probabilities[surp_idx] < 0.055) or \
-                          (probabilities[sad_idx] > 0.27 and mouth_mean < 85)
-
-            # 3. Fear expression: Wide eyes / upper eyelid elevation / apprehension
-            is_fear_expr = (fear_sig > ang_sig and (probabilities[surp_idx] >= 0.055 or raw_dominant == 'fear' or raw_dominant == 'surprise')) or \
-                           (fear_sig > 0.45)
-
-            if is_confused:
-                probabilities[ang_idx] = max(probabilities[ang_idx] * 1.85, 0.58)
-                probabilities[neu_idx] *= 0.40
-                dominant_emotion = 'confused'
-            elif is_sad_expr:
-                probabilities[sad_idx] = max(probabilities[sad_idx] * 1.5, 0.55)
-                dominant_emotion = 'sad'
-            elif is_fear_expr:
-                probabilities[fear_idx] = max(probabilities[fear_idx], fear_sig, 0.58)
-                probabilities[surp_idx] *= 0.20
-                probabilities[neu_idx] *= 0.35
-                probabilities[sad_idx] *= 0.60
-                dominant_emotion = 'fear'
-            elif raw_dominant == 'neutral' or probabilities[neu_idx] > 0.08:
-                probabilities[neu_idx] = max(probabilities[neu_idx] * 1.6, 0.55)
-                dominant_emotion = 'neutral'
-            else:
-                probabilities[neu_idx] = max(probabilities[neu_idx], 0.52)
-                dominant_emotion = 'neutral'
+            dominant_emotion = 'neutral'
+            probabilities[neu_idx] = 0.52
 
         probabilities = probabilities / np.sum(probabilities)
 

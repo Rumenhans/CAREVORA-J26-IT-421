@@ -10,6 +10,7 @@ abstract class FacialCameraAdapter {
   Future<void> dispose();
   bool get isInitialized;
   String? get lastError;
+  CameraController? get controller;
 }
 
 /// Production implementation using Flutter's official `camera` and `camera_web` plugins.
@@ -17,6 +18,9 @@ class DefaultFacialCameraAdapter implements FacialCameraAdapter {
   CameraController? _controller;
   bool _initialized = false;
   String? _error;
+
+  @override
+  CameraController? get controller => _controller;
 
   @override
   bool get isInitialized => _initialized && _controller != null && _controller!.value.isInitialized;
@@ -44,7 +48,7 @@ class DefaultFacialCameraAdapter implements FacialCameraAdapter {
         front,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        imageFormatGroup: kIsWeb ? null : ImageFormatGroup.jpeg,
       );
 
       await controller.initialize();
@@ -259,6 +263,8 @@ class AutomaticFacialCaptureService {
   bool get isDisposed => _isDisposed;
   bool get isFlightInProgress => _isFlightInProgress;
   FacialCaptureStatus get status => _status;
+  CameraController? get cameraController => _cameraAdapter.controller;
+  bool get isCameraReady => _cameraAdapter.isInitialized;
   List<FacialEmotionResult> get sessionResults => List.unmodifiable(_sessionResults);
   FacialSessionAggregate get lastAggregate => _lastAggregate;
   FacialSessionAggregate get aggregate {
@@ -302,8 +308,12 @@ class AutomaticFacialCaptureService {
       _setStatus(FacialCaptureStatus.idle);
       return true;
     } else {
-      final err = _cameraAdapter.lastError ?? '';
-      if (err.toLowerCase().contains('permission')) {
+      final err = (_cameraAdapter.lastError ?? '').toLowerCase();
+      debugPrint('[FacialCapture] Camera init returned false. Error: $err');
+      if (err.contains('permission') ||
+          err.contains('denied') ||
+          err.contains('notallowed') ||
+          err.contains('not allowed')) {
         _setStatus(FacialCaptureStatus.permissionDenied);
       } else {
         _setStatus(FacialCaptureStatus.cameraUnavailable);
