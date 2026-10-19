@@ -1119,22 +1119,27 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       _facialConfidence = result.confidence;
       if (result.primaryEmotion == EmotionCategory.happy) {
         _selectedEmotion = 'Happy';
+        _currentFaceAsset = 'assets/images/landing/senior_happy_face.jpg';
         _lonelinessScore = 52;
         _isolationScore = 48;
       } else if (result.primaryEmotion == EmotionCategory.sadDepressed) {
         _selectedEmotion = 'Sad';
+        _currentFaceAsset = 'assets/images/landing/senior_sad_face.jpg';
         _lonelinessScore = 79;
         _isolationScore = 75;
       } else if (result.primaryEmotion == EmotionCategory.confusedAgitated) {
         _selectedEmotion = 'Confused';
+        _currentFaceAsset = 'assets/images/landing/senior_confused_face.jpg';
         _lonelinessScore = 65;
         _isolationScore = 62;
       } else if (result.primaryEmotion == EmotionCategory.calmNeutral) {
         _selectedEmotion = 'Neutral';
+        _currentFaceAsset = 'assets/images/landing/senior_neutral_calm_face.jpg';
         _lonelinessScore = 54;
         _isolationScore = 50;
       } else {
         _selectedEmotion = 'Fear';
+        _currentFaceAsset = 'assets/images/landing/senior_fear_face.jpg';
         _lonelinessScore = 70;
         _isolationScore = 68;
       }

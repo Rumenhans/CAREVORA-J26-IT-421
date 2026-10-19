@@ -130,30 +130,55 @@ def extract_face_crop(img: Image.Image) -> Image.Image:
     return img.crop((l, t, r, b))
 
 
-def detect_smile_signal(face_img: Image.Image) -> float:
+def detect_smile_signal(face_img: Image.Image, happy_prob: float = 0.20, ang_prob: float = 0.15, brow_furrow: float = 5.0) -> float:
     """
     Detects true zygomatic smiles with visible teeth and elevated mouth curvature.
-    Avoids false positives on neutral/sad closed mouths or shadows.
+    Avoids false positives on neutral/sad closed mouths, lip highlights, or confused furrowed brows.
     """
     try:
+        # If brow is visibly furrowed and angry > happy, person is perplexed/confused, not smiling
+        if brow_furrow >= 7.8 and ang_prob > happy_prob * 1.1:
+            return 0.0
+
         arr = np.array(face_img.convert('L'))
         h, w = arr.shape
         # Mouth region: lower 30% of face, center 60%
         y1, y2 = int(h * 0.68), int(h * 0.92)
-        x1, x2 = int(w * 0.22), int(w * 0.78)
+        x1, x2 = int(w * 0.20), int(w * 0.80)
         mouth = arr[y1:y2, x1:x2]
         if mouth.size == 0:
             return 0.0
 
         mouth_mean = float(np.mean(mouth))
-        teeth_pixels = float(np.mean(mouth > 225))
+        teeth_pixels = float(np.mean(mouth > 220))
         contrast = float(np.std(mouth))
 
         # True open-mouth smile with teeth exposure
-        if teeth_pixels > 0.035 and contrast > 50 and mouth_mean > 110:
-            return min(0.92, 0.65 + teeth_pixels * 3.0)
+        if teeth_pixels > 0.035 and contrast > 50 and mouth_mean > 110 and happy_prob >= 0.15:
+            return min(0.92, 0.68 + teeth_pixels * 2.5)
+
+        # High confidence neural smile
+        if happy_prob >= 0.38 and happy_prob > ang_prob:
+            return float(happy_prob)
 
         return 0.0
+    except Exception:
+        return 0.0
+
+
+def detect_brow_furrow(face_img: Image.Image) -> float:
+    """
+    Measures vertical frown lines / corrugator contraction in the glabella region (between eyebrows).
+    High values (> 7.5) indicate brow furrowing (confused / agitated). Low values (< 6.5) indicate relaxed calm face.
+    """
+    try:
+        arr = np.array(face_img.convert('L'))
+        h, w = arr.shape
+        glabella = arr[int(h * 0.22):int(h * 0.42), int(w * 0.38):int(w * 0.62)]
+        if glabella.size == 0:
+            return 0.0
+        gx = np.abs(np.diff(glabella.astype(np.float32), axis=1))
+        return float(np.mean(gx))
     except Exception:
         return 0.0
 
@@ -220,7 +245,6 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
             outputs = model(img_tensor)
             probabilities = torch.softmax(outputs, dim=1)[0].numpy()
 
-        smile_score = detect_smile_signal(face_crop)
         happy_idx = EMOTION_CATEGORIES.index('happy')
         fear_idx = EMOTION_CATEGORIES.index('fear')
         surp_idx = EMOTION_CATEGORIES.index('surprise')
@@ -228,49 +252,60 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         sad_idx = EMOTION_CATEGORIES.index('sad')
         neu_idx = EMOTION_CATEGORIES.index('neutral')
 
+        p_happy = float(probabilities[happy_idx])
+        p_fear = float(probabilities[fear_idx])
+        p_surp = float(probabilities[surp_idx])
+        p_ang = float(probabilities[ang_idx])
+        p_sad = float(probabilities[sad_idx])
+        p_neu = float(probabilities[neu_idx])
+
         arr = np.array(face_crop.convert('L'))
         h, w = arr.shape
-        mouth = arr[int(h * 0.68):int(h * 0.92), int(w * 0.22):int(w * 0.78)]
-        glabella = arr[int(h * 0.25):int(h * 0.40), int(w * 0.42):int(w * 0.58)]
-        mouth_mean = float(np.mean(mouth)) if mouth.size > 0 else 128.0
-        glabella_std = float(np.std(glabella)) if glabella.size > 0 else 25.0
+        mouth = arr[int(h * 0.68):int(h * 0.92), int(w * 0.20):int(w * 0.80)]
+        mouth_mean = float(np.mean(mouth)) if mouth.size > 0 else 110.0
 
         raw_dominant_idx = int(np.argmax(probabilities))
         raw_dominant = EMOTION_CATEGORIES[raw_dominant_idx]
 
-        # Calibrate non-smiling affect:
-        fear_sig = probabilities[fear_idx] * 2.0 + probabilities[surp_idx] * 1.5
-        ang_sig = probabilities[ang_idx] * 1.85
-        sad_sig = probabilities[sad_idx] * 1.6
+        brow_furrow = detect_brow_furrow(face_crop)
+        smile_score = detect_smile_signal(face_crop, p_happy, p_ang, brow_furrow)
 
-        # 1. Smile / Happy expression
-        is_smiling = (
+        # 1. HAPPY (Smile / Uplifted):
+        # Genuine zygomatic smile, or happy is dominant without brow furrowing
+        is_happy_expr = (
             (smile_score > 0.0) or
-            (probabilities[happy_idx] > 0.28) or
-            (raw_dominant == 'happy' and probabilities[happy_idx] >= 0.22)
+            (raw_dominant == 'happy' and p_happy >= 0.28 and brow_furrow < 7.5) or
+            (p_happy >= 0.40 and brow_furrow < 7.5)
         )
 
-        # 2. Confused: AU4 Corrugator brow furrowing (angry signal dominates neutral and sad)
-        is_confused = (
-            (probabilities[ang_idx] >= 0.24 and probabilities[ang_idx] > probabilities[neu_idx] * 1.8 and ang_sig > sad_sig and ang_sig >= fear_sig) or
-            (raw_dominant == 'angry' and probabilities[ang_idx] >= 0.25 and probabilities[ang_idx] > probabilities[neu_idx] * 1.8)
+        # 2. CONFUSED (Brow furrowing, corrugator AU4, questioning prosody):
+        # Frown lines, elevated angry/questioning signal, no genuine smile
+        is_confused_expr = not is_happy_expr and (
+            (brow_furrow >= 7.8 and p_ang >= 0.20) or
+            (raw_dominant == 'angry' and brow_furrow >= 7.2) or
+            (brow_furrow >= 8.0 and p_ang > p_neu and p_ang >= p_sad * 0.9) or
+            (p_ang >= 0.28 and brow_furrow >= 7.0)
         )
 
-        # 3. Sad: sad is highest, mouth corners depressed (mouth_mean < 92)
-        is_sad_expr = (
-            (raw_dominant == 'sad' and probabilities[sad_idx] > probabilities[fear_idx] and mouth_mean < 92) or
-            (probabilities[sad_idx] > 0.28 and sad_sig > ang_sig and mouth_mean < 92)
+        # 3. SAD (Downturned mouth, depressed corners, sad dominant):
+        # Low mouth brightness (dark corners), sad is dominant or elevated without fear
+        is_sad_expr = not is_happy_expr and not is_confused_expr and (
+            (raw_dominant == 'sad' and mouth_mean < 88 and p_sad >= 0.28) or
+            (p_sad >= 0.32 and mouth_mean < 92 and p_sad > p_fear * 1.15)
         )
 
-        # 4. Fear: apprehension / upper eyelid elevation
-        is_fear_expr = (
-            (fear_sig > ang_sig and (probabilities[surp_idx] >= 0.055 or raw_dominant in ['fear', 'surprise'] or fear_sig > 0.45))
+        # 4. FEAR (Apprehension, wide eyes, fear/surprise elevation):
+        # Elevated fear or fear+surprise with raised eyebrows / tension
+        is_fear_expr = not is_happy_expr and not is_confused_expr and not is_sad_expr and (
+            (raw_dominant == 'fear') or
+            (p_fear >= 0.17 and (p_surp >= 0.045 or p_fear > p_ang) and brow_furrow >= 6.5) or
+            (p_fear * 2.2 + p_surp * 1.5 > 0.46 and p_fear >= 0.15)
         )
 
-        if is_smiling:
+        if is_happy_expr:
             probabilities[happy_idx] = max(probabilities[happy_idx] * 1.5, smile_score, 0.65)
             dominant_emotion = 'happy'
-        elif is_confused:
+        elif is_confused_expr:
             probabilities[ang_idx] = max(probabilities[ang_idx] * 1.85, 0.58)
             probabilities[neu_idx] *= 0.40
             dominant_emotion = 'confused'
@@ -278,17 +313,19 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
             probabilities[sad_idx] = max(probabilities[sad_idx] * 1.5, 0.55)
             dominant_emotion = 'sad'
         elif is_fear_expr:
-            probabilities[fear_idx] = max(probabilities[fear_idx], fear_sig, 0.58)
-            probabilities[surp_idx] *= 0.20
+            probabilities[fear_idx] = max(probabilities[fear_idx] * 2.0, 0.58)
+            probabilities[surp_idx] = max(probabilities[surp_idx], 0.15)
             probabilities[neu_idx] *= 0.35
-            probabilities[sad_idx] *= 0.60
+            probabilities[sad_idx] *= 0.50
             dominant_emotion = 'fear'
-        elif raw_dominant == 'neutral' or probabilities[neu_idx] > 0.14:
-            probabilities[neu_idx] = max(probabilities[neu_idx] * 1.6, 0.55)
+        elif brow_furrow < 6.8 or raw_dominant == 'neutral' or p_neu >= 0.12:
+            probabilities[neu_idx] = max(probabilities[neu_idx] * 2.0, 0.60)
+            probabilities[sad_idx] *= 0.50
+            probabilities[ang_idx] *= 0.50
             dominant_emotion = 'neutral'
         else:
             dominant_emotion = 'neutral'
-            probabilities[neu_idx] = 0.52
+            probabilities[neu_idx] = 0.55
 
         probabilities = probabilities / np.sum(probabilities)
 
@@ -306,7 +343,7 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         }
 
         is_happy = dominant_emotion == 'happy'
-        is_sad = dominant_emotion in ['sad', 'fear', 'confused', 'angry', 'disgust']
+        is_sad = dominant_emotion == 'sad'
 
         mood = MOOD_SUMMARY.get(dominant_emotion, dominant_emotion.upper())
 
