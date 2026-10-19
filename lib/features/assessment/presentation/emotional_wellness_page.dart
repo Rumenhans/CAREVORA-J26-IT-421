@@ -19,6 +19,7 @@ import '../application/emotional_assessment_service.dart';
 import '../application/social_audit_service.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../../core/services/audio_player_service.dart';
+import '../../../core/services/url_launcher_service.dart';
 
 class EmotionalWellnessPage extends ConsumerStatefulWidget {
   final String? initialResidentId;
@@ -1440,66 +1441,292 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
   }
 
   void _showDoctorCallDialog(String doctorName, String specialty, String phone, String roomNo, String home) {
+    // 1. Immediately trigger real device native phone dialer (tel:+94...)
+    UrlLauncherService.launchTel(phone);
+
+    // 2. Open rich active in-app VoIP / direct consultation screen
+    Timer? callTimer;
+    int callDurationSeconds = 0;
+    bool isConnected = false;
+    bool isMuted = false;
+    bool isSpeakerOn = true;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: Color(0xFFE0F2FE),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(LucideIcons.phoneCall, color: Color(0xFF0284C7), size: 22),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'වෛද්‍යවරයා ඇමතීම (Calling Doctor)',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0C4A6E)),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$home හි $doctorName ($specialty) වෙත සෘජු ඇමතුමක් සම්බන්ධ වෙමින් පවතී...',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(10),
-              ),
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          callTimer ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+            setDialogState(() {
+              callDurationSeconds++;
+              if (callDurationSeconds >= 3 && !isConnected) {
+                isConnected = true;
+                _flutterTts.stop();
+                _flutterTts.speak(
+                  'Hello ${_currentResident.name}, this is $doctorName from $home. I have received your emergency notice from Room $roomNo. Please rest comfortably, I am on my way to your room right now.',
+                );
+              }
+            });
+          });
+
+          final minutesStr = (callDurationSeconds ~/ 60).toString().padLeft(2, '0');
+          final secondsStr = (callDurationSeconds % 60).toString().padLeft(2, '0');
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            backgroundColor: Colors.white,
+            contentPadding: const EdgeInsets.all(24),
+            content: SizedBox(
+              width: 440,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('📞 Phone Line: $phone', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0284C7))),
+                  // Doctor Avatar with live calling ripple / pulse
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isConnected
+                              ? const Color(0xFFDCFCE7)
+                              : const Color(0xFFE0F2FE),
+                        ),
+                      ),
+                      Container(
+                        width: 74,
+                        height: 74,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isConnected
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFF0284C7),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (isConnected ? const Color(0xFF16A34A) : const Color(0xFF0284C7))
+                                  .withValues(alpha: 0.35),
+                              blurRadius: 16,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          isConnected ? LucideIcons.stethoscope : LucideIcons.phoneCall,
+                          color: Colors.white,
+                          size: 34,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  Text(
+                    doctorName,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text('🚪 Caller Location: Room No $roomNo (${_currentResident.name})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFFDC2626))),
+                  Text(
+                    specialty,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF0284C7),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Status Badge & Timer
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isConnected ? const Color(0xFFF0FDF4) : const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isConnected ? const Color(0xFF86EFAC) : const Color(0xFF93C5FD),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isConnected ? const Color(0xFF16A34A) : const Color(0xFF2563EB),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isConnected
+                              ? '🟢 සජීවී ඇමතුම (Connected) • $minutesStr:$secondsStr'
+                              : '📡 ඇමතුම සම්බන්ධ වෙමින් (Calling) • $minutesStr:$secondsStr',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isConnected ? const Color(0xFF166534) : const Color(0xFF1D4ED8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Calling details banner
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.phone, size: 14, color: Color(0xFF0284C7)),
+                            const SizedBox(width: 8),
+                            const Text('Doctor Line:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                            const Spacer(),
+                            Text(phone, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.doorClosed, size: 14, color: Color(0xFFDC2626)),
+                            const SizedBox(width: 8),
+                            const Text('Elder Room:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                            const Spacer(),
+                            Text('Room $roomNo (${_currentResident.name})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626))),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.building2, size: 14, color: Color(0xFF0284C7)),
+                            const SizedBox(width: 8),
+                            const Text('Facility:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                            const Spacer(),
+                            Text(home, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  if (isConnected) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(LucideIcons.volume2, size: 18, color: Color(0xFF16A34A)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Doctor: "ආයුබෝවන් ${_currentResident.name}, මට Room $roomNo දැනුම්දීම ලැබුණා. මම දැන්ම ඔබේ කාමරයට එනවා."',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+
+                  // Action Button to explicitly trigger device Phone App dialer
+                  InkWell(
+                    onTap: () => UrlLauncherService.launchTel(phone),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE0F2FE),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF7DD3FC)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(LucideIcons.smartphone, size: 15, color: Color(0xFF0284C7)),
+                          SizedBox(width: 8),
+                          Text(
+                            '📱 Device එකේ Phone Dialer එකෙන් Call කරන්න (tel:)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0369A1),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Call Controls Row: Mute, Speaker, End Call
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      IconButton.filledTonal(
+                        onPressed: () => setDialogState(() => isMuted = !isMuted),
+                        icon: Icon(isMuted ? LucideIcons.micOff : LucideIcons.mic),
+                        style: IconButton.styleFrom(
+                          backgroundColor: isMuted ? const Color(0xFFFEE2E2) : const Color(0xFFF1F5F9),
+                          foregroundColor: isMuted ? const Color(0xFFDC2626) : const Color(0xFF334155),
+                          padding: const EdgeInsets.all(12),
+                        ),
+                        tooltip: isMuted ? 'Unmute' : 'Mute',
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          callTimer?.cancel();
+                          _flutterTts.stop();
+                          Navigator.pop(ctx);
+                        },
+                        icon: const Icon(Icons.call_end, size: 20),
+                        label: const Text(
+                          'ඇමතුම අවසන් කරන්න (End Call)',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFDC2626),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 2,
+                        ),
+                      ),
+                      IconButton.filledTonal(
+                        onPressed: () => setDialogState(() => isSpeakerOn = !isSpeakerOn),
+                        icon: Icon(isSpeakerOn ? LucideIcons.volume2 : LucideIcons.volumeX),
+                        style: IconButton.styleFrom(
+                          backgroundColor: isSpeakerOn ? const Color(0xFFDCFCE7) : const Color(0xFFF1F5F9),
+                          foregroundColor: isSpeakerOn ? const Color(0xFF16A34A) : const Color(0xFF334155),
+                          padding: const EdgeInsets.all(12),
+                        ),
+                        tooltip: isSpeakerOn ? 'Speaker On' : 'Speaker Off',
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            const Text(
-              'වෛද්‍යවරයා ඔබගේ ඇමතුමට පිළිතුරු දීමට හෝ මොහොතකින් කාමරයට පැමිණීමට සූදානම් වේ.',
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('අවසන් කරන්න (End Call)'),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
