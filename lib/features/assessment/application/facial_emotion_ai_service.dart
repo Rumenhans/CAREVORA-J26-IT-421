@@ -261,17 +261,17 @@ class FacialEmotionAiService {
                 arousal = 0.85;
                 actionUnits = const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU26: Jaw Drop'];
               }
-            } else if (dominant == 'neutral') {
+            } else if (dominant == 'neutral' || dominant == 'calm') {
               category = EmotionCategory.calmNeutral;
               valence = 0.05;
               arousal = 0.20;
               actionUnits = const ['AU0: Neutral Baseline'];
-            } else if (dominant == 'sad' || dominant == 'disgust') {
+            } else if (dominant == 'sad' || dominant == 'depressed' || dominant == 'disgust') {
               category = EmotionCategory.sadDepressed;
               valence = -conf;
               arousal = 0.25;
               actionUnits = const ['AU1: Inner Brow Raiser', 'AU15: Lip Corner Depressor'];
-            } else if (dominant == 'angry' || dominant == 'confused') {
+            } else if (dominant == 'angry' || dominant == 'confused' || dominant == 'agitated') {
               category = EmotionCategory.confusedAgitated;
               valence = -0.4 * conf;
               arousal = 0.75;
@@ -282,16 +282,18 @@ class FacialEmotionAiService {
               arousal = 0.85;
               actionUnits = const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU20: Lip Stretcher'];
             } else {
-              category = EmotionCategory.anxious;
-              valence = -0.6 * conf;
-              arousal = 0.70;
-              actionUnits = const ['AU1: Inner Brow Raiser', 'AU5: Upper Lid Raiser', 'AU20: Lip Stretcher'];
+              category = EmotionCategory.calmNeutral;
+              valence = 0.05;
+              arousal = 0.20;
+              actionUnits = const ['AU0: Neutral Baseline'];
             }
 
             final Map<EmotionCategory, double> probabilities = {
               EmotionCategory.happy: (parsedRawBreakdown['happy'] ?? 0.0) / 100.0,
-              EmotionCategory.calmNeutral: (parsedRawBreakdown['neutral'] ?? 0.0) / 100.0,
-              EmotionCategory.sadDepressed: (parsedRawBreakdown['sad'] ?? 0.0) / 100.0,
+              EmotionCategory.calmNeutral:
+                  ((parsedRawBreakdown['neutral'] ?? parsedRawBreakdown['calm']) ?? 0.0) / 100.0,
+              EmotionCategory.sadDepressed:
+                  ((parsedRawBreakdown['sad'] ?? parsedRawBreakdown['depressed']) ?? 0.0) / 100.0,
               EmotionCategory.confusedAgitated:
                   ((parsedRawBreakdown['confused'] ?? parsedRawBreakdown['angry']) ?? 0.0) / 100.0,
               EmotionCategory.anxious:
@@ -302,7 +304,9 @@ class FacialEmotionAiService {
                 ? 'CONFUSED / PUZZLED'
                 : (dominant == 'fear'
                     ? 'FEAR / ANXIOUS'
-                    : dominant.toUpperCase());
+                    : (dominant == 'neutral' || dominant == 'calm'
+                        ? 'CALM / NEUTRAL'
+                        : dominant.toUpperCase()));
 
             return FacialEmotionResult(
               status: FacialInferenceStatus.success,

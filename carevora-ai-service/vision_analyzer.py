@@ -86,41 +86,43 @@ transform = transforms.Compose([
 def extract_face_crop(img: Image.Image) -> Image.Image:
     """
     Locates the primary human face in the webcam image using robust YCrCb skin segmentation
-    and returns a square crop tightly focused on the face (avoiding ceilings/backgrounds).
+    and returns a square crop tightly focused on the face (avoiding ceilings/neck/backgrounds).
     """
     try:
         w, h = img.size
+        # Search primarily in upper 72% where the head/face is located on webcams
+        search_h = int(h * 0.72)
         arr = np.array(img).astype(np.float32)
-        R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        R, G, B = arr[:search_h, :, 0], arr[:search_h, :, 1], arr[:search_h, :, 2]
         Y = 0.299 * R + 0.587 * G + 0.114 * B
         Cr = (R - Y) * 0.713 + 128.0
         Cb = (B - Y) * 0.564 + 128.0
 
-        # Human skin chrominance cluster
-        skin = (Cr >= 133) & (Cr <= 178) & (Cb >= 77) & (Cb <= 127) & (Y >= 30) & (Y <= 245)
+        # Inclusive human skin chrominance + RGB ratio (works for all ethnicities/lighting)
+        skin = (Cr >= 126) & (Cr <= 185) & (Cb >= 72) & (Cb <= 138) & (Y >= 25) & (R > G) & (R > B)
         ys, xs = np.where(skin)
 
-        if len(xs) > 400:
-            x_min, x_max = int(np.percentile(xs, 5)), int(np.percentile(xs, 95))
-            y_min, y_max = int(np.percentile(ys, 5)), int(np.percentile(ys, 95))
+        if len(xs) > 250:
+            x_min, x_max = int(np.percentile(xs, 6)), int(np.percentile(xs, 94))
+            y_min, y_max = int(np.percentile(ys, 6)), int(np.percentile(ys, 94))
             fw, fh = x_max - x_min, y_max - y_min
             if fw > 30 and fh > 30:
                 cx = (x_min + x_max) // 2
                 cy = (y_min + y_max) // 2
-                side = int(max(fw, fh) * 1.35)
+                side = int(min(max(fw, fh) * 1.10, min(w, h)))
                 half = side // 2
                 l = max(0, cx - half)
                 t = max(0, cy - half)
-                r = min(w, cx + half)
-                b = min(h, cy + half)
+                r = min(w, l + side)
+                b = min(h, t + side)
                 return img.crop((l, t, r, b))
     except Exception:
         pass
 
-    # Fallback: lower-center crop (avoiding top ceiling area of webcam)
+    # Fallback: upper-center crop centered at face level (42% height on laptop webcams)
     w, h = img.size
-    crop_size = int(min(w, h) * 0.75)
-    cx, cy = w // 2, int(h * 0.55)
+    crop_size = int(min(w, h) * 0.65)
+    cx, cy = w // 2, int(h * 0.42)
     l = max(0, cx - crop_size // 2)
     t = max(0, cy - crop_size // 2)
     r = min(w, l + crop_size)
@@ -128,29 +130,55 @@ def extract_face_crop(img: Image.Image) -> Image.Image:
     return img.crop((l, t, r, b))
 
 
-def detect_smile_signal(face_img: Image.Image) -> float:
+def detect_smile_signal(face_img: Image.Image, happy_prob: float = 0.20, ang_prob: float = 0.15, brow_furrow: float = 5.0) -> float:
     """
     Detects true zygomatic smiles with visible teeth and elevated mouth curvature.
-    Avoids false positives on neutral/sad closed mouths or shadows.
+    Avoids false positives on neutral/sad closed mouths, lip highlights, or confused furrowed brows.
     """
     try:
+        # If brow is visibly furrowed and angry > happy, person is perplexed/confused, not smiling
+        if brow_furrow >= 7.8 and ang_prob > happy_prob * 1.1:
+            return 0.0
+
         arr = np.array(face_img.convert('L'))
         h, w = arr.shape
         # Mouth region: lower 30% of face, center 60%
         y1, y2 = int(h * 0.68), int(h * 0.92)
-        x1, x2 = int(w * 0.22), int(w * 0.78)
+        x1, x2 = int(w * 0.20), int(w * 0.80)
         mouth = arr[y1:y2, x1:x2]
         if mouth.size == 0:
             return 0.0
 
         mouth_mean = float(np.mean(mouth))
-        teeth_pixels = float(np.mean(mouth > 225))
+        teeth_pixels = float(np.mean(mouth > 220))
         contrast = float(np.std(mouth))
 
         # True open-mouth smile with teeth exposure
-        if teeth_pixels > 0.035 and contrast > 50 and mouth_mean > 110:
-            return min(0.92, 0.65 + teeth_pixels * 3.0)
+        if teeth_pixels > 0.035 and contrast > 50 and mouth_mean > 110 and happy_prob >= 0.15:
+            return min(0.92, 0.68 + teeth_pixels * 2.5)
+
+        # High confidence neural smile
+        if happy_prob >= 0.38 and happy_prob > ang_prob:
+            return float(happy_prob)
+
         return 0.0
+    except Exception:
+        return 0.0
+
+
+def detect_brow_furrow(face_img: Image.Image) -> float:
+    """
+    Measures vertical frown lines / corrugator contraction in the glabella region (between eyebrows).
+    High values (> 7.5) indicate brow furrowing (confused / agitated). Low values (< 6.5) indicate relaxed calm face.
+    """
+    try:
+        arr = np.array(face_img.convert('L'))
+        h, w = arr.shape
+        glabella = arr[int(h * 0.22):int(h * 0.42), int(w * 0.38):int(w * 0.62)]
+        if glabella.size == 0:
+            return 0.0
+        gx = np.abs(np.diff(glabella.astype(np.float32), axis=1))
+        return float(np.mean(gx))
     except Exception:
         return 0.0
 
@@ -217,7 +245,6 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
             outputs = model(img_tensor)
             probabilities = torch.softmax(outputs, dim=1)[0].numpy()
 
-        smile_score = detect_smile_signal(face_crop)
         happy_idx = EMOTION_CATEGORIES.index('happy')
         fear_idx = EMOTION_CATEGORIES.index('fear')
         surp_idx = EMOTION_CATEGORIES.index('surprise')
@@ -225,58 +252,80 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         sad_idx = EMOTION_CATEGORIES.index('sad')
         neu_idx = EMOTION_CATEGORIES.index('neutral')
 
+        p_happy = float(probabilities[happy_idx])
+        p_fear = float(probabilities[fear_idx])
+        p_surp = float(probabilities[surp_idx])
+        p_ang = float(probabilities[ang_idx])
+        p_sad = float(probabilities[sad_idx])
+        p_neu = float(probabilities[neu_idx])
+
         arr = np.array(face_crop.convert('L'))
         h, w = arr.shape
-        mouth = arr[int(h * 0.68):int(h * 0.92), int(w * 0.22):int(w * 0.78)]
-        glabella = arr[int(h * 0.25):int(h * 0.40), int(w * 0.42):int(w * 0.58)]
-        mouth_mean = float(np.mean(mouth)) if mouth.size > 0 else 128.0
-        glabella_std = float(np.std(glabella)) if glabella.size > 0 else 25.0
+        mouth = arr[int(h * 0.68):int(h * 0.92), int(w * 0.20):int(w * 0.80)]
+        mouth_mean = float(np.mean(mouth)) if mouth.size > 0 else 110.0
 
         raw_dominant_idx = int(np.argmax(probabilities))
         raw_dominant = EMOTION_CATEGORIES[raw_dominant_idx]
 
-        is_smiling = (smile_score > 0.0) or (probabilities[happy_idx] > 0.50)
+        brow_furrow = detect_brow_furrow(face_crop)
+        smile_score = detect_smile_signal(face_crop, p_happy, p_ang, brow_furrow)
 
-        if is_smiling:
-            probabilities[happy_idx] = max(probabilities[happy_idx], smile_score, 0.65)
+        # 1. HAPPY (Smile / Uplifted):
+        # Genuine zygomatic smile, or happy is dominant without brow furrowing
+        is_happy_expr = (
+            (smile_score > 0.0) or
+            (raw_dominant == 'happy' and p_happy >= 0.28 and brow_furrow < 7.5) or
+            (p_happy >= 0.40 and brow_furrow < 7.5)
+        )
+
+        # 2. CONFUSED (Brow furrowing, corrugator AU4, questioning prosody):
+        # Frown lines, elevated angry/questioning signal, no genuine smile
+        is_confused_expr = not is_happy_expr and (
+            (brow_furrow >= 7.8 and p_ang >= 0.20) or
+            (raw_dominant == 'angry' and brow_furrow >= 7.2) or
+            (brow_furrow >= 8.0 and p_ang > p_neu and p_ang >= p_sad * 0.9) or
+            (p_ang >= 0.28 and brow_furrow >= 7.0)
+        )
+
+        # 3. SAD (Downturned mouth, depressed corners, sad dominant):
+        # Low mouth brightness (dark corners), sad is dominant or elevated without fear
+        is_sad_expr = not is_happy_expr and not is_confused_expr and (
+            (raw_dominant == 'sad' and mouth_mean < 88 and p_sad >= 0.28) or
+            (p_sad >= 0.32 and mouth_mean < 92 and p_sad > p_fear * 1.15)
+        )
+
+        # 4. FEAR (Apprehension, wide eyes, fear/surprise elevation):
+        # Elevated fear or fear+surprise with raised eyebrows / tension
+        is_fear_expr = not is_happy_expr and not is_confused_expr and not is_sad_expr and (
+            (raw_dominant == 'fear') or
+            (p_fear >= 0.17 and (p_surp >= 0.045 or p_fear > p_ang) and brow_furrow >= 6.5) or
+            (p_fear * 2.2 + p_surp * 1.5 > 0.46 and p_fear >= 0.15)
+        )
+
+        if is_happy_expr:
+            probabilities[happy_idx] = max(probabilities[happy_idx] * 1.5, smile_score, 0.65)
             dominant_emotion = 'happy'
+        elif is_confused_expr:
+            probabilities[ang_idx] = max(probabilities[ang_idx] * 1.85, 0.58)
+            probabilities[neu_idx] *= 0.40
+            dominant_emotion = 'confused'
+        elif is_sad_expr:
+            probabilities[sad_idx] = max(probabilities[sad_idx] * 1.5, 0.55)
+            dominant_emotion = 'sad'
+        elif is_fear_expr:
+            probabilities[fear_idx] = max(probabilities[fear_idx] * 2.0, 0.58)
+            probabilities[surp_idx] = max(probabilities[surp_idx], 0.15)
+            probabilities[neu_idx] *= 0.35
+            probabilities[sad_idx] *= 0.50
+            dominant_emotion = 'fear'
+        elif brow_furrow < 6.8 or raw_dominant == 'neutral' or p_neu >= 0.12:
+            probabilities[neu_idx] = max(probabilities[neu_idx] * 2.0, 0.60)
+            probabilities[sad_idx] *= 0.50
+            probabilities[ang_idx] *= 0.50
+            dominant_emotion = 'neutral'
         else:
-            # Calibrate non-smiling affect:
-            fear_sig = probabilities[fear_idx] * 2.0 + probabilities[surp_idx] * 1.5
-            ang_sig = probabilities[ang_idx] * 1.85
-            sad_sig = probabilities[sad_idx] * 1.6
-
-            # 1. Confused expression: glabella furrowing / AU4 corrugator tension
-            is_confused = ((raw_dominant == 'angry' and glabella_std > 36) or
-                           (ang_sig >= fear_sig and ang_sig > sad_sig and probabilities[ang_idx] >= 0.20 and glabella_std > 36))
-
-            # 2. Sad expression: Downturned mouth, depressed affect
-            is_sad_expr = (raw_dominant == 'sad' and mouth_mean < 85 and probabilities[surp_idx] < 0.055) or \
-                          (probabilities[sad_idx] > 0.27 and mouth_mean < 85)
-
-            # 3. Fear expression: Wide eyes / upper eyelid elevation / apprehension
-            is_fear_expr = (fear_sig > ang_sig and (probabilities[surp_idx] >= 0.055 or raw_dominant == 'fear' or raw_dominant == 'surprise')) or \
-                           (fear_sig > 0.45)
-
-            if is_confused:
-                probabilities[ang_idx] = max(probabilities[ang_idx] * 1.85, 0.58)
-                probabilities[neu_idx] *= 0.40
-                dominant_emotion = 'confused'
-            elif is_sad_expr:
-                probabilities[sad_idx] = max(probabilities[sad_idx] * 1.5, 0.55)
-                dominant_emotion = 'sad'
-            elif is_fear_expr:
-                probabilities[fear_idx] = max(probabilities[fear_idx], fear_sig, 0.58)
-                probabilities[surp_idx] *= 0.20
-                probabilities[neu_idx] *= 0.35
-                probabilities[sad_idx] *= 0.60
-                dominant_emotion = 'fear'
-            elif raw_dominant == 'neutral' or probabilities[neu_idx] > 0.08:
-                probabilities[neu_idx] = max(probabilities[neu_idx] * 1.6, 0.55)
-                dominant_emotion = 'neutral'
-            else:
-                probabilities[neu_idx] = max(probabilities[neu_idx], 0.52)
-                dominant_emotion = 'neutral'
+            dominant_emotion = 'neutral'
+            probabilities[neu_idx] = 0.55
 
         probabilities = probabilities / np.sum(probabilities)
 
@@ -294,7 +343,7 @@ def analyze_facial_affect(image_bytes: bytes = None, simulated_cues: dict = None
         }
 
         is_happy = dominant_emotion == 'happy'
-        is_sad = dominant_emotion in ['sad', 'fear', 'confused', 'angry', 'disgust']
+        is_sad = dominant_emotion == 'sad'
 
         mood = MOOD_SUMMARY.get(dominant_emotion, dominant_emotion.upper())
 

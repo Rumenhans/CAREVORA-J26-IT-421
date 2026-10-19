@@ -7,6 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:camera/camera.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../../core/responsive/responsive_builder.dart';
@@ -1118,22 +1119,27 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
       _facialConfidence = result.confidence;
       if (result.primaryEmotion == EmotionCategory.happy) {
         _selectedEmotion = 'Happy';
+        _currentFaceAsset = 'assets/images/landing/senior_happy_face.jpg';
         _lonelinessScore = 52;
         _isolationScore = 48;
       } else if (result.primaryEmotion == EmotionCategory.sadDepressed) {
         _selectedEmotion = 'Sad';
+        _currentFaceAsset = 'assets/images/landing/senior_sad_face.jpg';
         _lonelinessScore = 79;
         _isolationScore = 75;
       } else if (result.primaryEmotion == EmotionCategory.confusedAgitated) {
         _selectedEmotion = 'Confused';
+        _currentFaceAsset = 'assets/images/landing/senior_confused_face.jpg';
         _lonelinessScore = 65;
         _isolationScore = 62;
       } else if (result.primaryEmotion == EmotionCategory.calmNeutral) {
         _selectedEmotion = 'Neutral';
+        _currentFaceAsset = 'assets/images/landing/senior_neutral_calm_face.jpg';
         _lonelinessScore = 54;
         _isolationScore = 50;
       } else {
         _selectedEmotion = 'Fear';
+        _currentFaceAsset = 'assets/images/landing/senior_fear_face.jpg';
         _lonelinessScore = 70;
         _isolationScore = 68;
       }
@@ -5971,8 +5977,24 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _capturedImageBytes != null
-                      ? Image.memory(
+                  Builder(
+                    builder: (context) {
+                      final controller = _facialCaptureService.cameraController;
+                      if (controller != null && controller.value.isInitialized) {
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: FittedBox(
+                            fit: BoxFit.cover,
+                            child: SizedBox(
+                              width: controller.value.previewSize?.height ?? 480,
+                              height: controller.value.previewSize?.width ?? 360,
+                              child: CameraPreview(controller),
+                            ),
+                          ),
+                        );
+                      }
+                      if (_capturedImageBytes != null) {
+                        return Image.memory(
                           _capturedImageBytes!,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) =>
@@ -5980,29 +6002,32 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
                             'assets/images/landing/senior_neutral_calm_face.jpg',
                             fit: BoxFit.cover,
                           ),
-                        )
-                      : Image.asset(
-                          _currentFaceAsset,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Image.asset(
-                              'assets/images/landing/senior_neutral_calm_face.jpg',
-                              fit: BoxFit.cover,
-                              errorBuilder: (ctx, err, st) {
-                                return Container(
-                                  color: const Color(0xFF1E293B),
-                                  child: const Center(
-                                    child: Icon(
-                                      LucideIcons.user,
-                                      size: 56,
-                                      color: Colors.white54,
-                                    ),
+                        );
+                      }
+                      return Image.asset(
+                        _currentFaceAsset,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Image.asset(
+                            'assets/images/landing/senior_neutral_calm_face.jpg',
+                            fit: BoxFit.cover,
+                            errorBuilder: (ctx, err, st) {
+                              return Container(
+                                color: const Color(0xFF1E293B),
+                                child: const Center(
+                                  child: Icon(
+                                    LucideIcons.user,
+                                    size: 56,
+                                    color: Colors.white54,
                                   ),
-                                );
-                              },
-                            );
-                          },
-                        ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      );
+                    },
+                  ),
 
                   // Overlay Face Tracking Box with green/purple corners
                   Center(
@@ -6405,20 +6430,26 @@ class _EmotionalWellnessPageState extends ConsumerState<EmotionalWellnessPage>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Text(emoji, style: const TextStyle(fontSize: 18)),
-                  const SizedBox(width: 8),
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: text,
+              Expanded(
+                child: Row(
+                  children: [
+                    Text(emoji, style: const TextStyle(fontSize: 18)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: text,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
