@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import Link from "next/link";
 import { ArrowLeft, Activity, HeartPulse, Droplet, Thermometer, TrendingUp } from "lucide-react";
 import { mockResident } from "@/lib/mock-data";
